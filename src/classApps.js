@@ -61,6 +61,8 @@ function createClassApps(ctx) {
 
   /** The owner asks the class's teachers to review the current published version (first time or again). */
   function submit(actor, cls, app) {
+    // Withdraw-and-resubmit in a loop would flood the teacher: a person submits a bounded number per hour.
+    ctx.limiter.guard('submit', actor.id);
     const v = app.published_version_id;
     if (!v) throw bad('Diese App ist noch nicht veröffentlicht.');
     const row = get(cls.id, app.id);

@@ -81,7 +81,9 @@ test('Ankündigungen: nur sichtbare lassen sich ausblenden; fremde Klassen bleib
   assert.ok(start.text.includes('Hallo 7b') && !start.text.includes('Nur 9c'));
   assert.equal((await M.post('/mitteilungen/ankuendigung/an-9c/ausblenden')).status, 404);
   assert.equal((await M.post('/mitteilungen/ankuendigung/an-7b/ausblenden')).status, 303);
-  assert.ok(!(await M.page('/start')).text.includes('Hallo 7b'));
+  const after = (await M.page('/start')).text;
+  assert.ok(!after.includes('<strong>Hallo 7b</strong>'), 'the announcement is gone');
+  assert.ok(after.includes('ist ausgeblendet'), 'with a confirmation');
 });
 
 test('Editor-Entwurf im Player: nur die Besitzerin, immer als Vorschau', async () => {

@@ -47,12 +47,15 @@ function createAppsHost(ctx) {
 
   // ---------- static files ----------
   function serveFile(req, res, appRow, rest) {
-    if (!limiter.hit('appFiles', clientIp(req))) return sendText(res, 429, 'Zu viele Anfragen.');
+    // A whole school often shares one address: the per-address limit is only a high backstop,
+    // the real limit is per person (the file token names who it was issued to).
+    if (!limiter.hit('appFilesIp', clientIp(req))) return sendText(res, 429, 'Zu viele Anfragen.');
     // Apps only run inside the Hub's sandboxed frame, never as a page of their own.
     if (req.headers['sec-fetch-dest'] === 'document') return sendText(res, 403, 'Diese App kann nur im Hub geöffnet werden.');
     const slash = rest.indexOf('/');
     const payload = tokens.verify('files', slash < 0 ? rest : rest.slice(0, slash));
     if (!payload || payload.a !== appRow.id) return sendText(res, 403, 'Der Link ist abgelaufen. Bitte öffne die App neu im Hub.');
+    if (!limiter.hit('appFiles', typeof payload.u === 'string' ? `u:${payload.u}` : `ip:${clientIp(req)}`)) return sendText(res, 429, 'Zu viele Anfragen.');
     let rel;
     try {
       rel = decodeURIComponent(slash < 0 ? '' : rest.slice(slash + 1));
@@ -142,7 +145,8 @@ function createAppsHost(ctx) {
     const user = session && db.get('SELECT * FROM users WHERE id = ? AND disabled = 0', String(t.u));
     if (!user) throw denied;
     // Class context only counts while the user really is in that class.
-    const classId = typeof t.c === 'string' && access.canViewClass(user, t.c) ? t.c : null;
+    // Archived classes are read-only for everyone: no class context, so no class writes and no class results.
+    const classId = typeof t.c === 'string' && access.canViewClass(user, t.c) && !access.isArchived(t.c) ? t.c : null;
     // The preview flag is part of the signed token: an app cannot switch it off.
     return { user, classId, preview: t.p === 1, versionId: String(t.v), sid: String(t.s) };
   }

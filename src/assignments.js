@@ -3,8 +3,9 @@
 // is done is DERIVED, the same way everywhere (start page, class overview,
 // teacher views), so nobody has to tick boxes:
 //
-//   done     the student recorded a result in the app after the assignment
-//            started, or reached full progress (1.0) after it started, or
+//   done     the student recorded a result in the app IN THIS CLASS after the
+//            assignment started, or reached full progress (1.0; progress is
+//            personal, not per class) after it started, or
 //            marked it done themselves
 //   started  the student opened the app after the assignment started
 //   open     nothing yet
@@ -16,7 +17,7 @@ function createAssignments(ctx) {
 
   // `x` is the assignment row alias; the SQL is fixed text, values are bound.
   const DONE = `(EXISTS (SELECT 1 FROM assignment_done d WHERE d.assignment_id = x.id AND d.user_id = ?)
-      OR EXISTS (SELECT 1 FROM results r WHERE r.app_id = x.app_id AND r.user_id = ? AND r.created_at >= x.starts_at)
+      OR EXISTS (SELECT 1 FROM results r WHERE r.app_id = x.app_id AND r.user_id = ? AND r.class_id = x.class_id AND r.created_at >= x.starts_at)
       OR EXISTS (SELECT 1 FROM progress p WHERE p.app_id = x.app_id AND p.user_id = ? AND p.value >= 1 AND p.updated_at >= x.starts_at))`;
   const STARTED = 'EXISTS (SELECT 1 FROM plays pl WHERE pl.app_id = x.app_id AND pl.user_id = ? AND pl.last_at >= x.starts_at)';
 

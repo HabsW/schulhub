@@ -4,10 +4,10 @@
 // privacy page.
 
 const {
-  html, page, csrfField, appIcon, appClass, avatar, ROLE_LABEL, icon, linkButton, postButton, badge,
+  html, page, flash, csrfField, appIcon, appClass, avatar, ROLE_LABEL, icon, linkButton, postButton, badge,
   sectionHead, row, list, appRow, shelf, shelfItem, meter, sparkline, stat, stats, empty, notice, dueChip,
 } = require('../html');
-const { HttpError, formatAgo, formatDue, formatLongDay, plural, dayKey } = require('../util');
+const { HttpError, formatAgo, formatDue, formatLongDay, plural, dayKey, isLocalPath } = require('../util');
 const { manifestOf } = require('../manifest');
 
 const MOSAIC = [['🔤', 0], ['⭐', 4], ['🎨', 2], ['🧮', 5], ['🌍', 1], ['🔬', 3], ['🎵', 6], ['🧩', 7]];
@@ -85,8 +85,9 @@ module.exports = (app, ctx) => {
   // which itself refuses to start unless BASE_URL is localhost.
   if (config.dev) {
     app.post('/dev/login', (req, res, next) => {
-      const user = db.get("SELECT * FROM users WHERE id = ? AND oid LIKE 'dev-%' AND disabled = 0", String(req.body.user || ''));
+      const user = db.get("SELECT * FROM users WHERE id = ? AND oid LIKE 'dev-%'", String(req.body.user || ''));
       if (!user) return next(new HttpError(400, 'Diese Testperson gibt es nicht.'));
+      if (user.disabled) return next(new HttpError(403, 'Dieses Konto ist gesperrt. Wende dich an die Verwaltung der Schule.'));
       db.run('UPDATE users SET last_login_at = ?, flagged_inactive_at = NULL WHERE id = ?', Date.now(), user.id);
       auth.establishSession(req, user, (err, target) => (err ? next(err) : res.redirect(303, target)));
     });
@@ -323,13 +324,22 @@ module.exports = (app, ctx) => {
     const body = html`<header class="page-head"><div class="page-head-text"><h1>Mitteilungen</h1>
         <p>Was sich bei dir getan hat. ${unread ? plural(unread, 'neue Mitteilung', 'neue Mitteilungen') + '.' : 'Alles gelesen.'}</p></div>
         ${unread ? html`<div class="actions">${postButton(req, '/mitteilungen/gelesen', 'Alle als gelesen markieren', { kind: 'secondary', icon: 'check' })}</div>` : ''}</header>
-      ${items.length ? list(items.map((n) => row({
-        href: n.href || '', title: n.text, cls: `notice-row${n.read_at ? '' : ' unread'}`,
-        start: html`<span class="avatar" aria-hidden="true">${icon(ICON[n.kind] || 'bell', { cls: 'sm' })}</span>`,
-        sub: formatAgo(n.created_at), chevron: Boolean(n.href),
-      })))
+      ${items.length ? html`<ul class="list" role="list">${items.map((n) => html`<li class="row notice-row${n.read_at ? '' : ' unread'}">
+        <span class="avatar" aria-hidden="true">${icon(ICON[n.kind] || 'bell', { cls: 'sm' })}</span>
+        <div class="row-main">${n.href
+          ? html`<form method="post" action="/mitteilungen/${n.id}/oeffnen" class="row-form-link">${csrfField(req)}<button class="row-link row-title">${n.text}</button></form>`
+          : html`<span class="row-title">${n.text}</span>`}<span class="row-sub">${formatAgo(n.created_at)}</span></div>
+        ${n.href ? html`<div class="row-end">${icon('chevronRight', { cls: 'chev' })}</div>` : ''}</li>`)}</ul>`
       : empty({ icon: 'bell', title: 'Noch keine Mitteilungen', text: 'Hier erfährst du zum Beispiel, wenn deine App freigegeben wurde oder eine neue Aufgabe da ist.' })}`;
     res.send(page(req, { title: 'Mitteilungen', body, width: 'narrow' }));
+  });
+
+  /** Open one notice: mark it read, then go where it points (only the person's own notices). */
+  app.post('/mitteilungen/:id/oeffnen', (req, res) => {
+    const n = db.get('SELECT * FROM notices WHERE id = ? AND user_id = ?', Number.parseInt(req.params.id, 10) || 0, req.user.id);
+    if (!n) throw new HttpError(404, 'Diese Seite gibt es nicht – oder du hast keinen Zugriff darauf.');
+    if (!n.read_at) db.run('UPDATE notices SET read_at = ? WHERE id = ?', Date.now(), n.id);
+    res.redirect(303, isLocalPath(n.href) ? n.href : '/mitteilungen');
   });
 
   app.post('/mitteilungen/gelesen', (req, res) => {
@@ -342,6 +352,7 @@ module.exports = (app, ctx) => {
     const an = db.get('SELECT * FROM announcements WHERE id = ?', String(req.params.id));
     if (!an || !access.canSeeAnnouncement(req.user, an)) throw new HttpError(404, 'Diese Seite gibt es nicht – oder du hast keinen Zugriff darauf.');
     db.run('INSERT OR IGNORE INTO announcement_dismissed (announcement_id, user_id) VALUES (?, ?)', an.id, req.user.id);
+    flash(req, `Die Ankündigung „${an.title}“ ist ausgeblendet.`);
     res.redirect(303, '/start');
   });
 

@@ -88,6 +88,8 @@ function createUserFiles(ctx) {
     put(appId, userId, name, type, buffer) {
       const t = checkFile(name, type, buffer, L);
       const other = usage(appId, userId, name);
+      const account = db.get('SELECT COALESCE(SUM(size), 0) AS bytes FROM user_files WHERE user_id = ? AND NOT (app_id = ? AND name = ?)', userId, appId, name).bytes;
+      if (account + buffer.length > L.fileAccountBytes) throw new FileError('quota', `Dein Platz für Dateien ist voll (höchstens ${Math.round(L.fileAccountBytes / 1048576)} MB in allen Apps zusammen).`);
       if (other.n >= L.filesPerApp || other.bytes + buffer.length > L.fileTotalBytes) {
         throw new FileError('quota', `Dein Platz für Dateien in dieser App ist voll (höchstens ${L.filesPerApp} Dateien, ${Math.round(L.fileTotalBytes / 1048576)} MB).`);
       }

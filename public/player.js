@@ -117,6 +117,26 @@
   }
   window.HubPlayer = { reload: reloadApp };
 
+  // ------------------------------------------------------------- favourite
+  // Toggle in place: a page reload would end the round the person is playing.
+  var fav = document.getElementById('favourite');
+  if (fav && window.fetch) fav.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var button = fav.querySelector('button');
+    fetch(fav.action, { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-Token': csrf } })
+      .then(function (res) { if (!res.ok) throw new Error('favourite'); return res.json(); })
+      .then(function (d) {
+        button.classList.remove('busy');
+        button.removeAttribute('aria-busy');
+        button.setAttribute('aria-pressed', d.favourite ? 'true' : 'false');
+        button.setAttribute('aria-label', d.favourite ? 'Aus den Favoriten nehmen' : 'Zu den Favoriten');
+        button.title = d.favourite ? 'Favorit' : 'Zu den Favoriten';
+        var svg = button.querySelector('svg');
+        if (svg) svg.classList.toggle('filled', d.favourite);
+      })
+      .catch(function () { fav.submit(); });
+  });
+
   // ------------------------------------------------------- loading, fullscreen
   frame.addEventListener('load', function () { stage.classList.add('ready'); });
   setTimeout(function () { stage.classList.add('ready'); }, 4000);

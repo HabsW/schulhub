@@ -567,6 +567,12 @@
   .row.wrap .row-end { flex-basis: 100%; justify-content: flex-start; }
   @media (min-width: 560px) { .row.wrap .row-end { flex-basis: auto; justify-content: flex-end; } }
   a.row-link { color: inherit; text-decoration: none; }
+  .row-form-link { display: contents; }
+  button.row-link { all: unset; cursor: pointer; font-weight: 650; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
+  button.row-link:focus-visible { outline: 2px solid var(--line-strong); outline-offset: 2px; }
+  button.row-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+  .row:has(button.row-link) { transition: background-color var(--t-1); }
+  .row:has(button.row-link:hover) { background: var(--raised-2); }
   a.row-link::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
   .row:has(a.row-link) { transition: background-color var(--t-1); }
   .row:has(a.row-link:hover) { background: var(--raised-2); }

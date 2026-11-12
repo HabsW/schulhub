@@ -13,10 +13,14 @@ function createServices(ctx) {
   const { db, config, uploads } = ctx;
 
   // ---------- audit log ----------
-  function audit(actor, action, target = '', detail = '') {
+  /**
+   * Record what happened. `subjectId`: the person the entry is ABOUT (e.g. whose role changed),
+   * so that deleting that account can anonymise the entry.
+   */
+  function audit(actor, action, target = '', detail = '', { subjectId = null } = {}) {
     db.run(
-      'INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail) VALUES (?, ?, ?, ?, ?, ?)',
-      Date.now(), actor ? actor.id : null, actor ? `${actor.name} (${actor.role})` : 'System', action, String(target).slice(0, 200), String(detail).slice(0, 500)
+      'INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail, subject_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      Date.now(), actor ? actor.id : null, actor ? `${actor.name} (${actor.role})` : 'System', action, String(target).slice(0, 200), String(detail).slice(0, 500), subjectId
     );
   }
   function pruneAudit() {
@@ -28,11 +32,16 @@ function createServices(ctx) {
    * Leave a short message for some people (no e-mail, no push). Text and link
    * are composed by the server; names inside the text are escaped when shown.
    */
-  function notify(userIds, kind, text, href = '') {
+  function notify(userIds, kind, text, href = '', { subjectId = null } = {}) {
     const now = Date.now();
+    const t = String(text).slice(0, 300);
+    const link = isLocalPath(href) ? href : '';
     for (const id of new Set(userIds)) {
       if (!id) continue;
-      db.run('INSERT INTO notices (user_id, kind, text, href, created_at) VALUES (?, ?, ?, ?, ?)', id, String(kind).slice(0, 40), String(text).slice(0, 300), isLocalPath(href) ? href : '', now);
+      // The same unread message twice is noise (e.g. withdraw and resubmit in a loop): keep one.
+      if (db.get('SELECT 1 AS dup FROM notices WHERE user_id = ? AND read_at IS NULL AND kind = ? AND text = ? AND href = ?', id, String(kind).slice(0, 40), t, link)) continue;
+      // subjectId: the person this notice names, so it disappears when that account is deleted.
+      db.run('INSERT INTO notices (user_id, kind, text, href, created_at, subject_id) VALUES (?, ?, ?, ?, ?, ?)', id, String(kind).slice(0, 40), t, link, now, subjectId);
       db.run('DELETE FROM notices WHERE user_id = ? AND id NOT IN (SELECT id FROM notices WHERE user_id = ? ORDER BY id DESC LIMIT ?)', id, id, config.limits.noticesPerUser);
     }
   }
@@ -266,6 +275,16 @@ function createServices(ctx) {
       }
       db.run('DELETE FROM sessions WHERE user_id = ?', user.id);
       db.run("UPDATE audit_log SET actor_id = NULL, actor_label = 'Gelöschtes Konto' WHERE actor_id = ?", user.id);
+      // Entries ABOUT the person keep what happened, but not who it was.
+      db.run("UPDATE audit_log SET target = 'Gelöschtes Konto', detail = '', subject_id = NULL WHERE subject_id = ?", user.id);
+      // Older entries without a subject: account actions whose target is exactly this name.
+      db.run(
+        `UPDATE audit_log SET target = 'Gelöschtes Konto', detail = '' WHERE subject_id IS NULL AND target = ?
+           AND action IN ('rolle_geaendert','konto_gesperrt','konto_entsperrt','konto_markiert','konto_geloescht')`,
+        user.name
+      );
+      // Notices to other people that name this person go with them.
+      db.run('DELETE FROM notices WHERE subject_id = ?', user.id);
       // cascades: memberships, apps (+ versions, drafts), saves, scores, results, progress, achievements,
       // files, favourites, feedback to them, notices, comments
       db.run('DELETE FROM users WHERE id = ?', user.id);

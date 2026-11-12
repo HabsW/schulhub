@@ -232,11 +232,11 @@ function checkValue(field, v) {
       const rows = Array.isArray(v) ? v : typeof v === 'string' ? v.split('\n').filter((l) => l.trim()).map((l) => l.split(/\s*=\s*/)) : null;
       if (!rows) return { error: 'Paare erwartet' };
       const value = [];
-      for (const r of rows) {
-        if (!Array.isArray(r) || r.length !== 2) return { error: 'jede Zeile braucht genau ein "=" zwischen den beiden Teilen' };
+      for (const [i, r] of rows.entries()) {
+        if (!Array.isArray(r) || r.length !== 2) return { error: `Zeile ${i + 1}: jede Zeile braucht genau ein "=" zwischen den beiden Teilen` };
         const a = str(String(r[0] ?? ''), LIMITS.itemChars);
         const b = str(String(r[1] ?? ''), LIMITS.itemChars);
-        if (!a || !b) return { error: 'ein Paar hat eine leere Seite' };
+        if (!a || !b) return { error: `Zeile ${i + 1}: ein Paar hat eine leere Seite` };
         value.push([a, b]);
       }
       if (value.length > field.maxItems) return { error: `höchstens ${field.maxItems} Paare` };

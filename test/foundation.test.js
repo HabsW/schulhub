@@ -367,7 +367,7 @@ test('Aufbewahrung: Konten werden nur markiert, archivierte Klassen nach Frist g
   assert.ok(h.db.get("SELECT 1 AS ok FROM audit_log WHERE action = 'klasse_geloescht' AND target = 'Uralt'"), 'and logged');
 });
 
-test('Datenbank: Version 1 wird ohne Datenverlust auf Version 2 gehoben', () => {
+test('Datenbank: Version 1 wird ohne Datenverlust auf die aktuelle Version gehoben', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-mig-'));
   const file = path.join(dir, 'hub.sqlite');
   const raw = new DatabaseSync(file);
@@ -376,11 +376,13 @@ test('Datenbank: Version 1 wird ohne Datenverlust auf Version 2 gehoben', () => 
   raw.exec(`INSERT INTO users (id, oid, name, email, role, created_at) VALUES ('u1', 'o1', 'L', 'l@x', 'teacher', 1);
             INSERT INTO classes (id, name, created_at) VALUES ('c1', 'K', 1);
             INSERT INTO apps (id, owner_id, name, emoji, origin_key, created_at, updated_at) VALUES ('a1', 'u1', 'A', '🎮', 'a00000000000000000001', 1, 1);
-            INSERT INTO class_apps (class_id, app_id, status, version_id, requested_version_id, created_at) VALUES ('c1', 'a1', 'approved', 'v1', 'v2', 1);`);
+            INSERT INTO class_apps (class_id, app_id, status, version_id, requested_version_id, created_at) VALUES ('c1', 'a1', 'approved', 'v1', 'v2', 1);
+            INSERT INTO results (app_id, user_id, title, created_at) VALUES ('a1', 'u1', 'alt', 1);`);
   raw.close();
   const db = openDb(file);
   try {
-    assert.equal(db.get('PRAGMA user_version').user_version, 2);
+    assert.equal(db.get('PRAGMA user_version').user_version, require('../src/db').SCHEMA_VERSION);
+    assert.equal(db.get('SELECT class_id FROM results').class_id, '', 'results from before classes were recorded are marked as such');
     const row = db.get('SELECT * FROM class_apps');
     assert.deepEqual([row.status, row.version_id, row.requested_version_id, row.request_state], ['approved', 'v1', 'v2', 'waiting']);
     assert.equal(db.get('SELECT pref_theme FROM users').pref_theme, 'dark');

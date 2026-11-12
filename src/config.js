@@ -96,13 +96,14 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       fileBytes: 1 * MB, // hub.files: one file
       filesPerApp: 50, // hub.files: files per person per app
       fileTotalBytes: 10 * MB, // hub.files: all files of one person in one app
+      fileAccountBytes: 50 * MB, // hub.files: all files of one person in all apps
       achievementsPerApp: 50,
       noticesPerUser: 200, // older in-Hub messages are dropped
       feedbackChars: 2000,
     },
     // [max events, per milliseconds]
     rate: {
-      login: [20, 10 * 60_000], // per IP
+      login: [600, 10 * 60_000], // per IP - high: a whole school signs in through one address (no passwords here to guess)
       joinFail: [8, 10 * 60_000], // wrong join codes per user
       joinFailIp: [300, 10 * 60_000], // ... and per IP (high: a whole school shares one address)
       write: [240, 60_000], // state-changing Hub requests per user
@@ -110,7 +111,9 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       uploadVersions: [30, 60 * 60_000], // per user
       sdk: [600, 60_000], // SDK calls per user and app
       sdkFiles: [120, 60_000], // hub.files uploads per user and app
-      appFiles: [3000, 60_000], // static app files per IP
+      appFiles: [3000, 60_000], // static app files per person (from the file token)
+      appFilesIp: [60000, 60_000], // ... and a backstop per address
+      submit: [30, 60 * 60_000], // submissions to classes per person
       draftWrites: [600, 60_000], // editor saves per user
     },
   };

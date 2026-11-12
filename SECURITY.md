@@ -134,7 +134,7 @@ adopted stylesheet; the preview, console, search panel, autocompletion, dialogs 
 | Removing an app destroying results | An app that was ever approved becomes `removed`: not playable any more, but its results stay readable for the class's teachers (`canSeeStudentData` accepts `approved` and `removed`). Publishing a new version never brings it back. |
 | Students bypassing review by "sharing" | Sharing with colleagues (`apps.shared`) only works for apps whose owner is staff (`access.isSharedWith`). A colleague may preview the shared app's published version before adding it. |
 | Co-teacher invitations used by students | A join code has a role. A class code always creates a **student** membership, whoever uses it. A teacher invitation creates a teacher membership only for staff accounts; a student using it gets nothing. One active code per class and role. |
-| Archived classes | Read-only (`canChangeClass` is false). Students lose access and class context; nobody can join; teachers keep read access to results. Archived classes do not count for "shares a class" on leaderboards. |
+| Archived classes | Read-only (`canChangeClass` is false). Students lose access and class context; nobody can join; teachers keep read access to results. The SDK gives **no class context** in an archived class, even with a token issued before archiving – so no class data can be written and no results are filed into it. Archived classes do not count for "shares a class" on leaderboards. Tests: *Archivierte Klassen…* |
 
 Tests: *Prüfen: Zurückgeben…*, *Entfernte Apps…*, *Kolleg/innen teilen Apps…*, *Lehrkraft-Einladung…*, *Archivierte Klassen…*
 
@@ -146,6 +146,7 @@ Tests: *Prüfen: Zurückgeben…*, *Entfernte Apps…*, *Kolleg/innen teilen App
 | Ticking an assignment "done" for someone else | `POST /aufgaben/:id/erledigt` only writes a row for the signed-in user (`access.canMarkDone`: student of the class, class active). Any user id in the form is ignored. "Done" is otherwise derived from results / full progress after the start (`src/assignments.js`). |
 | Students seeing other classes' assignments | `access.canSeeAssignment` = may view the class; archived classes are invisible to students. |
 | Teacher reading a class that is not theirs | Every class page, tab, result list, CSV, student detail, overview and settings page loads the class and checks `canManageClass` / `canChangeClass` / `canSeeClassResults` / `canSeeStudentData`; not allowed = 404. |
+| Results without a class | A result recorded without class context (e.g. a school-wide app at home) has `class_id` NULL and never appears in any class view. Results from before version 2 are marked `''` ("class unknown") by migration 3 and remain visible to the teachers of the app's classes, as before. Assignment state counts only results of the assignment's own class (progress, being personal, counts everywhere). Test: *Aufgaben zählen nur Ergebnisse aus ihrer Klasse…* |
 | Results leaking between classes | Teacher views (results list, student detail, CSV, overview grid, weekly charts, assignment detail) only count results with `class_id = <this class> OR class_id IS NULL`. Tested with one student in two classes. |
 | Removed app hides earlier results from its teacher | `canSeeClassResults` allows status `approved` or `removed`; removed apps keep "Ergebnisse" and can be brought back (`classApps.restore`). |
 | Private feedback read or written by the wrong person | Writing: `canGiveFeedback` (teacher of an active class → a student of that class). Optional links to an app / assignment are checked against the same class. Reading: `canReadFeedback` (the student, the class's teachers). Marking read: only the student (`canMarkFeedbackRead`), by POST – looking never changes state. Deleting: `canDeleteFeedback` (author, the student, admin). Length ≤ `limits.feedbackChars`. The notification text is composed by the server. |
@@ -267,8 +268,9 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 
 ### Abuse and operations
 
-- **Rate limits** on logins, wrong join codes, state-changing requests, uploads, app files and SDK calls. Test: *SDK-Aufrufe werden gebremst*, *Beitrittscodes…*
-- **Quotas** per user and app for saves, shared data, results, leaderboards, comments.
+- **Rate limits** on logins, wrong join codes, state-changing requests, uploads, app files, SDK calls, editor writes, `hub.files` uploads and class submissions. A whole school usually shares one public address, so limits are **per person** wherever a person is known: app files are counted per person (the file token names whom it was issued to) with only a high per-address backstop; sign-in has a high per-address limit (there are no passwords to guess here); a person can submit a bounded number of apps to classes per hour, and the same unread notice is never repeated. Tests: *SDK-Aufrufe werden gebremst*, *Beitrittscodes…*, *Grenzen gelten pro Person…*, *Einreichen lässt sich nicht als Flut…*
+- **Quotas** per user and app for saves, shared data, results, leaderboards, comments, files (`hub.files`: per app and 50 MB per account across apps). Test: *Dateien aus Apps: Obergrenze pro Konto…*
+- **Personal pages are never cached**: every response to a signed-in person carries `Cache-Control: no-store` (shared school PCs, back button after logout). Test: *Persönliche Seiten…*
 - **Audit log** of sign-ins, refused sign-ins, role changes, blocks, uploads, refused uploads, publishing, approvals, rejections, deletions and data exports. Readable by the admin only, pruned after `AUDIT_RETENTION_DAYS`.
 - **Errors**: users see a German sentence; details go to the server log only. Test: *Fehlerseiten verraten keine Interna*
 - **Secrets** come from environment variables. `.env` and `data/` are git-ignored. Nothing secret is sent to the browser.
@@ -282,7 +284,7 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
   with that person, and never if the person chose to be anonymous. Everyone else – other
   classes, teachers of other classes, the whole school in a school-wide app – sees "Anonym".
   Test: *Bestenliste: Namen sehen nur Personen aus derselben Klasse…*
-- "Meine Daten" shows everything, exports it as JSON, deletes per app or the whole account. Deleting an account removes its rows and anonymises its audit entries. Test: *Meine Daten…*
+- "Meine Daten" shows everything, exports it as JSON, deletes per app or the whole account. Deleting an account removes its rows, anonymises the audit entries it made **and the entries about it** (`audit_log.subject_id`; older entries by exact name for account actions), and deletes other people's in-Hub notices that name it (`notices.subject_id`). A test scans every text column of every table for the deleted person's name, e-mail and id. Tests: *Meine Daten…*, *Konto löschen: kein Name bleibt zurück…*
 - Retention (`src/settings.js`, run daily by `services.maintenance`): audit log 365 days; archived
   classes are deleted 12 months after archiving; accounts without sign-in for 15 months are
   only **flagged** for the admin and never deleted automatically; in-Hub notices fade after
@@ -309,7 +311,9 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 - **Microsoft sign-in was not exercised end to end in development.** The redirect to the tenant authority and the role mapping are tested; the callback (code exchange, `tid` check) is ported from the working example but has not been run against a real tenant in this codebase. Test it with a real school account before going live.
 - **Leaderboard scores and results come from the app's code in the student's browser** and can be faked by the student. They are for fun and practice, not for grades.
 - **A hostile app can act as the person using it, inside that app** (it holds their short-lived token by design). It cannot reach other apps or the Hub. Teacher review before approval is the control.
-- **The SDK token is readable by the app** and contains internal random ids of user and class. These grant nothing and are not personal data, but they are the same across apps.
+- **The SDK token is readable by the app** and contains internal random ids of user and class and the hash of the session id (`s`). These grant nothing on their own (the token is bound to the app's origin and the hash cannot be turned back into a session cookie) and are not personal data, but they are the same across apps.
+- **Leaderboards as a covert channel.** An approved app could encode what it learns about its users into leaderboard scores (numbers only, at most 20 boards) that its author reads. Teacher review of the code is the control; scores never carry text.
+- **Where permission decisions live.** Every decision about one object goes through `src/access.js`. List queries (search, catalogue, start page, queues) pre-filter in SQL with the same rules, and objects opened from them are checked again through `access.js`.
 - **Rate limits and login state are in memory**, per process. Run one process, or move them to a shared store before scaling out.
 - **Cookie isolation between Hub and apps** relies on the `__Host-` cookie under HTTPS. Use a separate registrable domain for apps in production. On plain-HTTP localhost this protection is weaker.
 - **Frame navigation blocking** was verified in Chromium only. Browsers that do not apply the parent's `frame-src` to later navigations would allow an app to navigate its own frame away (and leak what it knows about its own user).

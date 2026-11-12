@@ -43,8 +43,8 @@ module.exports = (app, ctx) => {
     const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
     // The file token unlocks exactly this version's static files - or the owner's draft.
     const fileToken = play.draft
-      ? tokens.sign('files', { a: a.id, d: 1 }, 60 * 60)
-      : tokens.sign('files', { a: a.id, v: play.version.id }, config.fileTokenSeconds);
+      ? tokens.sign('files', { a: a.id, d: 1, u: req.user.id }, 60 * 60)
+      : tokens.sign('files', { a: a.id, v: play.version.id, u: req.user.id }, config.fileTokenSeconds);
     const origin = config.appOrigin(a.origin_key);
     const back = play.draft ? `/studio/${a.id}` : play.preview ? `/apps/${a.id}` : cls ? `/klassen/${cls.id}` : '/start';
     const favourite = Boolean(db.get('SELECT 1 AS ok FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id));
@@ -55,7 +55,7 @@ module.exports = (app, ctx) => {
         <span class="app-name">${appIcon(a, 'xs')}<span>${a.name}</span>${cls ? html`<small>${cls.name}</small>` : ''}</span>
         ${play.preview ? badge(html`${play.draft ? 'Entwurf' : 'Vorschau'}<span class="label-wide">${play.draft ? ' · nichts wird gespeichert' : ` · Version ${play.version.number}`}</span>`, 'wait') : ''}
         ${play.preview ? html`<button class="btn quiet sm" type="button" id="console-toggle" aria-controls="console" aria-expanded="false">${icon('terminal')}<span class="label-wide">Konsole</span><span class="count wait" id="console-count" hidden>0</span></button>` : ''}
-        ${play.preview ? '' : html`<form method="post" action="/apps/${a.id}/favorit" class="inline">${csrfField(req)}
+        ${play.preview ? '' : html`<form method="post" action="/apps/${a.id}/favorit" class="inline" id="favourite">${csrfField(req)}
           <input type="hidden" name="zurueck" value="${req.originalUrl}">
           <button class="btn quiet icon sm" aria-pressed="${favourite ? 'true' : 'false'}" aria-label="${favourite ? 'Aus den Favoriten nehmen' : 'Zu den Favoriten'}" title="${favourite ? 'Favorit' : 'Zu den Favoriten'}">${icon('heart', { cls: favourite ? 'filled' : '' })}</button></form>`}
         <button class="btn quiet icon sm" type="button" id="fullscreen" aria-label="Vollbild" title="Vollbild">${icon('maximize')}</button>
@@ -74,7 +74,7 @@ module.exports = (app, ctx) => {
           <p class="muted">Melde dich neu an – danach geht es hier weiter.</p>
           <a class="btn primary" href="${req.originalUrl}">Neu anmelden</a></div>
       </div>`;
-    res.send(page(req, { title: a.name, body, shell: 'player', scripts: ['player.js'] }));
+    res.send(page(req, { title: a.name, body, shell: 'player', scripts: ['player.js'], styles: ['css/frames.css'] }));
   });
 
   /**
@@ -116,6 +116,7 @@ module.exports = (app, ctx) => {
     if (!a || !access.resolvePlay(req.user, a)) throw deny();
     const had = db.run('DELETE FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id).changes > 0;
     if (!had) db.run('INSERT INTO favorites (user_id, app_id, created_at) VALUES (?, ?, ?)', req.user.id, a.id, Date.now());
+    if (String(req.headers.accept || '').includes('application/json')) return res.json({ favourite: !had });
     const back = String(req.body.zurueck || '');
     res.redirect(303, /^\/(apps|klassen|start|katalog)\b[^\s]*$/.test(back) && !back.startsWith('//') ? back : `/apps/${a.id}/spielen`);
   });

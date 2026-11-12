@@ -379,6 +379,18 @@ const MIGRATIONS = [
     updated_at INTEGER NOT NULL
   );
   `,
+  // ---------------------------------------------------------------- 2 -> 3
+  `
+  -- The person an audit entry or an in-Hub notice is ABOUT (not who did it), so that deleting
+  -- an account can remove their name everywhere (audit targets, other people's notices).
+  ALTER TABLE audit_log ADD COLUMN subject_id TEXT;
+  CREATE INDEX audit_subject ON audit_log(subject_id);
+  ALTER TABLE notices ADD COLUMN subject_id TEXT;
+  CREATE INDEX notices_subject ON notices(subject_id);
+  -- Results from before version 2 did not record a class: mark them '' ("class unknown").
+  -- From now on NULL means "recorded without any class context" and never shows in a class.
+  UPDATE results SET class_id = '' WHERE class_id IS NULL;
+  `,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;

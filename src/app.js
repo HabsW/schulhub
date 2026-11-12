@@ -62,6 +62,8 @@ function createHubApp(ctx) {
     const expired = !s.createdAt || Date.now() - s.createdAt > config.sessionMs;
     if (user && !user.disabled && !expired) {
       req.user = user;
+      // Pages of signed-in people are personal: never kept by the browser (shared school PCs, back button after logout).
+      res.setHeader('Cache-Control', 'no-store');
       return next();
     }
     s.regenerate(next);

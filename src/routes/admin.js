@@ -344,7 +344,7 @@ module.exports = (app, ctx) => {
     if (u.role === 'admin' && role !== 'admin' && admins() <= 1) throw bad('Es muss mindestens einen Admin geben. Ernenne zuerst ein weiteres Konto zum Admin.');
     if (u.role !== role) {
       db.run('UPDATE users SET role = ? WHERE id = ?', role, u.id);
-      services.audit(req.user, 'rolle_geaendert', u.name, `${ROLE_LABEL[u.role]} → ${ROLE_LABEL[role]}`);
+      services.audit(req.user, 'rolle_geaendert', u.name, `${ROLE_LABEL[u.role]} → ${ROLE_LABEL[role]}`, { subjectId: u.id });
       flash(req, `${u.name} ist jetzt ${ROLE_LABEL[role]}.`);
     }
     // Someone who just gave away their own admin role cannot see the admin area any more.
@@ -357,7 +357,7 @@ module.exports = (app, ctx) => {
     const on = req.body.an === '1';
     db.run('UPDATE users SET disabled = ? WHERE id = ?', on ? 1 : 0, u.id);
     if (on) db.run('DELETE FROM sessions WHERE user_id = ?', u.id); // signed out everywhere, immediately
-    services.audit(req.user, on ? 'konto_gesperrt' : 'konto_entsperrt', u.name);
+    services.audit(req.user, on ? 'konto_gesperrt' : 'konto_entsperrt', u.name, '', { subjectId: u.id });
     flash(req, on ? `${u.name} ist gesperrt und wurde überall abgemeldet.` : `${u.name} kann sich wieder anmelden.`);
     res.redirect(303, back(req, `/admin/konten/${u.id}`));
   });

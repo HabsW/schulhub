@@ -1,0 +1,4 @@
+/* Pages that embed an app frame (player, review workbench, editor) opt out of the
+   cross-page view transition: its snapshot overlay swallowed taps into the app
+   during the first moments, and aborted transitions logged errors. */
+@view-transition { navigation: none; }
