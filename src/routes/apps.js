@@ -159,16 +159,25 @@ module.exports = (app, ctx) => {
               (SELECT COUNT(*) FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
                 WHERE ca.app_id = a.id AND ca.status = 'approved') AS classes,
               (SELECT COUNT(*) FROM class_apps ca WHERE ca.app_id = a.id AND ca.request_state = 'waiting') AS waiting,
-              (SELECT COUNT(*) FROM class_apps ca WHERE ca.app_id = a.id AND ca.request_state = 'returned') AS returned
+              (SELECT COUNT(*) FROM class_apps ca WHERE ca.app_id = a.id AND ca.request_state = 'returned') AS returned,
+              (SELECT c.name FROM class_apps ca JOIN classes c ON c.id = ca.class_id
+                WHERE ca.app_id = a.id AND ca.request_state = 'waiting' ORDER BY c.name LIMIT 1) AS waiting_class,
+              (SELECT c.name FROM class_apps ca JOIN classes c ON c.id = ca.class_id
+                WHERE ca.app_id = a.id AND ca.request_state = 'returned' ORDER BY c.name LIMIT 1) AS returned_class
          FROM apps a LEFT JOIN app_versions pv ON pv.id = a.published_version_id
         WHERE a.owner_id = ? ORDER BY a.updated_at DESC LIMIT 100`,
       user.id
     );
     const used = uploads.userBytes(user.id);
+    // The current version and where it is: in classes, waiting for a teacher, given back.
     const sub = (a) => {
       if (!a.published_number) return a.versions ? `${plural(a.versions, 'Version', 'Versionen')}, noch nicht veröffentlicht` : 'Noch nichts hochgeladen';
-      const where = a.classes ? `in ${plural(a.classes, 'Klasse', 'Klassen')}` : a.waiting || a.returned ? '' : 'in keiner Klasse';
-      return `Version ${a.published_number} veröffentlicht${where ? ` · ${where}` : ''}`;
+      const parts = [`Version ${a.published_number}`];
+      if (a.classes) parts.push(`in ${plural(a.classes, 'Klasse', 'Klassen')}`);
+      if (a.waiting) parts.push(`wartet auf Freigabe in ${a.waiting === 1 ? a.waiting_class : plural(a.waiting, 'Klasse', 'Klassen')}`);
+      if (a.returned) parts.push(`zurückgegeben in ${a.returned === 1 ? a.returned_class : plural(a.returned, 'Klasse', 'Klassen')}`);
+      if (parts.length === 1) parts.push(a.schoolwide_version_id ? 'für die ganze Schule' : 'in keiner Klasse');
+      return parts.join(' · ');
     };
     const marks = (a) => (a.waiting || a.returned || a.schoolwide_version_id || a.shared
       ? html`<span class="apps-badges apps-rowbadges">${a.waiting ? badge('wartet', 'wait') : ''}${a.returned ? badge('zurückgegeben', 'danger') : ''}${a.schoolwide_version_id ? badge('schulweit') : ''}${a.shared ? badge('geteilt') : ''}</span>`
@@ -296,7 +305,7 @@ module.exports = (app, ctx) => {
         stat({ label: 'Ergebnis im Schnitt', value: res.people >= USAGE_MIN_PEOPLE && res.avg !== null ? `${Math.round(res.avg * 100)} %` : word('zu wenige Daten'), sub: 'in 30 Tagen' }),
       ])}
       <div class="apps-usage">${opens
-        ? html`${barChart(bars, { label: 'Öffnungen pro Tag in den letzten 30 Tagen', height: 80 })}<div class="apps-axis" aria-hidden="true"><span>${formatDay(now - 29 * DAY)}</span><span>heute</span></div>`
+        ? html`${barChart(bars, { label: 'Öffnungen pro Tag in den letzten 30 Tagen', height: 80, labels: false })}<div class="apps-axis" aria-hidden="true"><span>${formatDay(now - 29 * DAY)}</span><span>heute</span></div>`
         : html`<p class="meta">In den letzten 30 Tagen hat niemand die App geöffnet.</p>`}</div>
     </section>`;
   }
@@ -314,7 +323,7 @@ module.exports = (app, ctx) => {
   /** Date, size, note and check summary of a version (owner and reviewer lists). */
   function versionSub(v) {
     const parts = [formatDate(v.created_at), plural(v.file_count, 'Datei', 'Dateien'), formatBytes(v.total_bytes)];
-    return html`<span class="apps-vmeta">${parts.map((p, i) => html`${i ? ' · ' : ''}<span class="apps-nobr">${p}</span>`)}</span>${v.note ? html`<span class="apps-note">${v.note}</span>` : ''}<span class="apps-check"><a href="/apps/${v.app_id}/versionen/${v.id}/quelltext#pruefbericht">Prüfbericht</a>${V.reportBadges(V.parseReport(v))}</span>`;
+    return html`<span class="apps-vmeta">${parts.map((p, i) => html`${i ? ' · ' : ''}<span class="apps-nobr">${p}</span>`)}</span>${v.note ? html`<span class="apps-note">${v.note}</span>` : ''}<span class="apps-check"><a class="apps-checklink" href="/apps/${v.app_id}/versionen/${v.id}/quelltext#pruefbericht">Prüfbericht</a>${V.reportBadges(V.parseReport(v))}</span>`;
   }
   /** Preview, source and download of a version - always the same three, at the end of the row. */
   function versionTools(v, classId = '') {
@@ -336,7 +345,7 @@ module.exports = (app, ctx) => {
     const published = a.published_version_id ? byId.get(a.published_version_id) : null;
     const fresh = typeof req.query.neu === 'string' ? byId.get(req.query.neu) : null;
     const rows = planRows(user, a);
-    const sourceLink = (v) => (it) => `/apps/${a.id}/versionen/${v.id}/quelltext?datei=${encodeURIComponent(it.file)}${it.line ? `#L${it.line}` : ''}`;
+    const sourceLink = (v) => (it) => `/apps/${a.id}/versionen/${v.id}/quelltext?datei=${encodeURIComponent(it.file)}${it.line ? `#L${it.line}` : '#datei'}`;
 
     // ----- head -----
     const target = published || newest;
@@ -442,8 +451,8 @@ module.exports = (app, ctx) => {
           ${icon('upload')}
           <strong class="apps-drop-title"><span class="apps-drop-fine">Ordner oder ZIP-Datei hierher ziehen</span><span class="apps-drop-coarse">Ordner oder ZIP-Datei auswählen</span></strong>
           <div class="actions">
-            <label class="btn${versions.length ? '' : ' primary'}">${icon('folder')}<span>Ordner auswählen</span><input class="file-input" type="file" id="pick-folder" webkitdirectory multiple></label>
-            <label class="btn">${icon('file')}<span>ZIP-Datei auswählen</span><input class="file-input" type="file" id="pick-zip" accept=".zip,application/zip"></label>
+            <label class="btn apps-dropbtn${versions.length ? '' : ' primary'}">${icon('folder')}<span>Ordner auswählen</span><input class="file-input" type="file" id="pick-folder" webkitdirectory multiple></label>
+            <label class="btn apps-dropbtn">${icon('file')}<span>ZIP-Datei auswählen</span><input class="file-input" type="file" id="pick-zip" accept=".zip,application/zip"></label>
           </div>
           <span class="meta">Höchstens ${plural(L.maxFiles, 'Datei', 'Dateien')}, ${formatBytes(L.maxFileBytes)} pro Datei, ${formatBytes(L.maxVersionBytes)} insgesamt.</span>
         </div>
@@ -462,6 +471,7 @@ module.exports = (app, ctx) => {
 
     // ----- classes -----
     const options = isOwner && published ? submitOptions(user, a, classRows) : [];
+    const ownClasses = isOwner && published && !options.length ? access.visibleClasses(user).length : 0;
     const classLine = (r) => {
       const st = classState(r, num, reasons.get(r.class_id));
       const open = !r.archived_at && isOwner;
@@ -478,8 +488,10 @@ module.exports = (app, ctx) => {
       : !published ? (classRows.length ? html`<p class="meta apps-after">Veröffentliche zuerst eine Version – dann kannst du die App in eine Klasse einbringen.</p>` : '')
         : options.length ? html`<form method="post" action="/apps/${a.id}/einreichen" class="apps-submit">${csrfField(req)}
             ${field(req, { label: 'In eine Klasse einbringen', name: 'klasse', control: html`<select id="f-klasse" name="klasse">${options.map((o) => html`<option value="${o.c.id}">${o.c.name} – ${o.mode === 'approve' ? 'gleich in der Klasse' : 'die Lehrkraft prüft zuerst'}</option>`)}</select>` })}
-            <button class="btn">${icon('send')}<span>${options.some((o) => o.mode === 'submit') ? 'Einreichen' : 'Hinzufügen'}</span></button></form>`
-          : html`<p class="meta apps-after">Du bist in keiner weiteren Klasse, in die du die App einbringen könntest.</p>`;
+            <div class="actions"><button class="btn">${icon('send')}<span>${options.some((o) => o.mode === 'submit') ? 'Einreichen' : 'Hinzufügen'}</span></button></div></form>`
+          : ownClasses ? html`<p class="meta apps-after">Die App ist schon in allen Klassen, in die du sie einbringen kannst.</p>`
+            : access.isStaff(user) ? html`<p class="meta apps-after">Du hast noch keine Klasse. <a href="/klassen">Lege eine Klasse an</a> – dann kannst du die App dort einsetzen.</p>`
+              : html`<p class="meta apps-after">Du bist noch in keiner Klasse. Mit dem QR-Code oder Link deiner Lehrkraft trittst du einer bei – dann kannst du die App dort einreichen.</p>`;
     const schoolwide = isAdmin
       ? html`<div class="apps-sub"><h3>Für die ganze Schule</h3>
           <p class="meta">${a.schoolwide_version_id ? `Alle angemeldeten Personen können Version ${num(a.schoolwide_version_id) ?? '–'} öffnen.` : 'Bisher nur in Klassen.'}</p>
@@ -487,10 +499,15 @@ module.exports = (app, ctx) => {
             ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweite Freigabe beenden', { size: 'sm', fields: { an: '0' }, confirm: 'Schulweite Freigabe beenden?\nDie App ist danach nur noch in den Klassen, in denen sie freigegeben ist.', confirmLabel: 'Beenden' })
             : published ? postButton(req, `/apps/${a.id}/schulweit`, 'Für die ganze Schule freigeben', { size: 'sm', icon: 'school', fields: { an: '1' }, confirm: `Version ${published.number} für die ganze Schule freigeben?\nAlle angemeldeten Personen – auch Schüler/innen aller Klassen – können sie dann öffnen.`, confirmLabel: 'Freigeben' })
               : html`<span class="meta">Erst möglich, wenn eine Version veröffentlicht ist.</span>`}</div></div>`
-      : a.schoolwide_version_id ? html`<p class="meta apps-after">${icon('school', { cls: 'sm' })} Die Verwaltung hat Version ${num(a.schoolwide_version_id) ?? '–'} für die ganze Schule freigegeben.</p>` : '';
+      : a.schoolwide_version_id && classRows.length ? html`<p class="meta apps-after apps-iconline">${icon('school', { cls: 'sm' })}<span>Die Verwaltung hat Version ${num(a.schoolwide_version_id) ?? '–'} für die ganze Schule freigegeben.</span></p>` : '';
     const classSection = html`<section class="section" id="klassen" aria-labelledby="h-klassen">
       ${sectionHead('Klassen', { id: 'h-klassen', count: classRows.length ? String(classRows.length) : null, sub: isOwner && user.role === 'student' ? 'Deine Lehrkraft prüft jede neue Version, bevor die Klasse sie bekommt.' : '' })}
-      ${classRows.length ? list(classRows.map(classLine)) : empty({ icon: 'school', title: 'Noch in keiner Klasse', text: published ? 'Bring die App in eine Klasse, damit andere sie benutzen können.' : 'Sobald eine Version veröffentlicht ist, kannst du die App in eine Klasse einbringen.' })}
+      ${classRows.length ? list(classRows.map(classLine)) : empty({
+        icon: 'school', title: 'Noch in keiner Klasse',
+        text: !published ? 'Sobald eine Version veröffentlicht ist, kannst du die App in eine Klasse einbringen.'
+          : a.schoolwide_version_id ? 'Für die ganze Schule ist sie schon freigegeben. In einer Klasse kommen Aufgaben, Einstellungen und Ergebnisse für die Lehrkraft dazu.'
+            : 'Bring die App in eine Klasse, damit andere sie benutzen können.',
+      })}
       ${submitForm}${schoolwide}
     </section>`;
 
@@ -563,7 +580,7 @@ module.exports = (app, ctx) => {
         ? linkButton(`/pruefen/${c.id}/${a.id}`, 'Jetzt prüfen', { size: 'sm', icon: 'arrowRight' })
         : !c.archived_at && c.request_state === 'returned' ? linkButton(`/pruefen/${c.id}/${a.id}`, 'Im Prüfplatz ansehen', { kind: 'quiet', size: 'sm' }) : '';
       return html`<li class="row apps-cls"><span class="tile sm app-7" aria-hidden="true">${icon('school', { cls: 'sm' })}</span>
-        <div class="row-main"><span class="row-title"><a href="/klassen/${c.id}">${c.name}</a> <span class="apps-badges">${st.marks}</span></span><span class="row-sub">${st.sub}</span>
+        <div class="row-main"><span class="row-title"><a class="row-link" href="/klassen/${c.id}">${c.name}</a> <span class="apps-badges">${st.marks}</span></span><span class="row-sub">${st.sub}</span>
           ${act ? html`<div class="apps-actions apps-cls-actions">${act}</div>` : ''}</div></li>`;
     };
     const versionRow = (v) => {
@@ -811,6 +828,8 @@ module.exports = (app, ctx) => {
     const report = V.parseReport(v);
     const counts = V.reportCounts(report);
     const fileHref = (p) => `/apps/${a.id}/versionen/${v.id}/quelltext?datei=${encodeURIComponent(p)}`;
+    // Picking a file jumps to the code: on a phone it starts far below the head otherwise.
+    const fileLink = (p) => `${fileHref(p)}#datei`;
     const openAll = files.length <= 40;
 
     const treeView = (node, depth = 0) => html`<ul class="apps-tree${depth ? ' apps-subtree' : ''}" role="list">${[...node.dirs.values()].map((d) => html`<li><details${openAll || (file && file.path.startsWith(`${d.path}/`)) ? raw(' open') : ''}>
@@ -819,7 +838,7 @@ module.exports = (app, ctx) => {
         const text = uploads.isTextFile(f.path);
         const current = file && f.path === file.path;
         return html`<li>${text || hub
-          ? html`<a class="apps-file" href="${fileHref(f.path)}"${current ? raw(' aria-current="page"') : ''}>${icon('fileCode', { cls: 'sm' })}<span class="apps-fname">${f.name}</span>${hub ? badge('Hub') : html`<small>${formatBytes(f.size)}</small>`}</a>`
+          ? html`<a class="apps-file" href="${fileLink(f.path)}"${current ? raw(' aria-current="page"') : ''}>${icon('fileCode', { cls: 'sm' })}<span class="apps-fname">${f.name}</span>${hub ? badge('Hub') : html`<small>${formatBytes(f.size)}</small>`}</a>`
           : html`<span class="apps-file apps-file-bin">${icon('file', { cls: 'sm' })}<span class="apps-fname">${f.name}</span><small>${formatBytes(f.size)}</small></span>`}</li>`;
       })}</ul>`;
 
@@ -847,11 +866,11 @@ module.exports = (app, ctx) => {
     ${v.note ? html`<p class="apps-vnote"><span class="eyebrow">Was ist neu</span><span class="pre">${v.note}</span></p>` : ''}
     <details class="disclosure apps-reportbox" id="pruefbericht"${counts.error || counts.warning ? raw(' open') : ''}>
       <summary><strong>Prüfbericht</strong>${V.reportBadges(report)}</summary>
-      <div class="disclosure-body">${V.reportList(report, { href: (it) => `${fileHref(it.file)}${it.line ? `#L${it.line}` : ''}` })}</div></details>
+      <div class="disclosure-body">${V.reportList(report, { href: (it) => `${fileHref(it.file)}${it.line ? `#L${it.line}` : '#datei'}` })}</div></details>
     <div class="apps-src">
       <details class="apps-srcfiles"><summary class="apps-srcsum">${icon('folder', { cls: 'sm' })}<span>Dateien</span><span class="apps-srccur">${files.length}${file ? ` · ${file.path}` : ''}</span></summary>
         <nav aria-label="Dateien von Version ${v.number}">${treeView(fileTree(files))}</nav></details>
-      <div class="apps-srcview">
+      <div class="apps-srcview" id="datei">
         ${file ? html`<div class="apps-filehead"><code>${file.path}</code><span class="meta">${formatBytes(file.size)}${lines ? ` · ${plural(lines, 'Zeile', 'Zeilen')}` : ''}</span></div>` : ''}
         ${view}
       </div>

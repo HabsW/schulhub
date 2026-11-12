@@ -6,19 +6,13 @@
    ===================================================================== */
 
 /* ------------------------------------------------------------ layout
-   One column below 1200px (preview, then the panel), two from 1200px.
-   The decision bar is the bench's last item and spans its whole grid area,
-   aligned to the end: "position: sticky" then keeps it at the bottom of the
-   screen while the bench is in view. (Not "fixed": the shell animates <main>
-   with a transform, which would pin a fixed bar to <main> instead.) */
+   One column below 1200px (preview, then the panel), two from 1200px. */
 .review-bench { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); align-items: start; }
-.review-preview { grid-column: 1; grid-row: 1; }
-.review-panel { grid-column: 1; grid-row: 2; }
-.review-panel-decide { padding-bottom: 6rem; }
-@media (min-width: 1200px) {
-  .review-bench { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
-  .review-panel { grid-column: 2; grid-row: 1; }
-}
+@media (min-width: 1200px) { .review-bench { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (min-width: 1500px) { .review-bench { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); } }
+/* below 1200px the decision bar is fixed at the bottom of the screen: room for it after the last section */
+.review-panel-decide { padding-bottom: 6.5rem; }
+@media (min-width: 1200px) { .review-panel-decide { padding-bottom: 0; } }
 
 /* ------------------------------------------------------------ preview */
 .review-preview { display: grid; gap: var(--s-2); min-width: 0; }
@@ -31,7 +25,7 @@
 .review-devbtn[aria-pressed="true"]:hover { background: var(--ink); color: var(--ink-on-ink); }
 @media (max-width: 719.98px) { .review-devices { display: none; } }
 .review-tools { display: flex; align-items: center; gap: var(--s-1); margin-left: auto; }
-.review-viewport { display: flex; min-height: 0; height: min(72dvh, 46rem); padding: var(--s-3); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+.review-viewport { display: flex; min-height: 0; height: min(72dvh, 46rem); padding: var(--s-3); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); container-type: inline-size; }
 @media (min-width: 1200px) { .review-viewport { height: auto; } }
 @media (max-width: 559.98px) { .review-viewport { padding: 0; border-radius: var(--r-1); } }
 /* The device frame. margin-inline:auto centres it while it fits and keeps it scrollable when it does not. */
@@ -39,6 +33,15 @@
 .review-device-phone { width: 390px; }
 .review-device-tablet { width: 820px; }
 .review-device-full { width: 100%; }
+/* Handy and Tablet keep their real layout width (the app sees 390 / 820 px) and are drawn
+   smaller where the column is narrower - never cut off, never scrolled sideways. */
+@container (max-width: 821px) { .review-device-tablet { zoom: .9; } }
+@container (max-width: 739px) { .review-device-tablet { zoom: .8; } }
+@container (max-width: 657px) { .review-device-tablet { zoom: .7; } }
+@container (max-width: 575px) { .review-device-tablet { zoom: .6; } }
+@container (max-width: 493px) { .review-device-tablet { zoom: .5; } }
+@container (max-width: 411px) { .review-device-tablet { zoom: .4; } }
+@container (max-width: 391px) { .review-device-phone { zoom: .85; } }
 .review-stage { height: 100%; }
 .review-hint { display: flex; align-items: center; gap: var(--s-2); color: var(--ink-3); font-size: var(--fs-meta); }
 
@@ -63,6 +66,7 @@
 .review-note { padding: 0 var(--s-3) var(--s-3); color: var(--ink-2); font-size: var(--fs-small); }
 .review-filelink { padding: var(--s-2) var(--s-3); border-top: 1px solid var(--line-1); font-size: var(--fs-small); }
 .review-filelink > a { display: inline-flex; align-items: center; gap: .35rem; min-height: 2rem; }
+@media (pointer: coarse) { .review-filelink > a { min-height: var(--tap); } }
 .review-diff { max-height: 60dvh; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--line-1); }
 .review-hunk-head { position: sticky; left: 0; padding: .3rem var(--s-3); border-bottom: 1px solid var(--line-1); background: var(--raised-2); color: var(--ink-3); font: 600 var(--fs-meta)/1.4 var(--sans); }
 .review-code { margin: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: none; font-size: .8rem; line-height: 1.6; }
@@ -77,21 +81,32 @@
 .review-tx-add::before { content: "+"; color: var(--ok); }
 .review-tx-del::before { content: "−"; color: var(--danger); }
 
-/* ------------------------------------------------------------ decision bar */
-.review-decide { position: sticky; z-index: 20; grid-column: 1; grid-row: 1 / span 2; align-self: end; bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + var(--s-2)); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--raised-1); box-shadow: var(--shadow-float); }
-@media (min-width: 720px) { .review-decide { bottom: var(--s-4); padding: var(--s-3) var(--s-4); } }
-@media (min-width: 1200px) { .review-decide { grid-column: 2; grid-row: 1; } }
-/* the label is left out where it would push the buttons onto a second line */
-.review-decide-what { display: none; min-width: 0; overflow-wrap: anywhere; }
-@media (min-width: 560px) and (max-width: 1199.98px), (min-width: 1500px) { .review-decide-what { display: block; } }
-.review-decide-actions { display: flex; flex: 1 1 auto; justify-content: flex-end; gap: var(--s-2); }
-.review-act { position: relative; flex: 0 0 auto; }
+/* ------------------------------------------------------------ decision bar
+   Below 1200px: fixed at the bottom of the screen (above the tab bar on phones).
+   From 1200px: the first item of the panel, sticky at its top and level with the
+   preview's toolbar - so it never covers what the panel shows first. */
+.review-decide { position: fixed; z-index: 29; left: var(--gutter); right: var(--gutter); bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + var(--s-2)); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--raised-1); box-shadow: var(--shadow-float); }
+@media (min-width: 720px) { .review-decide { left: calc(var(--rail) + var(--gutter)); bottom: calc(var(--s-4) + env(safe-area-inset-bottom)); padding: var(--s-3) var(--s-4); } }
+@media (min-width: 1200px) {
+  .review-decide { position: sticky; top: calc(var(--topbar) + var(--s-4)); left: auto; right: auto; bottom: auto; box-shadow: none; }
+  /* fills the strip between the top bar and the stuck bar, so the panel does not show through */
+  .review-decide::before { content: ""; position: absolute; left: -1px; right: -1px; bottom: 100%; height: calc(var(--s-4) + 1px); background: var(--ground); }
+}
+/* basis 0: the label wraps beside the buttons instead of pushing them onto a second row */
+.review-decide-what { flex: 1 1 0; min-width: 6rem; line-height: 1.35; overflow-wrap: anywhere; }
+@media (max-width: 559.98px) { .review-decide-what { display: none; } }
+.review-decide-actions { display: flex; flex: 0 0 auto; justify-content: flex-end; gap: var(--s-2); margin-left: auto; }
+/* static: a sheet is placed against the bar (a positioned box), not against its own button */
+.review-act { position: static; flex: 0 0 auto; }
 .review-act-btn { list-style: none; }
 .review-act-btn::-webkit-details-marker { display: none; }
 .review-sheet { position: absolute; z-index: 30; right: 0; bottom: calc(100% + var(--s-3)); width: min(26rem, calc(100vw - 2 * var(--gutter))); display: grid; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--raised-2); box-shadow: var(--shadow-float); animation: pop var(--t-2) var(--ease) both; }
+/* from 1200px the bar is at the top: its sheets open downwards */
+@media (min-width: 1200px) { .review-sheet { top: calc(100% + var(--s-2)); bottom: auto; } }
 /* phones: two equal buttons; a sheet opens over the whole bar */
 @media (max-width: 559.98px) {
-  .review-act { position: static; flex: 1 1 0; }
+  .review-decide-actions { flex: 1 1 100%; }
+  .review-act { flex: 1 1 0; }
   .review-act-btn { width: 100%; }
   .review-sheet { left: 0; right: 0; width: auto; }
 }

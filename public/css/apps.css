@@ -38,6 +38,8 @@
 .apps-nobr { white-space: nowrap; }
 .apps-note { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: .2rem; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .apps-check { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin-top: .4rem; }
+/* links that stand alone: at least 44px tall under touch */
+@media (pointer: coarse) { .apps-checklink, .apps-loclink { display: inline-flex; align-items: center; min-height: var(--tap); } }
 .apps-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-1); }
 @media (max-width: 559.98px) { .apps-actions { justify-content: flex-start; } }
 /* keeps the row's last three tools in line when a row has no delete button */
@@ -51,6 +53,7 @@
 /* upload */
 .apps-upload { display: grid; gap: var(--s-4); }
 .apps-notefield { max-width: 40rem; }
+@media (max-width: 559.98px) { .apps-dropbtn { flex: 1 1 100%; } }
 .apps-drop-title { color: var(--ink); font-size: 1.02rem; }
 .apps-drop-coarse { display: none; }
 @media (pointer: coarse) { .apps-drop-fine { display: none; } .apps-drop-coarse { display: inline; } }
@@ -63,15 +66,18 @@
 
 /* classes */
 .apps-cls { align-items: flex-start; }
-.apps-cls-actions { justify-content: flex-start; margin-top: var(--s-3); }
+.apps-cls-actions { position: relative; z-index: 1; justify-content: flex-start; margin-top: var(--s-3); }
 .apps-reason { display: grid; gap: .1rem; margin-top: .4rem; padding: .1rem 0 .1rem var(--s-3); border-left: 2px solid var(--danger-line); color: var(--ink); }
 .apps-submit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3); margin-top: var(--s-4); }
 .apps-submit > .field { flex: 1 1 16rem; min-width: 0; }
 .apps-after { margin-top: var(--s-4); }
+.apps-iconline { display: flex; align-items: center; gap: var(--s-2); }
 .apps-sub { display: grid; gap: var(--s-2); margin-top: var(--s-5); padding-top: var(--s-5); border-top: 1px solid var(--line-1); }
 
 /* usage */
 .apps-usage { margin-top: var(--s-4); }
+/* the bars keep a readable height in a narrow column (the SVG stretches, preserveAspectRatio="none") */
+.apps-usage svg { height: 5rem; }
 .apps-axis { display: flex; justify-content: space-between; margin-top: var(--s-1); color: var(--ink-3); font-size: var(--fs-meta); }
 .apps-statword { display: block; padding-top: .35rem; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; line-height: 1.25; }
 
