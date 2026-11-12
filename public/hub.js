@@ -97,6 +97,22 @@
     if (event.target.matches && event.target.matches('input.copy')) event.target.select();
   });
 
+  // ------------------------------------------------- page transitions
+  // Pages that embed an app frame (player, review workbench, editor) get no
+  // cross-page transition: its overlay swallowed early taps into the app. The
+  // outgoing page skips it, so the incoming page never sees a half transition.
+  var FRAME_PAGE = /\/(apps\/[^/]+\/spielen|pruefen\/[^/]+\/[^/]+|studio\/[^/]+)(\?|$)/;
+  window.addEventListener('pageswap', function (event) {
+    var vt = event.viewTransition;
+    if (!vt) return;
+    vt.finished.catch(function () {});
+    var to = event.activation && event.activation.entry && event.activation.entry.url;
+    if (to && FRAME_PAGE.test(new URL(to).pathname + new URL(to).search.slice(0, 1))) vt.skipTransition();
+  });
+  window.addEventListener('pagereveal', function (event) {
+    if (event.viewTransition) { event.viewTransition.finished.catch(function () {}); event.viewTransition.ready.catch(function () {}); }
+  });
+
   // ----------------------------------------------------------- tabs
   // On narrow screens the tab row scrolls sideways: bring the current tab into view.
   document.querySelectorAll('.tabs [aria-current="page"]').forEach(function (tab) {

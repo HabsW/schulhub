@@ -125,7 +125,7 @@ module.exports = (app, ctx) => {
       lead: staff ? 'Deine Klassen. Schüler/innen treten selbst per QR-Code oder Link bei.' : 'Die Klassen, in denen du bist.',
       actions: staff ? linkButton('/klassen/neu', 'Neue Klasse', { kind: 'primary', icon: 'plus' }) : '',
     })}
-    ${waitingTotal ? notice({ tone: 'wait', title: `${plural(waitingTotal, 'App wartet', 'Apps warten')} auf deine Prüfung`, text: 'Apps von Schüler/innen brauchen deine Freigabe, bevor die Klasse sie benutzen kann.', actions: linkButton('/pruefen', 'Jetzt prüfen', { kind: 'primary', size: 'sm', icon: 'arrowRight' }), cls: 'mb-6' }) : ''}
+    ${waitingTotal ? notice({ tone: 'wait', title: `${plural(waitingTotal, 'App wartet', 'Apps warten')} auf deine Prüfung`, text: 'Apps von Schüler/innen brauchen deine Freigabe, bevor die Klasse sie benutzen kann.', actions: linkButton('/pruefen', 'Jetzt prüfen', { kind: 'secondary', size: 'sm', icon: 'arrowRight' }), cls: 'mb-6' }) : ''}
     ${classes.length
       ? list(classes.map(classRow))
       : staff
