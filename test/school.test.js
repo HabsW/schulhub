@@ -200,6 +200,14 @@ test('Suche: nur Apps, Klassen und Personen, die man sehen darf; Schüler/innen 
   assert.ok(!(await search(Y, 'Mia')).includes('Mia Schmidt'), 'a teacher without classes finds nobody');
 
   for (const q of ['%%', '__', 'M']) assert.ok(!(await search(L, q)).includes('Mia Schmidt'), `no wildcard or one-letter search: ${q}`);
+
+  // A name-like query does not find an app only because a word of its text contains it ("Ben" in "üben").
+  h.db.run("UPDATE apps SET description = 'Vokabeln üben, bis sie sitzen' WHERE id = ?", quiz.id);
+  assert.ok(!(await search(L, 'Ben')).includes(`/apps/${quiz.id}/spielen`), '"Ben" must not match inside "üben"');
+  assert.ok((await search(L, 'üben')).includes(`/apps/${quiz.id}/spielen`), 'a word of the description still matches');
+  assert.ok((await search(L, 'Qui')).includes(`/apps/${quiz.id}/spielen`), 'the start of the name matches');
+  assert.ok((await search(L, 'Vokabeln')).includes(`/apps/${quiz.id}/spielen`));
+  h.db.run("UPDATE apps SET description = '' WHERE id = ?", quiz.id);
   text = await search(M, '<script>alert(1)</script>');
   assert.ok(!text.includes('<script>alert(1)') && text.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), 'the query is shown escaped');
   assert.equal((await M.get('/suche?q=a&q=b')).status, 200, 'repeated parameters are harmless');
@@ -247,6 +255,27 @@ test('Entdecken: nur sichtbare Apps; „Zur Klasse hinzufügen“ nur, wo die Le
   assert.equal((await L.post(`/klassen/${cls7b}/apps`, { app: kayaShared.id })).status, 303);
   assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cls7b, kayaShared.id).status, 'approved');
   assert.deepEqual(addForms((await L.get('/katalog')).text), [], 'once in the class, it is not offered again');
+});
+
+test('Entdecken und Suche: den Namen eines Schülers sieht nur, wer mit seiner App in einer Klasse ist', async () => {
+  const app = await h.makeApp(B, 'Bens Rechenspiel', { 'index.html': '<h1>Rechnen</h1>' });
+  // Approved in 7b (Mia and Herr Lehmann share that class with it) and released for the whole school
+  // (Lena, Herr Kaya and Frau Yilmaz see it only that way).
+  h.db.run(
+    "INSERT INTO class_apps (class_id, app_id, status, version_id, added_by, decided_by, decided_at, created_at) VALUES (?, ?, 'approved', ?, ?, ?, ?, ?)",
+    cls7b, app.id, app.published_version_id, lehmann.id, lehmann.id, Date.now(), Date.now()
+  );
+  h.db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', app.id);
+  const rowOf = (text) => [...text.matchAll(/<li class="row school-app-row[\s\S]*?<\/li>/g)].map((m) => m[0]).find((r) => r.includes(`/apps/${app.id}/spielen`)) || '';
+  for (const [who, url] of [[M, '/katalog'], [M, '/suche?q=Rechenspiel'], [L, '/katalog'], [L, '/suche?q=Rechenspiel']]) {
+    assert.ok(rowOf((await who.get(url)).text).includes('von Ben Hoffmann'), `${url}: the class sees who built it`);
+  }
+  for (const [who, url] of [[LE, '/katalog'], [LE, '/suche?q=Rechenspiel'], [K, '/katalog'], [K, '/suche?q=Rechenspiel'], [Y, '/katalog']]) {
+    const text = (await who.get(url)).text;
+    assert.ok(rowOf(text), `${url}: the school-wide app is listed`);
+    assert.ok(rowOf(text).includes('von Schüler/innen gebaut'), url);
+    assert.ok(!text.includes('Ben Hoffmann'), `${url}: no student name outside the class`);
+  }
 });
 
 // -------------------------------------------------------------- announcements
@@ -419,7 +448,8 @@ test('Meine Daten: der Export enthält alles Neue und keine fremden E-Mail-Adres
 test('Konto löschen: nur mit genau dem Wort LÖSCHEN, danach zurück zur Startseite', async () => {
   const user = h.addUser('Wort Test', 'student');
   const b = await h.browser().login(user);
-  await b.page('/meine-daten');
+  const form = /<input id="f-bestaetigung"[^>]*>/.exec((await b.page('/meine-daten')).text)[0];
+  assert.ok(form.includes(' required') && form.includes('pattern="\\s*LÖSCHEN\\s*"'), 'the browser checks the word before the confirmation dialog opens');
   for (const word of ['löschen', 'Löschen', 'LOESCHEN', 'LÖSCHEN!', 'LÖSCHEN JETZT', '']) {
     assert.equal((await b.post('/meine-daten/konto-loeschen', { bestaetigung: word })).status, 400, word);
   }
@@ -475,6 +505,7 @@ test('Verwaltung: Konten mit Filtern und Seiten, Rollen mit klaren Folgen, Klass
   assert.ok(text.includes('zum Admin machen?') && text.includes('alles ändern und löschen'), 'promotion to admin says what it means');
   assert.ok(text.includes('wird sofort abgemeldet'), 'blocking says what happens');
   assert.match(text, /data-danger="1"[^>]*>[\s\S]*?Konto endgültig löschen/, 'deleting is a danger action');
+  assert.ok(text.includes('Sofort gelöscht werden das Konto, alle Daten in Apps und 1 eigene App mit allen Versionen.'), 'the confirmation lists what goes, in a sentence');
   text = (await A.get(`/admin/konten/${admin.id}`)).text;
   assert.ok(text.includes('einzige aktive Admin-Konto') && !text.includes(`/admin/nutzer/${admin.id}/rolle`), 'the last admin cannot be demoted here');
   await A.page(`/admin/konten/${ben.id}`);
@@ -655,6 +686,51 @@ test('Wiederherstellung: feindliche Archive werden abgelehnt, ohne dass etwas ge
       assert.deepEqual(fs.readdirSync(target), [], `${name}: nothing written`);
     }
     assert.ok(!fs.existsSync(path.join(work, 'evil.txt')) && !fs.existsSync('/tmp/evil.txt'), 'nothing outside the data folder');
+
+    // Hidden schema objects: SQLite runs what the SQL of a schema row says, whatever its type column
+    // claims (security review L1). Rows are written with writable_schema, like an attacker would.
+    const crafted = (name, statements = [], rows = []) => {
+      const file = path.join(work, `${name}.sqlite`);
+      fs.writeFileSync(file, goodDb);
+      const x = new DatabaseSync(file, { defensive: false });
+      for (const s of statements) x.exec(s);
+      if (rows.length) {
+        x.exec('PRAGMA writable_schema = ON');
+        for (const [type, n, tbl, sql] of rows) x.prepare('INSERT INTO sqlite_master (type, name, tbl_name, rootpage, sql) VALUES (?, ?, ?, 0, ?)').run(type, n, tbl, sql);
+        x.exec('PRAGMA writable_schema = OFF');
+      }
+      x.close();
+      return fs.readFileSync(file);
+    };
+    const promote = "CREATE TRIGGER evil AFTER INSERT ON audit_log BEGIN UPDATE users SET role = 'admin'; END";
+    const schemaAttacks = {
+      // the reviewer's case: type 'TRIGGER' in capitals slipped past a case-sensitive check
+      upperCaseType: [crafted('upper', [], [['TRIGGER', 'evil', 'audit_log', promote]]), /Trigger/],
+      // SQLite only needs "cr…" at the start: comments after CREATE and any letter case still make a live trigger
+      mixedCaseWithComment: [crafted('mixed', [], [['Trigger', 'evil2', 'audit_log', "cReAtE /* harmlos */\n  tRiGgEr evil2 aFtEr InSeRt On audit_log BeGiN UpDaTe users SET role = 'admin'; EnD"]]), /Trigger/],
+      // a comment before CREATE: SQLite itself refuses the schema
+      leadingComment: [crafted('lead', [], [['trigger', 'evil4', 'audit_log', `/* x */ ${promote.replace('evil', 'evil4')}`]]), /./],
+      // any other type with trigger SQL: SQLite itself refuses the schema (only case variants of 'trigger' load)
+      triggerDisguisedAsTable: [crafted('lie', [], [['table', 'evil3', 'audit_log', promote.replace('evil', 'evil3')]]), /./],
+      upperCaseView: [crafted('view', [], [['VIEW', 'v', 'v', 'CREATE VIEW v AS SELECT * FROM users']]), /Sicht/],
+      extraTable: [crafted('extra', ['CREATE TABLE extra (x TEXT)']), /gehört nicht dazu/],
+      changedTable: [crafted('changed', ['ALTER TABLE users ADD COLUMN evil TEXT']), /verändert/],
+      missingIndex: [crafted('missing', ['DROP INDEX audit_at']), /fehlt/],
+    };
+    for (const [name, [data, reason]] of Object.entries(schemaAttacks)) {
+      const zipFile = path.join(work, `${name}.zip`);
+      fs.writeFileSync(zipFile, makeZip([{ name: 'hub.sqlite', data }]));
+      const target = fs.mkdtempSync(path.join(work, 'ziel-'));
+      await assert.rejects(restoreBackup({ zipFile, dataDir: target }), (err) => err instanceof RestoreError && reason.test(err.message), name);
+      assert.deepEqual(fs.readdirSync(target), [], `${name}: nothing written`);
+    }
+    // The upper-case trigger really is live in SQLite: what the check above refuses would have run.
+    const live = path.join(work, 'live.sqlite');
+    fs.writeFileSync(live, schemaAttacks.upperCaseType[0]);
+    const probe = new DatabaseSync(live);
+    probe.exec("UPDATE users SET role = 'student'; INSERT INTO audit_log (at, actor_label, action) VALUES (1, 'x', 'anmeldung')");
+    assert.equal(probe.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get().n > 0, true, 'the disguised trigger fires in SQLite');
+    probe.close();
     const notZip = path.join(work, 'kein.zip');
     fs.writeFileSync(notZip, 'das ist kein zip');
     await assert.rejects(restoreBackup({ zipFile: notZip, dataDir: fs.mkdtempSync(path.join(work, 'ziel-')) }), /kein gültiges ZIP/);

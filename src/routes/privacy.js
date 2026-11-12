@@ -256,7 +256,11 @@ module.exports = (app, ctx) => {
         ${isLastAdmin(u)
           ? notice({ tone: 'wait', text: 'Du bist der einzige Admin. Ernenne zuerst in der Verwaltung jemand anderen zum Admin.' })
           : html`<form method="post" action="/meine-daten/konto-loeschen" class="stack mt-4" data-confirm="Dein Konto wirklich löschen?\nAlles oben Genannte wird sofort und endgültig gelöscht." data-confirm-label="Konto löschen" data-danger="1">${csrfField(req)}
-            ${field(req, { label: 'Tippe zur Bestätigung LÖSCHEN', name: 'bestaetigung', hint: 'In Großbuchstaben, genau dieses Wort.', required: true, attrs: 'autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20"' })}
+            ${field(req, {
+              label: 'Tippe zur Bestätigung LÖSCHEN', name: 'bestaetigung', hint: 'In Großbuchstaben, genau dieses Wort.', required: true,
+              // The browser checks the word before the confirmation opens; the server checks it again.
+              attrs: 'autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="20" pattern="\\s*LÖSCHEN\\s*" title="Bitte tippe genau LÖSCHEN in Großbuchstaben."',
+            })}
             <button class="btn danger">Konto endgültig löschen</button></form>`}
       </section>
     </div></div>`;

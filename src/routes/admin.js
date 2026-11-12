@@ -9,7 +9,7 @@ const {
 } = require('../html');
 const { deny, bad, isLocalPath, formatDate, formatDay, formatAgo, formatBytes, plural, dayKey } = require('../util');
 const { auditLabel, actorLabel } = require('../auditLabels');
-const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart } = require('../formKit');
+const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, joinDe } = require('../formKit');
 const backup = require('../backup');
 
 const DAY = 86_400_000;
@@ -324,7 +324,11 @@ module.exports = (app, ctx) => {
           <p class="school-note">Das Protokoll nennt danach nur noch „Gelöschtes Konto“. Meldet sich die Person wieder an, entsteht ein neues, leeres Konto – zum Aussperren „Sperren“ benutzen.</p>
           ${postButton(req, `/admin/nutzer/${u.id}/loeschen`, 'Konto endgültig löschen', {
             kind: 'danger', icon: 'trash', fields: { zurueck: '/admin/konten' },
-            confirm: `${u.name} endgültig löschen?\nKonto, App-Daten${n.apps ? `, ${plural(n.apps, 'eigene App', 'eigene Apps')}` : ''}${sole.length ? ` und ${plural(sole.length, 'Klasse', 'Klassen')}` : ''} werden sofort gelöscht. Das kann nicht rückgängig gemacht werden.`,
+            confirm: `${u.name} endgültig löschen?\nSofort gelöscht werden ${joinDe([
+              'das Konto', 'alle Daten in Apps',
+              n.apps && `${plural(n.apps, 'eigene App', 'eigene Apps')} mit allen Versionen`,
+              sole.length && `${plural(sole.length, 'Klasse', 'Klassen')} ohne weitere Lehrkraft`,
+            ])}. Das kann nicht rückgängig gemacht werden.`,
             confirmLabel: 'Endgültig löschen',
           })}`}
       </section>

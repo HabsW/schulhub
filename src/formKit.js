@@ -18,6 +18,12 @@ function queryChoice(req, name, allowed, fallback = '') {
   return typeof v === 'string' && allowed.includes(v) ? v : fallback;
 }
 
+/** German list: "a", "a und b", "a, b und c". */
+function joinDe(items) {
+  const xs = items.filter(Boolean);
+  return xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} und ${xs[xs.length - 1]}`;
+}
+
 /** Text for a LIKE pattern with \ as the escape character. */
 const likePattern = (q) => `%${String(q).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 
@@ -143,6 +149,6 @@ function displaySummary(user) {
 }
 
 module.exports = {
-  queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart,
+  queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, joinDe,
   DISPLAY_PREFS, displaySummary,
 };

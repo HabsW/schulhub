@@ -145,12 +145,25 @@ module.exports = (app, ctx) => {
       .filter((r) => access.canManageClass(user, r.class_id) && access.isStudentOf(r.class_id, r.id));
   }
 
+  /**
+   * The search shows an app only if the query starts a word of its name or
+   * description, so a short, name-like query ("Ben") does not find an app
+   * because its text says "üben". Longer queries also match inside words
+   * (German compounds: "trainer" finds "Vokabeltrainer").
+   */
+  function appMatches(a, q) {
+    const at = new RegExp(`(?:^|[^\\p{L}\\p{N}])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'iu');
+    const has = (text) => String(text || '').toLocaleLowerCase('de').includes(q.toLocaleLowerCase('de'));
+    return at.test(a.name) || at.test(a.description || '') || (q.length >= 5 && has(a.name)) || (q.length >= 6 && has(a.description));
+  }
+
   app.get('/suche', (req, res) => {
     const u = req.user;
     const staff = access.isStaff(u);
     const q = queryText(req, 'q', 60);
     const searching = q.length >= 2;
-    const apps = searching ? access.visibleApps(u, { q, limit: 200 }) : [];
+    // visibleApps decides what may be shown; appMatches only narrows its text match.
+    const apps = searching ? access.visibleApps(u, { q, limit: 200 }).filter((a) => appMatches(a, q)) : [];
     const classes = searching ? [...access.visibleClasses(u, { q }), ...access.visibleClasses(u, { q, archived: true })] : [];
     const people = searching && staff ? findStudents(u, q) : [];
     const info = catalogInfo(u, apps.slice(0, 12));
