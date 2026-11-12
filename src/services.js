@@ -213,6 +213,8 @@ function createServices(ctx) {
    * version that was approved, and the new one waits for the teacher.
    */
   function publish(actor, app, version) {
+    // Publishing back and forth would flood the classes' review history: a bounded number per hour.
+    ctx.limiter.guard('publish', actor.id);
     db.tx(() => {
       db.run('UPDATE apps SET published_version_id = ?, updated_at = ? WHERE id = ?', version.id, Date.now(), app.id);
       // Classes follow at once only where the publisher decides; elsewhere the new version waits.
@@ -285,6 +287,12 @@ function createServices(ctx) {
       );
       // Notices to other people that name this person go with them.
       db.run('DELETE FROM notices WHERE subject_id = ?', user.id);
+      // Their apps go too: notices pointing at them, and app names in the audit log (app names are
+      // often personal, e.g. "Marlenes Spiel").
+      for (const a of db.all('SELECT id, name FROM apps WHERE owner_id = ?', user.id)) {
+        db.run("DELETE FROM notices WHERE href LIKE ? OR href LIKE ?", `/apps/${a.id}%`, `/pruefen/%/${a.id}%`);
+        db.run("UPDATE audit_log SET target = 'Gelöschte App', detail = '' WHERE target = ? AND (actor_id IS NULL OR actor_id = ? OR action LIKE 'app_%' OR action LIKE 'version_%' OR action IN ('veroeffentlicht','einreichung_zurueckgezogen','schulweit_freigegeben','schulweit_beendet','schulweit_aktualisiert','schulweit_update_abgelehnt','kommentar_geloescht'))", a.name, user.id);
+      }
       // cascades: memberships, apps (+ versions, drafts), saves, scores, results, progress, achievements,
       // files, favourites, feedback to them, notices, comments
       db.run('DELETE FROM users WHERE id = ?', user.id);

@@ -54,18 +54,22 @@ module.exports = (app, ctx) => {
   });
 
   // ---------------------------------------------------------- Microsoft sign-in
+  // Sign-in limits: a whole school shares one address, so the per-address limit is a high backstop;
+  // starting a sign-in is limited per browser session, and only FAILED callbacks count per address.
   app.get('/auth/login', async (req, res, next) => {
+    ctx.limiter.guard('loginSession', req.sessionID);
     ctx.limiter.guard('login', req.ip);
     const url = await auth.loginUrl(req.session);
     req.session.save((err) => (err ? next(err) : res.redirect(url)));
   });
 
   app.get('/auth/callback', async (req, res, next) => {
-    ctx.limiter.guard('login', req.ip);
+    if (ctx.limiter.blocked('loginFail', req.ip)) return next(new HttpError(429, 'Zu viele fehlgeschlagene Anmeldungen. Bitte warte ein paar Minuten.'));
     let user;
     try {
       user = auth.upsertUser(await auth.handleCallback(req.session, req.query));
     } catch (err) {
+      ctx.limiter.hit('loginFail', req.ip);
       if (err instanceof HttpError) services.audit(null, 'anmeldung_abgelehnt');
       return next(err);
     }

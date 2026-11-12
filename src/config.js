@@ -103,7 +103,8 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
     },
     // [max events, per milliseconds]
     rate: {
-      login: [600, 10 * 60_000], // per IP - high: a whole school signs in through one address (no passwords here to guess)
+      login: [3000, 10 * 60_000], // per IP, only a backstop: a whole school signs in through one address (no passwords to guess)
+      loginFail: [300, 10 * 60_000], // failed sign-in callbacks per IP
       joinFail: [8, 10 * 60_000], // wrong join codes per user
       joinFailIp: [300, 10 * 60_000], // ... and per IP (high: a whole school shares one address)
       write: [240, 60_000], // state-changing Hub requests per user
@@ -112,7 +113,9 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       sdk: [600, 60_000], // SDK calls per user and app
       sdkFiles: [120, 60_000], // hub.files uploads per user and app
       appFiles: [3000, 60_000], // static app files per person (from the file token)
-      appFilesIp: [60000, 60_000], // ... and a backstop per address
+      appFilesBad: [600, 60_000], // requests with an invalid file token, per address (never blocks valid ones)
+      loginSession: [20, 10 * 60_000], // starting a Microsoft sign-in, per browser session
+      publish: [60, 60 * 60_000], // publishing versions, per person
       submit: [30, 60 * 60_000], // submissions to classes per person
       draftWrites: [600, 60_000], // editor saves per user
     },

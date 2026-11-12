@@ -174,7 +174,7 @@ function createClassApps(ctx) {
    * keeps its approved version and the new one waits. Removed apps stay removed.
    */
   function onPublish(actor, app, version) {
-    for (const row of db.all("SELECT ca.class_id, ca.status, ca.version_id, c.name FROM class_apps ca JOIN classes c ON c.id = ca.class_id WHERE ca.app_id = ? AND ca.status <> 'removed' AND c.archived_at IS NULL", app.id)) {
+    for (const row of db.all("SELECT ca.class_id, ca.status, ca.version_id, ca.requested_version_id, ca.request_state, c.name FROM class_apps ca JOIN classes c ON c.id = ca.class_id WHERE ca.app_id = ? AND ca.status <> 'removed' AND c.archived_at IS NULL", app.id)) {
       const trusted = actor.role === 'admin' || access.classRole(actor, row.class_id) === 'teacher';
       if (trusted) {
         db.run(
@@ -182,7 +182,7 @@ function createClassApps(ctx) {
                   decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?`,
           version.id, actor.id, Date.now(), row.class_id, app.id
         );
-      } else if (row.version_id !== version.id) {
+      } else if (row.version_id !== version.id && !(row.request_state === 'waiting' && row.requested_version_id === version.id)) {
         db.run(
           `UPDATE class_apps SET requested_version_id = ?, request_state = 'waiting',
                   status = CASE WHEN status = 'approved' THEN 'approved' ELSE 'pending' END WHERE class_id = ? AND app_id = ?`,

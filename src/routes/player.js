@@ -40,7 +40,7 @@ module.exports = (app, ctx) => {
     const a = getApp(req.params.id);
     const play = decide(req.user, a, { klasse: str(req.query.klasse), version: str(req.query.version), entwurf: req.query.entwurf === '1' });
     if (!play) throw deny();
-    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
+    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ? AND archived_at IS NULL', play.classId) : null;
     // The file token unlocks exactly this version's static files - or the owner's draft.
     const fileToken = play.draft
       ? tokens.sign('files', { a: a.id, d: 1, u: req.user.id }, 60 * 60)
@@ -87,7 +87,7 @@ module.exports = (app, ctx) => {
     const play = decide(req.user, a, { klasse: str(req.body.klasse), version: str(req.body.version), entwurf: req.body.entwurf === true });
     if (!play) throw deny();
     const user = req.user;
-    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
+    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ? AND archived_at IS NULL', play.classId) : null;
     // A preview is not a real use of the app: it is never counted, and its
     // token makes the SDK keep everything in memory (see sdkStore.js).
     if (req.body.first === true && !play.preview) services.recordPlay(a.id, user.id);
@@ -117,7 +117,7 @@ module.exports = (app, ctx) => {
     const had = db.run('DELETE FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id).changes > 0;
     if (!had) db.run('INSERT INTO favorites (user_id, app_id, created_at) VALUES (?, ?, ?)', req.user.id, a.id, Date.now());
     if (String(req.headers.accept || '').includes('application/json')) return res.json({ favourite: !had });
-    const back = String(req.body.zurueck || '');
+    const back = String((req.body && req.body.zurueck) || '');
     res.redirect(303, /^\/(apps|klassen|start|katalog)\b[^\s]*$/.test(back) && !back.startsWith('//') ? back : `/apps/${a.id}/spielen`);
   });
 };

@@ -33,19 +33,31 @@ test('Konto löschen: kein Name bleibt zurück – weder im Protokoll noch in Mi
     await L.post('/klassen', { name: '7b' });
     const cls = teacherClass(h, lehmann.id);
     await Z.post(`/beitreten/${joinCode(h, cls)}`);
+    // An older entry without a subject (written before subjects existed).
+    h.hub.ctx.services.audit(admin, 'konto_gesperrt', 'Marlene Zuckerbrot');
+    // Through the real routes: she comments on the teacher's app (a notice naming her goes to him),
+    // and she builds and submits an app with a personal name.
+    const teacherApp = await h.makeApp(L, 'Lehrer-Spiel', { 'index.html': 'x' });
+    await L.post(`/klassen/${cls}/apps`, { app: teacherApp.id });
+    await Z.page(`/apps/${teacherApp.id}/spielen?klasse=${cls}`);
+    const own = await h.makeApp(Z, 'Marlenes Spiel', { 'index.html': 'x' });
+    await Z.page(`/apps/${own.id}`);
+    assert.equal((await Z.post(`/apps/${own.id}/einreichen`, { klasse: cls })).status, 303);
+    // The real comment route: her comment on her submitted app notifies her teacher by name.
+    assert.equal((await Z.post(`/apps/${own.id}/kommentare`, { text: 'Bitte anschauen!' })).status, 303);
+    assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND kind = 'kommentar' AND text LIKE 'Marlene%'", lehmann.id), 'precondition: a notice names her');
+    assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND text LIKE '%Marlenes Spiel%'", lehmann.id), 'precondition: the teacher was told about her app');
     // Account actions about her, by the admin (role there and back, block, unblock).
     await A.page(`/admin/konten/${ziel.id}`);
     for (const [path, fields] of [['rolle', { rolle: 'teacher' }], ['rolle', { rolle: 'student' }], ['sperren', { an: '1' }], ['sperren', {}]]) {
       assert.equal((await A.post(`/admin/nutzer/${ziel.id}/${path}`, fields)).status, 303, path);
     }
-    // An older entry without a subject (written before subjects existed) and a notice naming her.
-    h.hub.ctx.services.audit(admin, 'konto_gesperrt', 'Marlene Zuckerbrot');
-    h.hub.ctx.services.notify([lehmann.id], 'kommentar', 'Marlene Zuckerbrot hat „Spiel“ kommentiert.', '/start', { subjectId: ziel.id });
     assert.ok(allText(h.db).some((t) => t.v.includes('Marlene Zuckerbrot')), 'precondition: the name is stored');
 
     await A.page('/admin'); // the admin sees the last message (a pending flash lives in the admin's own session)
     h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', ziel.id));
     const left = allText(h.db).filter((t) => t.v.includes('Marlene') || t.v.includes(ziel.email) || t.v.includes(ziel.id));
+    // (her app's personal name is covered by the 'Marlene' check above)
     assert.deepEqual(left, [], 'no name, e-mail or id of the deleted person anywhere');
     assert.ok(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE target = 'Gelöschtes Konto'").n >= 4, 'what happened is kept, who it was is not');
   } finally {
@@ -207,5 +219,100 @@ test('Wiederherstellung: das Referenz-Schema jeder Version entsteht genau wie be
     assert.throws(() => schemaForVersion(SCHEMA_VERSION + 1, path.join(dir, 'x.sqlite')), /unknown schema version/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Mitteilung öffnen: nur die eigene, nur per POST mit CSRF; Favorit ohne Inhalt stürzt nicht ab', async () => {
+  const h = await startHub();
+  try {
+    const mia = h.addUser('Mia', 'student');
+    const ben = h.addUser('Ben', 'student');
+    const t = h.addUser('Frau Yilmaz', 'teacher');
+    const [M, B, T] = await Promise.all([mia, ben, t].map((u) => h.browser().login(u)));
+    h.hub.ctx.services.notify([ben.id], 'aufgabe', 'Für Ben', '/start');
+    const id = h.db.get('SELECT id FROM notices WHERE user_id = ?', ben.id).id;
+    await M.page('/start');
+    assert.equal((await M.post(`/mitteilungen/${id}/oeffnen`)).status, 404, "Mia cannot open Ben's notice");
+    assert.equal(h.db.get('SELECT read_at FROM notices WHERE id = ?', id).read_at, null, 'and it stays unread');
+    assert.equal((await B.post(`/mitteilungen/${id}/oeffnen`, {}, { withCsrf: false })).status, 403);
+    await B.page('/start');
+    const opened = await B.post(`/mitteilungen/${id}/oeffnen`);
+    assert.equal(opened.status, 303);
+    assert.equal(opened.headers.location, '/start');
+    assert.ok(h.db.get('SELECT read_at FROM notices WHERE id = ?', id).read_at);
+    // favourite: a hand-made POST with the CSRF header but no body
+    const app = await h.makeApp(T, 'Für alle', { 'index.html': 'x' });
+    h.db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', app.id);
+    await M.page('/start');
+    const res = await M.raw('POST', `/apps/${app.id}/favorit`, { headers: { 'x-csrf-token': /<meta name="csrf" content="([^"]*)"/.exec((await M.page('/start')).text)[1] } });
+    assert.notEqual(res.status, 500);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Gefälschte Datei-Links blockieren nur sich selbst – echte App-Dateien laden weiter', async () => {
+  const h = await startHub({ rate: { appFilesBad: [5, 60_000] } });
+  try {
+    const owner = h.addUser('Frau Yilmaz', 'teacher');
+    const ben = h.addUser('Ben', 'student');
+    const [O, B] = await Promise.all([owner, ben].map((u) => h.browser().login(u)));
+    const app = await h.makeApp(O, 'Für alle', { 'index.html': 'x' });
+    h.db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', app.id);
+    for (let i = 0; i < 6; i++) await B.raw('GET', `/~falsch${i}/index.html`, { host: h.appHost(app) });
+    assert.equal((await B.raw('GET', '/~falsch/index.html', { host: h.appHost(app) })).status, 429, 'fake links are slowed down');
+    const url = /src="[^"]*(\/~[^/"]+\/index\.html)"/.exec((await B.page(`/apps/${app.id}/spielen`)).text)[1];
+    assert.equal((await B.raw('GET', url, { host: h.appHost(app) })).status, 200, 'a real link from the same address still loads');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Veröffentlichen hin und her flutet die Prüf-Geschichte nicht', async () => {
+  const h = await startHub({ rate: { publish: [4, 60 * 60_000] } });
+  try {
+    const lehmann = h.addUser('Herr Lehmann', 'teacher');
+    const mia = h.addUser('Mia', 'student');
+    const [L, M] = await Promise.all([lehmann, mia].map((u) => h.browser().login(u)));
+    await L.post('/klassen', { name: '7b' });
+    const cls = teacherClass(h, lehmann.id);
+    await M.post(`/beitreten/${joinCode(h, cls)}`);
+    const app = await h.makeApp(M, 'Mias App', { 'index.html': 'v1' }); // publish #1
+    await M.page(`/apps/${app.id}`);
+    await M.post(`/apps/${app.id}/einreichen`, { klasse: cls });
+    const v2 = await h.uploadFolder(M, app.id, { 'index.html': 'v2' });
+    const before = () => h.db.get("SELECT COUNT(*) AS n FROM comments WHERE app_id = ? AND kind = 'submitted'", app.id).n;
+    assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, { version: v2 })).status, 303); // #2: v2 now waits
+    const n = before();
+    assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, { version: v2 })).status, 303); // #3: same version again
+    assert.equal(before(), n, 'the same waiting version adds no history row');
+    await M.post(`/apps/${app.id}/veroeffentlichen`, { version: app.published_version_id }); // #4
+    assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, { version: v2 })).status, 429, 'bounded per hour'); // #5
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Konto löschen: Mitteilungen anderer, die die Person nennen, verschwinden (auch über fremde Apps)', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Adler', 'admin');
+    const lehrer = h.addUser('Herr Quastenflosser', 'teacher');
+    const mia = h.addUser('Mia', 'student');
+    const [L, M] = await Promise.all([lehrer, mia].map((u) => h.browser().login(u)));
+    await L.post('/klassen', { name: '7b' });
+    const cls = teacherClass(h, lehrer.id);
+    await M.post(`/beitreten/${joinCode(h, cls)}`);
+    const app = await h.makeApp(M, 'Mias App', { 'index.html': 'x' });
+    await M.page(`/apps/${app.id}`);
+    await M.post(`/apps/${app.id}/einreichen`, { klasse: cls });
+    // The teacher comments on HER app: her notice names him and points to her (surviving) app.
+    await L.page(`/apps/${app.id}`);
+    assert.equal((await L.post(`/apps/${app.id}/kommentare`, { text: 'Schön!' })).status, 303);
+    assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND text LIKE '%Quastenflosser%'", mia.id), 'precondition');
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', lehrer.id));
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE text LIKE '%Quastenflosser%'").n, 0, 'the notice naming him is gone');
+  } finally {
+    await h.stop();
   }
 });
