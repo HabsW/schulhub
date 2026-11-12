@@ -48,7 +48,7 @@ module.exports = (app, ctx) => {
     return v;
   };
   const fileList = (a) => uploads.listDraftFiles(a.id).map((f) => ({ path: f.path, size: f.size, text: uploads.isTextFile(f.path) }));
-  const previewSrc = (a) => `${config.appOrigin(a.origin_key)}/~${tokens.sign('files', { a: a.id, d: 1 }, PREVIEW_TOKEN_SECONDS)}/index.html`;
+  const previewSrc = (a, userId) => `${config.appOrigin(a.origin_key)}/~${tokens.sign('files', { a: a.id, d: 1, u: userId }, PREVIEW_TOKEN_SECONDS)}/index.html`;
   const nextVersion = (a) => db.get('SELECT COALESCE(MAX(number), 0) + 1 AS n FROM app_versions WHERE app_id = ?', a.id).n;
   const templateRow = (tpl, end) =>
     row({
@@ -166,7 +166,7 @@ module.exports = (app, ctx) => {
             <button class="btn quiet icon sm studio-phone-only" type="button" data-studio-reload aria-label="Vorschau neu laden" title="Vorschau neu laden">${icon('refresh')}</button>
           </div>
           <div class="stage studio-stage" id="stage" data-origin="${origin}" data-token-url="/apps/${a.id}/token" data-class="" data-version="" data-draft="1">
-            <iframe id="appframe" title="Vorschau: ${a.name}" src="${previewSrc(a)}" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe>
+            <iframe id="appframe" title="Vorschau: ${a.name}" src="${previewSrc(a, req.user.id)}" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe>
             <div class="loading ${appClass(a)}" aria-hidden="true">${appIcon(a, 'lg')}</div>
             <section class="console" id="console" aria-label="Konsole" hidden>
               <div class="console-head"><strong>Konsole</strong><span>Meldungen deiner App (nur in der Vorschau)</span>
@@ -217,7 +217,7 @@ module.exports = (app, ctx) => {
       title: `Editor · ${a.name}`,
       body,
       shell: 'player',
-      styles: ['css/studio.css'],
+      styles: ['css/studio.css', 'css/frames.css'],
       // the small player first: the preview starts while the large editor bundle is still being parsed
       scripts: ['player.js', 'vendor/codemirror.js', 'studio.js'],
     });
@@ -320,7 +320,7 @@ module.exports = (app, ctx) => {
   app.get('/studio/:appId/vorschau', (req, res) => {
     const a = draftApp(req);
     res.set('Cache-Control', 'no-store');
-    res.json({ src: previewSrc(a) });
+    res.json({ src: previewSrc(a, req.user.id) });
   });
 
   /** Read one text file of the draft. Looked up by exact name in the database - never a disk path. */
