@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spielwiese</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page wiese">
+  <header class="hub-stack kopf">
+    <p class="hub-eyebrow">SDK-Spielwiese</p>
+    <h1>Spielwiese</h1>
+    <p class="hub-muted">Jeder Knopf ruft eine Funktion des SDK auf. Darunter steht, was zurückkommt – oder welcher Fehler. Schau in <code>app.js</code>, wie es gemacht ist.</p>
+    <p><span class="hub-badge" id="modus">Verbinde …</span></p>
+  </header>
+
+  <div class="karten">
+    <section class="hub-card hub-stack" aria-labelledby="t-wer">
+      <h2 id="t-wer">Wer, wo, wie</h2>
+      <p class="hub-muted">Diese Werte sind sofort da, ohne <code>await</code>.</p>
+      <div class="knoepfe"><button class="hub-btn" data-aufruf="wer"><code>hub.user, hub.class, hub.mode, hub.app</code></button></div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-save">
+      <h2 id="t-save">Spielstand <code>hub.save</code></h2>
+      <p class="hub-muted">Nur für dich, in dieser App.</p>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="save-set"><code>hub.save.set('zaehler', n + 1)</code></button>
+        <button class="hub-btn" data-aufruf="save-get"><code>hub.save.get('zaehler', 0)</code></button>
+        <button class="hub-btn" data-aufruf="save-keys"><code>hub.save.keys()</code></button>
+        <button class="hub-btn" data-aufruf="save-remove"><code>hub.save.remove('zaehler')</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-shared">
+      <h2 id="t-shared">Für alle <code>hub.shared</code></h2>
+      <p class="hub-muted">Alle lesen, nur die Besitzerin oder der Besitzer der App schreibt.</p>
+      <label class="hub-label">Nachricht<input class="hub-input" id="nachricht" value="Hallo von der Spielwiese!" maxlength="200"></label>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="shared-set"><code>hub.shared.set('nachricht', text)</code></button>
+        <button class="hub-btn" data-aufruf="shared-get"><code>hub.shared.get('nachricht')</code></button>
+        <button class="hub-btn" data-aufruf="shared-keys"><code>hub.shared.keys()</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-class">
+      <h2 id="t-class">Klasse <code>hub.classData</code></h2>
+      <p class="hub-muted">Nur wenn die App aus einer Klasse geöffnet wurde. Alle in der Klasse lesen, die Lehrkraft schreibt.</p>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="class-get"><code>hub.classData.get('wortliste', [])</code></button>
+        <button class="hub-btn" data-aufruf="class-set"><code>hub.classData.set('wortliste', ['Hund', 'Katze'])</code></button>
+        <button class="hub-btn" data-aufruf="class-keys"><code>hub.classData.keys()</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-board">
+      <h2 id="t-board">Bestenliste <code>hub.leaderboard</code></h2>
+      <p class="hub-muted">Es zählt der beste Wert pro Person.</p>
+      <label class="hub-label">Punkte<input class="hub-input" id="punkte" type="number" value="42" min="0" max="100000"></label>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="board-submit"><code>hub.leaderboard.submit('punkte', n)</code></button>
+        <button class="hub-btn" data-aufruf="board-top"><code>hub.leaderboard.top('punkte', { limit: 5 })</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-results">
+      <h2 id="t-results">Ergebnisse <code>hub.results</code></h2>
+      <p class="hub-muted">Die Lehrkraft der Klasse sieht sie in der Auswertung.</p>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="results-add"><code>hub.results.add({ title, score, maxScore, details })</code></button>
+        <button class="hub-btn" data-aufruf="results-mine"><code>hub.results.mine({ limit: 5 })</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-progress">
+      <h2 id="t-progress">Fortschritt <code>hub.progress</code></h2>
+      <p class="hub-muted">Eine Zahl von 0 bis 1. Sie erscheint auf deiner Startseite.</p>
+      <label class="hub-label">Wie weit? <span id="anteil-text">40 %</span><input id="anteil" type="range" min="0" max="100" step="5" value="40"></label>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="progress-set"><code>hub.progress.set(wert, { label })</code></button>
+        <button class="hub-btn" data-aufruf="progress-get"><code>hub.progress.get()</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-ach">
+      <h2 id="t-ach">Erfolge <code>hub.achievements</code></h2>
+      <p class="hub-muted">Nur Erfolge, die in <code>schulhub.json</code> stehen.</p>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="ach-list"><code>hub.achievements.list()</code></button>
+        <button class="hub-btn" data-aufruf="ach-unlock"><code>hub.achievements.unlock('ausprobiert')</code></button>
+        <button class="hub-btn" data-aufruf="ach-secret"><code>hub.achievements.unlock('geheim')</code></button>
+        <button class="hub-btn" data-aufruf="ach-unknown"><code>hub.achievements.unlock('gibt-es-nicht')</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-settings">
+      <h2 id="t-settings">Einstellungen <code>hub.settings</code></h2>
+      <p class="hub-muted">Die Lehrkraft stellt sie im Hub für ihre Klasse ein. Sonst gelten die Standardwerte aus <code>schulhub.json</code>.</p>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="settings-all"><code>hub.settings.all()</code></button>
+        <button class="hub-btn" data-aufruf="settings-get"><code>hub.settings.get('farbe', 'himmel')</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-files">
+      <h2 id="t-files">Dateien <code>hub.files</code></h2>
+      <p class="hub-muted">Kleine Dateien (Bilder, Text, JSON) für dich, höchstens 1 MB.</p>
+      <label class="hub-label">Notiz<textarea class="hub-textarea" id="notiz" rows="2" maxlength="2000">Meine erste Notiz.</textarea></label>
+      <div class="knoepfe">
+        <button class="hub-btn" data-aufruf="files-put"><code>hub.files.put('notiz.txt', text)</code></button>
+        <button class="hub-btn" data-aufruf="files-get"><code>hub.files.get('notiz.txt')</code></button>
+        <button class="hub-btn" data-aufruf="files-bild"><code>hub.files.put('bild.png', blob)</code></button>
+        <button class="hub-btn" data-aufruf="files-zeigen"><code>hub.files.get('bild.png')</code></button>
+        <button class="hub-btn" data-aufruf="files-list"><code>hub.files.list()</code></button>
+        <button class="hub-btn" data-aufruf="files-remove"><code>hub.files.remove('notiz.txt')</code></button>
+      </div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+      <img class="vorschaubild" id="bild" alt="Das gespeicherte Bild" hidden>
+    </section>
+
+    <section class="hub-card hub-stack" aria-labelledby="t-room">
+      <h2 id="t-room">Mehrspieler <code>hub.room</code></h2>
+      <p class="hub-muted">Vorbereitet, aber noch nicht eingeschaltet: Der Aufruf endet immer mit dem Fehler <code>not_available</code>.</p>
+      <div class="knoepfe"><button class="hub-btn" data-aufruf="room"><code>hub.room('runde-1', { maxPlayers: 4 })</code></button></div>
+      <pre class="ausgabe" aria-live="polite"></pre>
+    </section>
+  </div>
+</main>
+
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

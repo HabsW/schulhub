@@ -1,0 +1,12 @@
+{
+  "category": "Freizeit",
+  "achievements": [
+    { "id": "erste-runde", "title": "Erste Ernte", "description": "Eine Runde gespielt.", "emoji": "🌱" },
+    { "id": "zehn", "title": "Fleißig", "description": "10 Punkte in einer Runde.", "emoji": "⭐" },
+    { "id": "dreissig", "title": "Erntemeister", "description": "30 Punkte in einer Runde.", "emoji": "🏆" },
+    { "id": "gold", "title": "Goldrichtig", "description": "Einen goldenen Apfel gefangen.", "emoji": "🌟", "secret": true }
+  ],
+  "settings": [
+    { "key": "sekunden", "label": "Sekunden pro Runde", "type": "number", "min": 15, "max": 120, "step": 5, "default": 30 }
+  ]
+}

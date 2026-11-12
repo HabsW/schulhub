@@ -1,0 +1,41 @@
+/* Eigenes CSS für die Spielwiese. Die Bausteine kommen aus hub-ui.css. */
+
+/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
+[hidden] { display: none !important; }
+
+.wiese { max-width: 72rem; }
+.kopf { gap: .5rem; margin-bottom: 1.5rem; }
+.kopf h1, .kopf p { margin: 0; }
+
+.karten {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+  align-items: start;
+}
+.karten h2 { margin: 0; }
+.karten p { margin: 0; }
+
+code { font: 600 .85em var(--hub-mono); }
+
+.knoepfe { display: grid; gap: .5rem; }
+.knoepfe .hub-btn { justify-content: flex-start; min-height: 2.75rem; padding: .5rem .8rem; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+
+.ausgabe {
+  min-height: 3.2rem;
+  max-height: 18rem;
+  margin: 0;
+  padding: .7rem .8rem;
+  overflow: auto;
+  border: 1px solid var(--hub-line-1);
+  border-radius: var(--hub-r-btn);
+  background: var(--hub-raised-2);
+  font: .82rem/1.5 var(--hub-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ausgabe:empty::before { content: "Noch nichts aufgerufen."; color: var(--hub-ink-3); }
+.ausgabe.fehler { border-color: var(--hub-danger); }
+
+input[type="range"] { width: 100%; accent-color: var(--hub-accent); }
+.vorschaubild { width: 64px; height: 64px; border-radius: 8px; image-rendering: pixelated; }

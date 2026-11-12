@@ -1,0 +1,31 @@
+{
+  "category": "Fächerübergreifend",
+  "achievements": [
+    { "id": "erste-runde", "title": "Erste Runde", "description": "Eine Quiz-Runde beendet.", "emoji": "🎯" },
+    { "id": "alles-richtig", "title": "Alles richtig", "description": "Eine Runde ohne einen Fehler.", "emoji": "💯" },
+    { "id": "dranbleiben", "title": "Drangeblieben", "description": "Fünf Runden gespielt.", "emoji": "🔥" }
+  ],
+  "settings": [
+    {
+      "key": "fragen",
+      "label": "Fragen und Antworten",
+      "help": "Eine Frage pro Zeile: Frage = richtige Antwort. Die falschen Antworten nimmt das Quiz aus den anderen Zeilen.",
+      "type": "pairs",
+      "columns": ["Frage", "Richtige Antwort"],
+      "default": [
+        ["Wie viele Beine hat eine Spinne?", "Acht"],
+        ["Wie heißt die Hauptstadt von Frankreich?", "Paris"],
+        ["Welcher Planet ist der größte im Sonnensystem?", "Jupiter"],
+        ["Wie heißt das Ergebnis einer Multiplikation?", "Produkt"],
+        ["In welchem Jahr fiel die Berliner Mauer?", "1989"],
+        ["Welches chemische Zeichen hat Gold?", "Au"],
+        ["Wie heißt „Schmetterling“ auf Englisch?", "butterfly"],
+        ["Welcher Fluss fließt durch Köln?", "Rhein"]
+      ]
+    },
+    { "key": "pro-runde", "label": "Fragen pro Runde", "type": "number", "min": 3, "max": 20, "default": 5 }
+  ],
+  "results": {
+    "labels": { "frage": "Frage", "antwort": "Richtige Antwort", "gegeben": "Gegebene Antwort", "richtig": "Richtig" }
+  }
+}

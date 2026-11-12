@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lernkarten</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page hub-stack">
+  <header class="hub-stack kopf">
+    <p class="hub-eyebrow" id="klasse">Lernkarten</p>
+    <h1>Lernkarten</h1>
+    <p class="hub-muted" id="stand"></p>
+    <progress class="hub-progress" id="fortschritt" max="1" value="0"></progress>
+  </header>
+
+  <section class="hub-stack" id="lernen" hidden>
+    <p class="hub-muted" id="zaehler"></p>
+    <div class="hub-card karte" id="karte">
+      <p class="hub-eyebrow" id="seite">Vorderseite</p>
+      <p class="karten-text" id="text" aria-live="polite"></p>
+    </div>
+    <div class="hub-row" id="vorne">
+      <button class="hub-btn hub-primary hub-big" id="umdrehen">Umdrehen</button>
+    </div>
+    <div class="hub-row" id="hinten" hidden>
+      <button class="hub-btn hub-primary hub-big" id="gewusst">Gewusst</button>
+      <button class="hub-btn hub-big" id="nochmal">Noch nicht</button>
+    </div>
+  </section>
+
+  <section class="hub-card hub-stack" id="fertig" hidden>
+    <h2 id="fertig-titel"></h2>
+    <p class="hub-muted" id="fertig-text"></p>
+    <div class="hub-row"><button class="hub-btn hub-primary" id="weiter">Weiterlernen</button></div>
+  </section>
+
+  <p class="hub-muted" id="lehrkraft" hidden>Als Lehrkraft legst du die Karten im Hub fest: in deiner Klasse bei dieser App unter „Einstellungen“.</p>
+</main>
+
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

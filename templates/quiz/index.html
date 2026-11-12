@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page hub-stack">
+  <header class="hub-stack kopf">
+    <p class="hub-eyebrow" id="klasse">Quiz</p>
+    <h1>Quiz</h1>
+    <p class="hub-muted" id="stand"></p>
+    <progress class="hub-progress" id="fortschritt" max="1" value="0"></progress>
+  </header>
+
+  <section class="hub-card hub-stack" id="start" hidden>
+    <p id="start-text"></p>
+    <div class="hub-row"><button class="hub-btn hub-primary hub-big" id="los">Runde starten</button></div>
+    <p class="hub-muted" id="lehrkraft" hidden>Als Lehrkraft legst du die Fragen im Hub fest: in deiner Klasse bei dieser App unter „Einstellungen“.</p>
+  </section>
+
+  <section class="hub-card hub-stack" id="frage-box" hidden>
+    <p class="hub-eyebrow" id="zaehler"></p>
+    <h2 id="frage"></h2>
+    <div class="antworten" id="antworten"></div>
+    <p class="rueckmeldung" id="rueckmeldung" aria-live="polite"></p>
+    <div class="hub-row"><button class="hub-btn hub-primary" id="weiter" hidden>Weiter</button></div>
+  </section>
+
+  <section class="hub-card hub-stack" id="ende" hidden>
+    <h2 id="ende-titel"></h2>
+    <ul class="hub-list" id="ende-liste"></ul>
+    <div class="hub-row"><button class="hub-btn hub-primary" id="nochmal">Noch eine Runde</button></div>
+  </section>
+
+  <section class="hub-stack" id="erfolge-box" hidden>
+    <h2>Erfolge</h2>
+    <ul class="hub-list" id="erfolge"></ul>
+  </section>
+</main>
+
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

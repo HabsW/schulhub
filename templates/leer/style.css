@@ -1,0 +1,13 @@
+/* Eigenes CSS. Die Bausteine (hub-btn, hub-card, hub-row …) kommen aus hub-ui.css.
+   Eine eigene Farbe für Knöpfe: :root { --hub-accent: #5aa9ff; } */
+
+/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
+[hidden] { display: none !important; }
+
+.zahl {
+  margin: 0;
+  font-size: 4.5rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}

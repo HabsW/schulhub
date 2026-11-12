@@ -1,0 +1,25 @@
+/* Eigenes CSS für das Quiz. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
+
+/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
+[hidden] { display: none !important; }
+
+.kopf { gap: .5rem; }
+.kopf h1 { margin: 0; }
+
+.antworten { display: grid; gap: .6rem; }
+@media (min-width: 560px) { .antworten { grid-template-columns: 1fr 1fr; } }
+
+.antwort { justify-content: flex-start; min-height: 3.25rem; padding-block: .6rem; text-align: left; white-space: normal; }
+.antwort[disabled] { opacity: 1; }
+.antwort.richtig { border-color: var(--hub-ok); color: var(--hub-ok); }
+.antwort.falsch { border-color: var(--hub-danger); color: var(--hub-danger); }
+
+.rueckmeldung { min-height: 1.6em; margin: 0; font-weight: 640; }
+
+.marke { flex: none; width: 1.5rem; font-weight: 800; text-align: center; }
+.marke.ok { color: var(--hub-ok); }
+.marke.falsch { color: var(--hub-danger); }
+
+.erfolg .emoji { font-size: 1.3rem; }
+.erfolg.offen { color: var(--hub-ink-3); }
+.erfolg.offen .emoji { filter: grayscale(1); opacity: .5; }
