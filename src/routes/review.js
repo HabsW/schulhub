@@ -113,9 +113,9 @@ module.exports = (app, ctx) => {
     const preview = html`<section class="review-preview" aria-label="Vorschau von Version ${version.number}">
       <div class="review-toolbar">
         <div class="review-devices" role="group" aria-label="Bildschirmbreite der Vorschau">
-          <button type="button" class="btn quiet sm review-devbtn" data-device="phone" aria-pressed="false">${icon('smartphone')}<span>Handy</span></button>
-          <button type="button" class="btn quiet sm review-devbtn" data-device="tablet" aria-pressed="false">${icon('tablet')}<span>Tablet</span></button>
-          <button type="button" class="btn quiet sm review-devbtn" data-device="full" aria-pressed="true">${icon('monitor')}<span>Voll</span></button>
+          <button type="button" class="btn quiet sm review-devbtn" data-device="phone" aria-pressed="false" title="So breit wie ein Handy (390 Pixel)">${icon('smartphone')}<span>Handy</span><small class="review-devw" aria-hidden="true">390</small></button>
+          <button type="button" class="btn quiet sm review-devbtn" data-device="tablet" aria-pressed="false" title="So breit wie ein Tablet (820 Pixel)">${icon('tablet')}<span>Tablet</span><small class="review-devw" aria-hidden="true">820</small></button>
+          <button type="button" class="btn quiet sm review-devbtn" data-device="full" aria-pressed="true" title="So breit wie diese Spalte">${icon('monitor')}<span>Voll</span><small class="review-devw" id="review-fitw" aria-hidden="true"></small></button>
         </div>
         <div class="review-tools">
           <button class="btn quiet sm" type="button" id="console-toggle" aria-controls="console" aria-expanded="false">${icon('terminal')}<span>Konsole</span><span class="count wait" id="console-count" hidden>0</span></button>
@@ -139,7 +139,7 @@ module.exports = (app, ctx) => {
           </div>
         </div>
       </div>
-      <p class="review-hint">${icon('info', { cls: 'sm' })}<span>Vorschau von Version ${version.number}: Was du hier ausprobierst, wird nicht gespeichert.</span></p>
+      <p class="review-hint">${icon('info', { cls: 'sm' })}<span>Vorschau von Version ${version.number}: Was du hier ausprobierst, wird nicht gespeichert.<span class="review-scale" id="review-scale" aria-live="polite"></span></span></p>
     </section>`;
 
     // ----- what is new -----
@@ -186,7 +186,7 @@ module.exports = (app, ctx) => {
     const visible = hist.rows.filter((r) => r.class_id === null || r.class_id === cls.id);
     const historyBlock = html`<section class="review-block" id="verlauf" aria-labelledby="h-verlauf">
       <h2 id="h-verlauf">Verlauf</h2>
-      ${visible.length ? V.historyTimeline(req, visible, { canDelete: (r) => r.kind === 'comment' && r.author_id === user.id, deleteAction: (r) => `/apps/${a.id}/kommentare/${r.id}/loeschen` }) : html`<p class="meta">Noch keine Einträge.</p>`}
+      ${visible.length ? V.historyTimeline(req, visible, { canDelete: (r) => access.canDeleteComment(user, r), deleteAction: (r) => `/apps/${a.id}/kommentare/${r.id}/loeschen` }) : html`<p class="meta">Noch keine Einträge.</p>`}
       ${V.commentForm(req, `/pruefen/${cls.id}/${a.id}/kommentar`, { label: `Kommentar an ${owner}`, hint: 'Eine Frage oder ein Tipp, ohne schon zu entscheiden.' })}
     </section>`;
 

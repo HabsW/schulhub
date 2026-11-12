@@ -23,6 +23,9 @@
 .review-devices { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-btn); background: var(--raised-2); border: 1px solid var(--line-1); }
 .review-devbtn[aria-pressed="true"] { background: var(--ink); color: var(--ink-on-ink); }
 .review-devbtn[aria-pressed="true"]:hover { background: var(--ink); color: var(--ink-on-ink); }
+/* the width each size gives the app */
+.review-devw { color: inherit; opacity: .72; font: 600 .72rem/1 var(--mono); font-variant-numeric: tabular-nums; }
+.review-devw:empty { display: none; }
 @media (max-width: 719.98px) { .review-devices { display: none; } }
 .review-tools { display: flex; align-items: center; gap: var(--s-1); margin-left: auto; }
 .review-viewport { display: flex; min-height: 0; height: min(72dvh, 46rem); padding: var(--s-3); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); container-type: inline-size; }
