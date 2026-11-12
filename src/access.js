@@ -240,6 +240,27 @@ function createAccess(db) {
     );
   }
 
+  // ----- package A -----
+  /**
+   * Leave a class oneself: a student may always leave an active class; a
+   * teacher only while another teacher remains (otherwise the class would be
+   * orphaned - archive or delete it instead). Archived classes are read-only.
+   */
+  function canLeaveClass(user, classId) {
+    const role = classRole(user, classId);
+    if (!role || isArchived(classId)) return false;
+    if (role === 'student') return true;
+    return Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND role = 'teacher' AND user_id <> ?", classId, user.id));
+  }
+  /**
+   * Results of one app in one class (lists, overview, CSV): the class's teachers
+   * (and the admin), while the app is approved there - or after it was removed.
+   */
+  const canSeeClassResults = (user, classId, appId) =>
+    canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
+  /** Only the student a feedback is for marks it as read. */
+  const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
+
   return {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
@@ -251,6 +272,7 @@ function createAccess(db) {
     canAnnounce, canSeeAnnouncement, canDeleteAnnouncement,
     canJoinRoom,
     visibleApps, visibleClasses,
+    canLeaveClass, canSeeClassResults, canMarkFeedbackRead, // package A
   };
 }
 
