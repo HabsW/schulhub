@@ -31,7 +31,7 @@ const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const yauzl = require('yauzl');
 const { DatabaseSync } = require('node:sqlite');
-const { SCHEMA_VERSION } = require('./db');
+const { openDb, SCHEMA_VERSION, SCHEMA_V1 } = require('./db');
 const { HttpError, plural } = require('./util');
 
 const STORES = ['blobs', 'userfiles'];
@@ -294,8 +294,111 @@ async function extractArchive(zipFile, staging) {
   return written;
 }
 
-/** Check the unpacked database; returns a summary. Opens it read-only. */
-function checkDatabase(file, written) {
+/** Schema SQL without comments (quoted parts are kept as they are). */
+function stripSqlComments(sql) {
+  const s = String(sql ?? '');
+  let out = '';
+  for (let i = 0; i < s.length;) {
+    const c = s[i];
+    if (c === "'" || c === '"' || c === '`' || c === '[') {
+      const close = c === '[' ? ']' : c;
+      let j = i + 1;
+      while (j < s.length && !(s[j] === close && s[j + 1] !== close)) j += s[j] === close ? 2 : 1;
+      out += s.slice(i, j + 1);
+      i = j + 1;
+    } else if (c === '-' && s[i + 1] === '-') {
+      const nl = s.indexOf('\n', i);
+      i = nl < 0 ? s.length : nl + 1;
+      out += ' ';
+    } else if (c === '/' && s[i + 1] === '*') {
+      const end = s.indexOf('*/', i + 2);
+      i = end < 0 ? s.length : end + 2;
+      out += ' ';
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  return out;
+}
+
+/** What a schema entry really creates, read from its SQL (SQLite trusts the SQL, not the type column). */
+function createKind(sql) {
+  const m = /^CREATE\s+(?:(?:TEMP|TEMPORARY)\s+)?(?:UNIQUE\s+)?(TABLE|INDEX|TRIGGER|VIEW|VIRTUAL\s+TABLE)\b/i.exec(stripSqlComments(sql).trim());
+  return m ? m[1].toLowerCase().replace(/\s+/, ' ') : '';
+}
+
+/** One schema as a map "type name" -> { table, sql }; SQL compared without comments, whitespace and identifier quotes. */
+function schemaMap(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    if (/^sqlite_stat[1-4]$/.test(r.name)) continue; // statistics written by ANALYZE
+    const sql = r.sql === null || r.sql === undefined ? null : stripSqlComments(r.sql).replace(/[\s"`[\]]+/g, '');
+    map.set(`${String(r.type).toLowerCase()} ${r.name}`, { table: r.tbl_name, sql });
+  }
+  return map;
+}
+
+/**
+ * The schema SchulHub itself creates for a database version, built fresh in
+ * dir: version 1 from SCHEMA_V1, the current version with openDb (all
+ * migrations). Versions in between cannot be rebuilt here.
+ */
+function referenceSchema(version, dir) {
+  const file = path.join(dir, `referenz-${version}.sqlite`);
+  const query = 'SELECT type, name, tbl_name, sql FROM sqlite_master';
+  if (version === SCHEMA_VERSION) {
+    const ref = openDb(file);
+    try {
+      return ref.all(query);
+    } finally {
+      ref.close();
+    }
+  }
+  if (version === 1) {
+    const ref = new DatabaseSync(file);
+    try {
+      ref.exec(SCHEMA_V1);
+      return ref.prepare(query).all();
+    } finally {
+      ref.close();
+    }
+  }
+  return fail(`Eine Datenbank der Version ${version} kann dieser Hub nicht prüfen. Spiele die Sicherung mit der SchulHub-Version ein, mit der sie erstellt wurde, und aktualisiere danach.`);
+}
+
+/**
+ * The database must have exactly the structure SchulHub creates for its
+ * version: no triggers, views or virtual tables (whatever the type column
+ * claims - SQLite runs what the SQL says), no extra or missing tables,
+ * columns, constraints or indexes.
+ */
+function checkSchema(db, version, dir) {
+  const rows = db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master').all();
+  for (const r of rows) {
+    const type = String(r.type).toLowerCase();
+    const kind = createKind(r.sql);
+    const name = `„${String(r.name).slice(0, 60)}“`;
+    if (type === 'view' || kind === 'view') fail(`Die Datenbank enthält eine Sicht (${name}), die SchulHub nie anlegt. Sie wird nicht übernommen.`);
+    if (type === 'trigger' || kind === 'trigger') fail(`Die Datenbank enthält einen Trigger (${name}), den SchulHub nie anlegt. Sie wird nicht übernommen.`);
+    if (kind === 'virtual table') fail(`Die Datenbank enthält eine virtuelle Tabelle (${name}), die SchulHub nie anlegt. Sie wird nicht übernommen.`);
+    if (r.sql !== null && r.sql !== undefined && kind !== type) fail(`Der Eintrag ${name} im Aufbau der Datenbank ist widersprüchlich. Sie wird nicht übernommen.`);
+  }
+  const have = schemaMap(rows);
+  const want = schemaMap(referenceSchema(version, dir));
+  for (const [key, v] of have) {
+    const w = want.get(key);
+    const name = `„${key.slice(key.indexOf(' ') + 1, key.indexOf(' ') + 61)}“`;
+    if (!w) fail(`Der Aufbau der Datenbank passt nicht zu SchulHub (Version ${version}): ${name} gehört nicht dazu. Sie wird nicht übernommen.`);
+    if (w.table !== v.table || w.sql !== v.sql) fail(`Der Aufbau der Datenbank passt nicht zu SchulHub (Version ${version}): ${name} ist verändert. Sie wird nicht übernommen.`);
+  }
+  for (const key of want.keys()) {
+    if (!have.has(key)) fail(`Der Aufbau der Datenbank passt nicht zu SchulHub (Version ${version}): „${key.slice(key.indexOf(' ') + 1)}“ fehlt. Sie wird nicht übernommen.`);
+  }
+}
+
+/** Check the unpacked database; returns a summary. Opens it read-only; dir is for the reference schema. */
+function checkDatabase(file, written, dir) {
   const head = Buffer.alloc(16);
   const fd = fs.openSync(file, 'r');
   try {
@@ -317,9 +420,8 @@ function checkDatabase(file, written) {
     if (version > SCHEMA_VERSION) {
       fail(`Die Sicherung stammt von einer neueren SchulHub-Version (Datenbank-Version ${version}, dieser Hub kennt Version ${SCHEMA_VERSION}). Aktualisiere zuerst SchulHub.`);
     }
-    // SchulHub never creates triggers or views; a database with them was not made by a backup.
-    const odd = db.prepare("SELECT type, name FROM sqlite_master WHERE type IN ('trigger', 'view') LIMIT 1").get();
-    if (odd) fail(`Die Datenbank enthält ${odd.type === 'view' ? 'eine Sicht' : 'einen Trigger'} („${String(odd.name).slice(0, 60)}“), den SchulHub nie anlegt. Sie wird nicht übernommen.`);
+    // Exactly SchulHub's own structure: no triggers or views (also not behind a disguised type), nothing added or changed.
+    checkSchema(db, version, dir);
 
     const count = (table) => (has(table) ? db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n : 0); // fixed names only
     const shas = (sql) => db.prepare(sql).all().map((r) => r.sha256);
@@ -379,7 +481,7 @@ async function restoreBackup({ zipFile, dataDir, force = false, log = () => {} }
     const written = await extractArchive(zipFile, staging);
     log('Entpackt, alle Prüfsummen stimmen.');
     const dbFile = path.join(staging, 'hub.sqlite');
-    const info = checkDatabase(dbFile, written);
+    const info = checkDatabase(dbFile, written, staging);
     log(`Datenbank geprüft (Version ${info.version}): ${plural(info.users, 'Konto', 'Konten')}, ${plural(info.classes, 'Klasse', 'Klassen')}, ${plural(info.apps, 'App', 'Apps')}.`);
     if (info.missing.blobs || info.missing.userfiles) {
       log(`Achtung: ${plural(info.missing.blobs, 'App-Datei', 'App-Dateien')} und ${plural(info.missing.userfiles, 'Nutzerdatei', 'Nutzerdateien')}, auf die die Datenbank verweist, fehlen in der Sicherung.`);
