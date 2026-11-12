@@ -351,14 +351,16 @@ module.exports = (app, ctx) => {
     if (!play) throw deny();
     const user = req.user;
     const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
-    if (req.body.first === true) {
+    // A preview is not a real use of the app: it is never counted, and its
+    // token makes the SDK keep everything in memory (see sdkStore.js).
+    if (req.body.first === true && !play.preview) {
       db.run(
         `INSERT INTO plays (app_id, user_id, first_at, last_at) VALUES (?, ?, ?, ?)
          ON CONFLICT (app_id, user_id) DO UPDATE SET last_at = excluded.last_at, count = count + 1`,
         a.id, user.id, Date.now(), Date.now()
       );
     }
-    const token = tokens.sign('sdk', { u: user.id, a: a.id, v: play.version.id, c: play.classId, s: sidHash(req.sessionID) }, config.sdkTokenSeconds);
+    const token = tokens.sign('sdk', { u: user.id, a: a.id, v: play.version.id, c: play.classId, s: sidHash(req.sessionID), p: play.preview ? 1 : 0 }, config.sdkTokenSeconds);
     res.json({
       token,
       expiresIn: config.sdkTokenSeconds,

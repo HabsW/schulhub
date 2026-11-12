@@ -12,20 +12,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { appHeaders } = require('./security');
 const { cleanText } = require('./util');
+const { ApiError, liveStore, createPreviewStores } = require('./sdkStore');
 
 const KEY = /^[A-Za-z0-9_.:-]{1,64}$/;
-
-class ApiError extends Error {
-  constructor(code, message, status = 200) {
-    super(message);
-    this.code = code;
-    this.status = status;
-  }
-}
 
 function createAppsHost(ctx) {
   const { db, config, tokens, uploads, limiter, access } = ctx;
   const L = config.limits;
+  // Previews write only to memory (see sdkStore.js).
+  const previewStores = (ctx.previewStores = createPreviewStores());
   const sdkFile = path.join(config.root, 'sdk', 'hub-sdk.js');
   let sdkCache = null;
   const sdkSource = () => (config.dev || !sdkCache ? (sdkCache = fs.readFileSync(sdkFile)) : sdkCache);
@@ -126,7 +121,8 @@ function createAppsHost(ctx) {
     if (!user) throw denied;
     // Class context only counts while the user really is in that class.
     const classId = typeof t.c === 'string' && access.canViewClass(user, t.c) ? t.c : null;
-    return { user, classId };
+    // The preview flag is part of the signed token: an app cannot switch it off.
+    return { user, classId, preview: t.p === 1, versionId: String(t.v), sid: String(t.s) };
   }
 
   const key = (params) => {
@@ -140,62 +136,57 @@ function createAppsHost(ctx) {
     if (size > max) throw new ApiError('too_large', 'Der Wert ist zu groß.');
     return { json, size };
   }
-  const decode = (row) => (row ? JSON.parse(row.value) : null);
+  const decode = (json) => (json === null || json === undefined ? null : JSON.parse(json));
   const number = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-  /** Key-value store shared by all users of the app (scope '') or of one class (scope = class id). */
-  function sharedStore(appRow, scope, mayWrite) {
+  /** Key-value data shared by all users of the app (scope '') or of one class (scope = class id). */
+  function sharedApi(store, scope, mayWrite) {
     const write = () => {
       if (!mayWrite) throw new ApiError('forbidden', 'Das dürfen nur die Lehrkraft bzw. die Besitzerin oder der Besitzer der App.');
     };
     return {
-      get: (p) => decode(db.get('SELECT value FROM shared_data WHERE app_id = ? AND class_id = ? AND key = ?', appRow.id, scope, key(p))),
-      keys: () => db.all('SELECT key FROM shared_data WHERE app_id = ? AND class_id = ? ORDER BY key', appRow.id, scope).map((r) => r.key),
+      get: (p) => decode(store.sharedGet(scope, key(p))),
+      keys: () => store.sharedKeys(scope),
       set(p) {
         write();
         const k = key(p);
         const { json, size } = encode(p.value, L.saveValueBytes);
-        const other = db.get('SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS n FROM shared_data WHERE app_id = ? AND class_id = ? AND key <> ?', appRow.id, scope, k);
+        const other = store.sharedUsage(scope, k);
         if (other.bytes + size > L.sharedTotalBytes || other.n >= L.saveKeys) throw new ApiError('quota', 'Der Speicher für gemeinsame Daten ist voll.');
-        db.run(
-          `INSERT INTO shared_data (app_id, class_id, key, value, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (app_id, class_id, key) DO UPDATE SET value = excluded.value, size = excluded.size, updated_at = excluded.updated_at`,
-          appRow.id, scope, k, json, size, Date.now()
-        );
+        store.sharedPut(scope, k, json, size);
         return true;
       },
       remove(p) {
         write();
-        db.run('DELETE FROM shared_data WHERE app_id = ? AND class_id = ? AND key = ?', appRow.id, scope, key(p));
+        store.sharedDelete(scope, key(p));
         return true;
       },
     };
   }
 
-  /** All methods. Every query is limited to appRow.id - an app can only reach its own data. */
-  function methods(appRow, user, classId) {
-    const shared = sharedStore(appRow, '', appRow.owner_id === user.id || access.isAdmin(user));
+  /**
+   * All methods. Permissions are decided here; `store` only keeps data and is
+   * always limited to this app (live tables, or memory during a preview).
+   */
+  function methods(appRow, user, classId, store) {
+    const shared = sharedApi(store, '', appRow.owner_id === user.id || access.isAdmin(user));
     const needClass = () => {
       if (!classId) throw new ApiError('no_class', 'Die App wurde nicht aus einer Klasse heraus geöffnet.');
-      return sharedStore(appRow, classId, access.canManageClass(user, classId));
+      return sharedApi(store, classId, access.canManageClass(user, classId));
     };
     return {
-      'save.get': (p) => decode(db.get('SELECT value FROM saves WHERE app_id = ? AND user_id = ? AND key = ?', appRow.id, user.id, key(p))),
-      'save.keys': () => db.all('SELECT key FROM saves WHERE app_id = ? AND user_id = ? ORDER BY key', appRow.id, user.id).map((r) => r.key),
+      'save.get': (p) => decode(store.saveGet(key(p))),
+      'save.keys': () => store.saveKeys(),
       'save.set': (p) => {
         const k = key(p);
         const { json, size } = encode(p.value, L.saveValueBytes);
-        const other = db.get('SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS n FROM saves WHERE app_id = ? AND user_id = ? AND key <> ?', appRow.id, user.id, k);
+        const other = store.saveUsage(k);
         if (other.bytes + size > L.saveTotalBytes || other.n >= L.saveKeys) throw new ApiError('quota', 'Dein Speicherplatz in dieser App ist voll.');
-        db.run(
-          `INSERT INTO saves (app_id, user_id, key, value, size, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT (app_id, user_id, key) DO UPDATE SET value = excluded.value, size = excluded.size, updated_at = excluded.updated_at`,
-          appRow.id, user.id, k, json, size, Date.now()
-        );
+        store.savePut(k, json, size);
         return true;
       },
       'save.remove': (p) => {
-        db.run('DELETE FROM saves WHERE app_id = ? AND user_id = ? AND key = ?', appRow.id, user.id, key(p));
+        store.saveDelete(key(p));
         return true;
       },
 
@@ -207,55 +198,39 @@ function createAppsHost(ctx) {
         const board = key({ key: p && p.board });
         const score = number(p.score);
         if (score === null) throw new ApiError('bad_value', 'Die Punktzahl muss eine Zahl sein.');
-        const old = db.get('SELECT score FROM scores WHERE app_id = ? AND board = ? AND user_id = ?', appRow.id, board, user.id);
-        if (!old && !db.get('SELECT 1 AS x FROM scores WHERE app_id = ? AND board = ? LIMIT 1', appRow.id, board)) {
-          if (db.get('SELECT COUNT(DISTINCT board) AS n FROM scores WHERE app_id = ?', appRow.id).n >= L.boardsPerApp) throw new ApiError('quota', 'Diese App hat zu viele Bestenlisten.');
-        }
-        const improved = !old || (p.lowerIsBetter === true ? score < old.score : score > old.score);
-        if (improved) {
-          db.run(
-            `INSERT INTO scores (app_id, board, user_id, score, updated_at) VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT (app_id, board, user_id) DO UPDATE SET score = excluded.score, updated_at = excluded.updated_at`,
-            appRow.id, board, user.id, score, Date.now()
-          );
-        }
-        return { best: improved ? score : old.score, improved };
+        const old = store.scoreGet(board);
+        if (old === null && !store.boardExists(board) && store.boardCount() >= L.boardsPerApp) throw new ApiError('quota', 'Diese App hat zu viele Bestenlisten.');
+        const improved = old === null || (p.lowerIsBetter === true ? score < old : score > old);
+        if (improved) store.scorePut(board, score);
+        return { best: improved ? score : old, improved };
       },
       'scores.top': (p) => {
         const board = key({ key: p && p.board });
         const limit = Math.min(Math.max(Number.parseInt(p.limit, 10) || 10, 1), 100);
         const inClass = classId && p.scope !== 'all';
-        const order = p.lowerIsBetter === true ? 'ASC' : 'DESC'; // fixed keywords, never user text
-        const rows = db.all(
-          `SELECT s.user_id, s.score, u.name, u.anonymous_scores FROM scores s JOIN users u ON u.id = s.user_id
-            WHERE s.app_id = ? AND s.board = ? AND (? = 0 OR s.user_id IN (SELECT user_id FROM class_members WHERE class_id = ?))
-            ORDER BY s.score ${order}, s.updated_at ASC LIMIT ?`,
-          appRow.id, board, inClass ? 1 : 0, classId || '', limit
-        );
-        const mine = db.get('SELECT score FROM scores WHERE app_id = ? AND board = ? AND user_id = ?', appRow.id, board, user.id);
+        const rows = store.top(board, { order: p.lowerIsBetter === true ? 'ASC' : 'DESC', limit, classId: inClass ? classId : '' });
+        const mine = store.scoreGet(board);
+        // Minors: a name is shown only to people who share a class with that
+        // person, and only if they did not choose to be anonymous. Everyone
+        // else (other classes, other teachers, the whole school) sees "Anonym".
+        const nameFor = (r) => (r.user_id === user.id ? r.name : r.shares_class && !r.anonymous_scores ? r.name : 'Anonym');
         return {
           scope: inClass ? 'class' : 'all',
-          entries: rows.map((r, i) => ({ rank: i + 1, name: r.anonymous_scores && r.user_id !== user.id ? 'Anonym' : r.name, score: r.score, me: r.user_id === user.id })),
-          me: mine ? { score: mine.score } : null,
+          entries: rows.map((r, i) => ({ rank: i + 1, name: nameFor(r), score: r.score, me: r.user_id === user.id })),
+          me: mine === null ? null : { score: mine },
         };
       },
 
       'results.add': (p) => {
         const title = cleanText(p && p.title, 120) || 'Ergebnis';
         const details = p.details === undefined || p.details === null ? null : encode(p.details, L.resultBytes).json;
-        db.run('INSERT INTO results (app_id, user_id, title, score, max_score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', appRow.id, user.id, title, number(p.score), number(p.maxScore), details, Date.now());
-        // keep only the newest N per user and app
-        db.run(
-          `DELETE FROM results WHERE app_id = ? AND user_id = ? AND id NOT IN
-             (SELECT id FROM results WHERE app_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?)`,
-          appRow.id, user.id, appRow.id, user.id, L.resultsPerUser
-        );
+        store.resultAdd({ title, score: number(p.score), maxScore: number(p.maxScore), details, classId }, L.resultsPerUser);
         return true;
       },
       'results.mine': (p) => {
         const limit = Math.min(Math.max(Number.parseInt(p && p.limit, 10) || 20, 1), 100);
-        return db
-          .all('SELECT title, score, max_score, details, created_at FROM results WHERE app_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?', appRow.id, user.id, limit)
+        return store
+          .resultsMine(limit)
           .map((r) => ({ title: r.title, score: r.score, maxScore: r.max_score, details: r.details ? JSON.parse(r.details) : null, at: r.created_at }));
       },
     };
@@ -266,10 +241,11 @@ function createAppsHost(ctx) {
       // Same-origin calls only: a foreign page cannot use this API even with a stolen token header.
       const origin = req.headers.origin;
       if (origin && origin !== config.appOrigin(appRow.origin_key)) throw new ApiError('forbidden', 'Nicht erlaubt.', 403);
-      const { user, classId } = authenticate(req, appRow);
+      const { user, classId, preview, versionId, sid } = authenticate(req, appRow);
       if (!limiter.hit('sdk', `${user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Anfragen. Bitte kurz warten.', 429);
       const body = await readJson(req, L.saveValueBytes + 4096);
-      const table = methods(appRow, user, classId);
+      const store = preview ? previewStores.previewStore(db, appRow, user, `${sid}:${appRow.id}:${versionId}`) : liveStore(db, appRow, user);
+      const table = methods(appRow, user, classId, store);
       const fn = body && typeof body.method === 'string' && Object.hasOwn(table, body.method) ? table[body.method] : null;
       if (!fn) throw new ApiError('unknown_method', 'Diese Funktion gibt es nicht.');
       const params = body.params && typeof body.params === 'object' ? body.params : {};

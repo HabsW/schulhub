@@ -57,8 +57,9 @@ Datenbank…*, *Beitrittscodes…*, *Schüler und fremde Lehrkräfte…*, *Wem e
 | App opened outside the Hub | Top-level requests (`Sec-Fetch-Dest: document`) are refused; `frame-ancestors` allows only the Hub. |
 | Unpublished code visible to others | Files are served only with a signed token for exactly that version, issued after a permission check. |
 | Apps learning identities | Apps get a display name and a per-app pseudonymous id. No e-mail address. |
+| A preview writing real data | A preview (an owner trying a version, a teacher reviewing a submission) gets an SDK token marked as preview. The mark is inside the signed token, so the app cannot remove it. The SDK API then keeps every write in memory (`src/sdkStore.js`): bounded per preview (2 MB), in number (400) and overall (128 MB), dropped after 2 hours idle or on restart. Reads of class and app data fall through to the real data, writes never do. Previews are not counted as plays, and a preview leaderboard shows no real players. |
 
-Tests: *App-Isolation…*, *App-Dateien…*, *SDK-Rechte…*
+Tests: *App-Isolation…*, *App-Dateien…*, *SDK-Rechte…*, *Vorschau…*
 
 ### Uploads
 
@@ -98,7 +99,11 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 ### Privacy (minors)
 
 - Stored about a person: name, school e-mail, Microsoft object id, role, class memberships, last sign-in, and what apps saved for them. No IP addresses, no photos, no tracking.
-- Teachers see names, not e-mail addresses. Leaderboards can show "Anonym".
+- Teachers see names, not e-mail addresses.
+- Leaderboards show a person's name only to people who are in at least one class together
+  with that person, and never if the person chose to be anonymous. Everyone else – other
+  classes, teachers of other classes, the whole school in a school-wide app – sees "Anonym".
+  Test: *Bestenliste: Namen sehen nur Personen aus derselben Klasse…*
 - "Meine Daten" shows everything, exports it as JSON, deletes per app or the whole account. Deleting an account removes its rows and anonymises its audit entries. Test: *Meine Daten…*
 
 ## Where security won over a feature

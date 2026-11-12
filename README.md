@@ -99,12 +99,12 @@ echte Konten. Am Code der App ändert sich nichts. Als Lehrkraft lokal testen: `
 |---|---|
 | `hub.user` | `{ id, name, isTeacher, isOwner }` – die `id` ist in jeder App eine andere, E-Mail gibt es nicht |
 | `hub.class` | `{ id, name }` der Klasse, aus der die App geöffnet wurde, oder `null` |
-| `hub.mode` | `'live'`, `'preview'` oder `'local'` |
+| `hub.mode` | `'live'`, `'preview'` oder `'local'`. In der Vorschau wird nichts dauerhaft gespeichert. |
 | `hub.save.get(key, fallback)` / `set(key, value)` / `remove(key)` / `keys()` | Spielstand **pro Konto** in dieser App |
 | `hub.classData.get / set / remove / keys` | Daten **für eine Klasse** (z. B. Wortliste): alle lesen, die Lehrkraft schreibt |
 | `hub.shared.get / set / remove / keys` | Daten **für alle Nutzer der App** (z. B. Level): alle lesen, Besitzer/in schreibt |
 | `hub.leaderboard.submit(board, score, { lowerIsBetter })` | Punktzahl melden, der beste Wert zählt |
-| `hub.leaderboard.top(board, { limit, scope })` | Bestenliste der Klasse (`scope: 'all'` für alle) |
+| `hub.leaderboard.top(board, { limit, scope })` | Bestenliste der Klasse (`scope: 'all'` für alle). Namen sieht nur, wer mit der Person in einer Klasse ist; alle anderen sehen „Anonym“. |
 | `hub.results.add({ title, score, maxScore, details })` | Ergebnis festhalten – erscheint in der Auswertung der Lehrkraft |
 | `hub.results.mine({ limit })` | eigene letzte Ergebnisse |
 
