@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vokabeltrainer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header><h1>🔤 Vokabeltrainer</h1><p id="who"></p></header>
+
+  <section id="menu" class="card" hidden>
+    <p id="progress-text"></p>
+    <div class="bar"><div id="progress-bar"></div></div>
+    <button id="start" class="primary">Übungsrunde starten</button>
+    <button id="edit" hidden>Wortliste der Klasse bearbeiten</button>
+    <h2>Bestenliste: richtig beantwortet</h2>
+    <ol id="board"></ol>
+  </section>
+
+  <section id="quiz" class="card" hidden>
+    <p class="small" id="count"></p>
+    <p class="word" id="word"></p>
+    <form id="answer-form"><input id="answer" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="auf Englisch …">
+      <button class="primary">Prüfen</button></form>
+    <p id="feedback" class="feedback"></p>
+  </section>
+
+  <section id="done" class="card" hidden>
+    <h2 id="done-title"></h2>
+    <ul id="done-list"></ul>
+    <button id="again" class="primary">Zurück zur Übersicht</button>
+  </section>
+
+  <section id="editor" class="card" hidden>
+    <h2>Wortliste für <span id="class-name"></span></h2>
+    <p class="small">Ein Wortpaar pro Zeile: <code>deutsch = englisch</code></p>
+    <textarea id="list" rows="12" spellcheck="false"></textarea>
+    <p><button id="save-list" class="primary">Speichern</button> <button id="cancel-list">Abbrechen</button></p>
+    <p id="editor-note" class="small"></p>
+  </section>
+</main>
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

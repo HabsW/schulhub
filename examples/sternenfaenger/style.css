@@ -1,0 +1,9 @@
+html, body { margin: 0; height: 100%; background: #0d1030; color: #fff; font: 16px/1.4 system-ui, sans-serif; }
+#wrap { position: relative; height: 100%; display: grid; place-items: center; }
+canvas { max-width: 100%; max-height: 100%; background: linear-gradient(#0d1030, #2a1a5e); touch-action: none; border-radius: 12px; }
+#panel { position: absolute; background: rgba(13, 16, 48, .92); border: 1px solid #5560c0; border-radius: 16px; padding: 1.2rem 1.6rem; text-align: center; max-width: 20rem; width: 86%; }
+#panel[hidden] { display: none; }
+h1 { margin: 0 0 .4rem; font-size: 1.5rem; } h2 { font-size: 1rem; margin: 1rem 0 .3rem; }
+button { font: inherit; font-weight: 700; font-size: 1.1rem; padding: .6rem 2rem; border-radius: 99px; border: 0; background: #ffd43b; color: #2a1a00; cursor: pointer; }
+.hint { color: #aab; font-size: .85rem; }
+ol { text-align: left; margin: 0; padding-left: 1.6rem; } li.me { color: #ffd43b; font-weight: 700; }

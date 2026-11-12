@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 17px/1.5 system-ui, sans-serif; background: #eef6f0; color: #18261d; }
+main { max-width: 34rem; margin: 0 auto; padding: 1.2rem; }
+h1 { margin: 0; font-size: 1.6rem; } h2 { font-size: 1.1rem; margin: 1.2rem 0 .4rem; }
+header p { margin: .2rem 0 1rem; color: #4d6355; }
+.card { background: #fff; border-radius: 16px; padding: 1.3rem; box-shadow: 0 4px 16px rgba(0, 60, 20, .08); }
+button { font: inherit; font-weight: 600; padding: .6rem 1.1rem; border-radius: 10px; border: 1px solid #b9cbbf; background: #fff; cursor: pointer; margin: .2rem .2rem .2rem 0; }
+button.primary { background: #2b8a4b; color: #fff; border-color: #2b8a4b; }
+input, textarea { font: inherit; padding: .6rem .7rem; border-radius: 10px; border: 1px solid #b9cbbf; width: 100%; }
+form { display: flex; gap: .5rem; } form input { flex: 1; }
+.word { font-size: 2rem; font-weight: 700; text-align: center; margin: .6rem 0 1rem; }
+.small { color: #4d6355; font-size: .9rem; margin: .2rem 0; }
+.feedback { min-height: 1.6rem; font-weight: 600; }
+.right { color: #1f7a3d; } .wrong { color: #b3261e; }
+.bar { height: .7rem; background: #dcebe0; border-radius: 99px; overflow: hidden; margin: .4rem 0 1rem; }
+#progress-bar { height: 100%; width: 0; background: #2b8a4b; transition: width .4s; }
+ol, ul { padding-left: 1.3rem; } li.me { font-weight: 700; }
+code { background: #eef6f0; padding: .1rem .3rem; border-radius: 5px; }
