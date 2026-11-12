@@ -118,3 +118,20 @@ test('UI-Kit und Seite: Darstellung kommt nur aus der Datenbank', async () => {
   assert.equal(font.status, 200);
   assert.equal((await M.raw('GET', `/~${tok}/hub-ui-fonts/../../src/config.js`, { host: h.appHost(game) })).status, 404);
 });
+
+test('Player: eine schulweite App mit fremder Klasse öffnet schulweit – Klassen-Apps bleiben zu', async () => {
+  const admin = h.addUser('Anna Adler', 'admin');
+  const A = await h.browser().login(admin);
+  const school = await h.makeApp(Y, 'Für alle', { 'index.html': 'x' });
+  await A.page(`/apps/${school.id}`);
+  assert.equal((await A.post(`/apps/${school.id}/schulweit`, { an: '1' })).status, 303);
+  // Mia opens it with her class in the link, although it is not in that class: school-wide, no class context.
+  const page = await M.page(`/apps/${school.id}/spielen?klasse=${cls7b}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /data-class=""/, 'no class context is invented');
+  const t = await M.send('POST', `/apps/${school.id}/token`, { klasse: cls7b, first: true });
+  assert.equal(t.json().class, null);
+  // A class app with a class the person is not in stays closed, and so does a preview.
+  assert.equal((await M.get(`/apps/${hidden.id}/spielen?klasse=${cls7b}`)).status, 404);
+  assert.equal((await M.get(`/apps/${school.id}/spielen?klasse=${cls7b}&version=${school.published_version_id}`)).status, 404);
+});

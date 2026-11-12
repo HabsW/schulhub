@@ -343,7 +343,7 @@ function page(req, { title, body, active = '', bare = false, shell = '', scripts
     ? html`<header class="topbar">
         <a class="brand" href="/start" aria-label="${config.hubName} – Start">${brandMark()}<span class="brand-name">${config.hubName}</span></a>
         <span class="topbar-title">${topbarTitle || title}</span>
-        <form class="topbar-search" role="search" method="get" action="/suche">${icon('search', { cls: 'sm' })}<label class="visually-hidden" for="topsearch">Suchen</label><input id="topsearch" type="search" name="q" placeholder="Apps, Klassen, Personen suchen" autocomplete="off"></form>
+        <form class="topbar-search" role="search" method="get" action="/suche">${icon('search', { cls: 'sm' })}<label class="visually-hidden" for="topsearch">Suchen</label><input id="topsearch" type="search" name="q" value="${req.path === '/suche' && typeof req.query.q === 'string' ? req.query.q.slice(0, 80) : ''}" placeholder="Apps, Klassen, Personen suchen" autocomplete="off"></form>
         <a class="icon-btn search-link" href="/suche" aria-label="Suchen" title="Suchen">${icon('search')}</a>
         <a class="icon-btn" href="/mitteilungen" aria-label="${data.unread ? `Mitteilungen, ${data.unread} neu` : 'Mitteilungen'}" title="Mitteilungen">${icon('bell')}${data.unread ? html`<span class="count dot" aria-hidden="true"></span>` : ''}</a>
         <details class="menu">

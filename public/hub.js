@@ -47,7 +47,8 @@
       if (form.requestSubmit) form.requestSubmit(); else form.submit();
     };
     dialog.showModal();
-    okButton.focus();
+    // Start on the safe choice: Enter twice must never delete anything.
+    dialog.querySelector('.actions button:first-child').focus();
   }
 
   document.addEventListener('submit', function (event) {

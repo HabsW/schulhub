@@ -221,6 +221,7 @@ Tests (`test/school.test.js`): *Darstellung: nur die eigenen Einstellungen, nur 
 | Favourites | Only for apps the person can open (`resolvePlay`); the return path is checked against local Hub paths. |
 | In-Hub messages | Written only by the server (`services.notify`), shown escaped, links must be local paths. Each person sees and marks only their own; marking read is a POST. |
 | Announcements | Shown and dismissable only if `access.canSeeAnnouncement` (school-wide, or a class the person can see); others answer 404. |
+| A stale class in a player link | `?klasse=` that does not fit falls back only for school-wide apps (open to everyone anyway), and then without a class context. A class app, a removed app or an archived class stays closed (404); previews never fall back. |
 | The owner's editor draft in the player | `?entwurf=1` and draft tokens only for `canManageApp` and only if a draft exists; the token is always a preview (`p: 1`, `v: 'draft'`), so nothing is stored and nothing counts as a play. |
 
 Tests: `test/shell.test.js`

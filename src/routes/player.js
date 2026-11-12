@@ -28,7 +28,12 @@ module.exports = (app, ctx) => {
       const classId = klasse && access.canViewClass(user, klasse) ? klasse : null;
       return { draft: true, version: { id: 'draft', number: 0 }, classId, preview: true };
     }
-    return access.resolvePlay(user, a, { classId: klasse, versionId: version });
+    const play = access.resolvePlay(user, a, { classId: klasse, versionId: version });
+    // A school-wide app opened with a class it is not in (e.g. linked from a class page) opens
+    // school-wide instead of a dead end. Only for school-wide apps: a link into an archived class
+    // or to a removed app must stay closed. Previews never fall back.
+    if (!play && klasse && !version && a.schoolwide_version_id) return access.resolvePlay(user, a);
+    return play;
   }
 
   app.get('/apps/:id/spielen', (req, res) => {

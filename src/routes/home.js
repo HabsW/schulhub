@@ -19,6 +19,7 @@ module.exports = (app, ctx) => {
   app.get('/', (req, res) => {
     if (req.user) return res.redirect('/start');
     const joining = String(req.session.returnTo || '').startsWith('/beitreten/');
+    const wanted = !joining && Boolean(req.session.returnTo);
     const devUsers = config.dev ? db.all("SELECT id, name, role FROM users WHERE oid LIKE 'dev-%' ORDER BY CASE role WHEN 'student' THEN 0 WHEN 'teacher' THEN 1 ELSE 2 END, name") : [];
     const body = html`<section class="hero">
       <div class="stack">
@@ -26,6 +27,7 @@ module.exports = (app, ctx) => {
         <h1>Apps von unserer Schule. Für unsere Schule.</h1>
         <p class="lead">Lern-Apps und Spiele, die Lehrkräfte und Schüler/innen selbst bauen. Einmal anmelden – und deine Klassen, deine Apps und dein Fortschritt sind da.</p>
         ${joining ? notice({ tone: 'wait', icon: 'userPlus', text: 'Melde dich an, um der Klasse beizutreten.' }) : ''}
+        ${wanted ? notice({ icon: 'lock', text: 'Bitte melde dich an – danach geht es auf der Seite weiter, die du öffnen wolltest.' }) : ''}
         ${req.query.geloescht === '1' ? notice({ tone: 'ok', text: 'Dein Konto und alle Daten dazu sind gelöscht. Wenn du dich wieder anmeldest, beginnt ein neues, leeres Konto.', role: 'status' }) : ''}
         ${auth.enabled
           ? html`<div class="actions">${linkButton('/auth/login', 'Mit Microsoft-Schulkonto anmelden', { kind: 'primary', size: 'lg', icon: 'arrowRight' })}</div>
@@ -170,6 +172,7 @@ module.exports = (app, ctx) => {
       const def = manifestOf(v).achievements.find((x) => x.id === r.achievement);
       return { ...r, title: def ? def.title : r.achievement, emoji: def ? def.emoji : '🏅' };
     });
+    const schoolwide = db.all('SELECT * FROM apps WHERE schoolwide_version_id IS NOT NULL ORDER BY updated_at DESC LIMIT 8');
     const submissions = db.all(
       `SELECT a.id, a.name, a.emoji, a.color, c.name AS class_name, ca.request_state FROM class_apps ca JOIN apps a ON a.id = ca.app_id
          JOIN classes c ON c.id = ca.class_id WHERE a.owner_id = ? AND ca.request_state IS NOT NULL ORDER BY ca.created_at DESC LIMIT 5`,
@@ -195,6 +198,9 @@ module.exports = (app, ctx) => {
         })) : empty({ icon: 'checkCircle', title: 'Keine offenen Aufgaben', text: 'Wenn deine Lehrkraft eine Aufgabe stellt, steht sie hier – mit Termin.' })}
       </section>
 
+      ${schoolwide.length ? html`<section class="section" aria-labelledby="s-school">${sectionHead('Für die ganze Schule', { id: 's-school', actions: linkButton('/katalog', 'Alle Apps', { kind: 'quiet', size: 'sm' }) })}
+        ${shelf(schoolwide.map((a) => shelfItem(a, `/apps/${a.id}/spielen`)), 'Für die ganze Schule')}</section>` : ''}
+
       ${favourites.length ? html`<section class="section" aria-labelledby="s-fav">${sectionHead('Favoriten', { id: 's-fav' })}
         ${shelf(favourites.map((a) => shelfItem(a, `/apps/${a.id}/spielen`)), 'Favoriten')}</section>` : ''}
 
@@ -214,7 +220,7 @@ module.exports = (app, ctx) => {
           href: `/klassen/${c.id}`, title: c.name, start: html`<span class="tile sm app-7" aria-hidden="true">${icon('school', { cls: 'sm' })}</span>`,
           sub: plural(db.get("SELECT COUNT(*) AS n FROM class_apps WHERE class_id = ? AND status = 'approved'", c.id).n, 'App', 'Apps'),
         })))
-        : empty({ icon: 'userPlus', title: 'Noch in keiner Klasse', text: 'Deine Lehrkraft zeigt dir einen QR-Code oder einen Link. Scanne ihn mit dem Handy oder öffne den Link – schon bist du dabei.' })}
+        : empty({ icon: 'userPlus', title: 'Noch in keiner Klasse', text: 'Deine Lehrkraft zeigt dir einen QR-Code oder einen Link. Scanne ihn mit dem Handy oder öffne den Link – schon bist du dabei.', actions: linkButton('/katalog', 'Apps entdecken', { icon: 'apps' }) })}
       </section>
 
       ${unlocked.length ? html`<section class="section" aria-labelledby="s-ach">${sectionHead('Erfolge', { id: 's-ach', count: String(db.get('SELECT COUNT(*) AS n FROM achievements WHERE user_id = ?', user.id).n) })}
@@ -262,12 +268,12 @@ module.exports = (app, ctx) => {
     const recent = recentApps(user, 3);
 
     return html`
-      ${stats([
+      ${classes.length ? stats([
         stat({ label: 'Warten auf Prüfung', value: waiting.length, tone: waiting.length ? 'wait' : '', href: '/pruefen', sub: waiting.length ? 'Apps von Schüler/innen' : 'Alles geprüft' }),
         stat({ label: 'Klassen', value: classes.length, href: '/klassen' }),
         stat({ label: 'Heute aktiv', value: activeToday, sub: 'Schüler/innen in deinen Klassen' }),
         stat({ label: 'Aufgaben fällig', value: dueSoon.length, sub: 'in den nächsten Tagen' }),
-      ])}
+      ]) : ''}
       <div class="grid-2 mt-6"><div>
         ${waiting.length ? html`<section class="section" aria-labelledby="s-wait">${sectionHead('Wartet auf dich', { id: 's-wait', count: String(waiting.length), actions: linkButton('/pruefen', 'Alle prüfen', { kind: 'quiet', size: 'sm' }) })}
           <div class="list attention">${waiting.slice(0, 6).map((w) => html`<div class="row">${appIcon(w)}<div class="row-main">
@@ -275,7 +281,7 @@ module.exports = (app, ctx) => {
             <span class="row-sub">von ${w.owner_name} · ${w.class_name} · Version ${w.version_number || '–'} · ${formatAgo(w.created_at)}</span></div>
             <div class="row-end">${badge('wartet', 'wait')}${icon('chevronRight', { cls: 'chev' })}</div></div>`)}</div></section>` : ''}
 
-        <section class="section" aria-labelledby="s-cls">${sectionHead('Deine Klassen', { id: 's-cls', actions: linkButton('/klassen', 'Klasse anlegen', { kind: 'quiet', size: 'sm', icon: 'plus' }) })}
+        <section class="section" aria-labelledby="s-cls">${sectionHead('Deine Klassen', { id: 's-cls', actions: classes.length ? linkButton('/klassen/neu', 'Klasse anlegen', { kind: 'quiet', size: 'sm', icon: 'plus' }) : '' })}
           ${classes.length ? list(classes.map((c) => {
             const a = activity(c.id);
             return row({
@@ -284,7 +290,7 @@ module.exports = (app, ctx) => {
               end: html`<span class="hide-phone">${sparkline(a, { label: `Ergebnisse pro Tag in ${c.name}` })}</span>`,
             });
           }))
-          : empty({ icon: 'school', title: 'Noch keine Klasse', text: 'Lege deine erste Klasse an. Deine Schüler/innen treten dann per QR-Code oder Link bei.', actions: linkButton('/klassen', 'Erste Klasse anlegen', { kind: 'primary', icon: 'plus' }) })}
+          : empty({ icon: 'school', title: 'Noch keine Klasse', text: 'Lege deine erste Klasse an. Deine Schüler/innen treten dann per QR-Code oder Link bei.', actions: linkButton('/klassen/neu', 'Erste Klasse anlegen', { kind: 'primary', icon: 'plus' }) })}
         </section>
       </div><div>
         ${dueSoon.length ? html`<section class="section" aria-labelledby="s-due">${sectionHead('Bald fällig', { id: 's-due' })}
