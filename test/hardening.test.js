@@ -179,6 +179,19 @@ test('Ohne Anmeldung: eine lange Adresse bläht die gespeicherte Sitzung nicht a
     const X = h.browser();
     assert.equal((await X.get(`/klassen?${'x'.repeat(8000)}`)).status, 302);
     assert.ok(!(await X.page('/')).text.includes('danach geht es auf der Seite weiter'), 'a long address is not kept');
+    // A broken form or JSON body without an account, with a long Hub address as Referer: an error page, nothing kept.
+    const long = `${h.config.hubOrigin}/${'x'.repeat(8000)}`;
+    const broken = await h.browser().raw('POST', '/apps', { headers: { 'content-type': 'application/json', referer: long }, body: '{kaputt' });
+    assert.equal(broken.status, 400);
+    const tooBig = await h.browser().raw('POST', '/apps', { headers: { 'content-type': 'application/x-www-form-urlencoded', referer: long }, body: `a=${'x'.repeat(70 * 1024)}` });
+    assert.equal(tooBig.status, 413);
+    // Each guard on its own: no return-to-form without an account, even from a short address ...
+    const short = await h.browser().raw('POST', '/apps', { headers: { 'content-type': 'application/json', referer: `${h.config.hubOrigin}/apps` }, body: '{kaputt' });
+    assert.equal(short.status, 400);
+    // ... and for signed-in people only to short addresses.
+    const L = await h.browser().login(h.addUser('Herr Lehmann', 'teacher'));
+    assert.equal((await L.post('/apps', { name: 'x' }, { headers: { referer: long } })).status, 400);
+    assert.equal((await L.post('/apps', { name: 'x' }, { headers: { referer: `${h.config.hubOrigin}/apps` } })).status, 303, 'a normal form error still returns to the form');
     const biggest = h.db.get('SELECT MAX(LENGTH(data)) AS n FROM sessions').n;
     assert.ok(biggest < 1000, `the largest stored session has ${biggest} bytes`);
     // A normal Hub link is still remembered for after the sign-in.

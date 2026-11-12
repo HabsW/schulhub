@@ -124,10 +124,11 @@ function createHubApp(ctx) {
     if (res.headersSent) return res.end();
     // A form that failed validation goes back to the page it came from, with
     // the message and what the person typed - instead of a dead-end error page.
-    // Only for plain validation problems; never for 401/403/404/429 or JSON.
-    if (req.method === 'POST' && !wantsJson(req) && [400, 409, 413].includes(status) && req.session) {
+    // Only for plain validation problems; never for 401/403/404/429 or JSON. Only for signed-in people
+    // (without an account there are no forms, and nothing should grow their session) and short addresses.
+    if (req.method === 'POST' && req.user && !wantsJson(req) && [400, 409, 413].includes(status) && req.session) {
       const back = sameOriginPath(req, config);
-      if (back) {
+      if (back && back.length <= 512) {
         flash(req, message, 'error');
         req.session.formState = { path: back.split('?')[0], fields: keptFields(req.body) };
         return res.redirect(303, back);
