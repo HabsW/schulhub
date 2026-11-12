@@ -1,0 +1,97 @@
+/* =====================================================================
+   Review (package B): the queue and the review workbench - "a workbench:
+   preview and decision side by side, a fixed decision bar" (DESIGN.md).
+   Unlayered: wins over hub.css. One class per selector, prefixed review-.
+   Tokens only. Green/red tints mark added/removed lines (status colours).
+   ===================================================================== */
+
+/* ------------------------------------------------------------ layout
+   One column below 1200px (preview, then the panel), two from 1200px.
+   The decision bar is the bench's last item and spans its whole grid area,
+   aligned to the end: "position: sticky" then keeps it at the bottom of the
+   screen while the bench is in view. (Not "fixed": the shell animates <main>
+   with a transform, which would pin a fixed bar to <main> instead.) */
+.review-bench { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); align-items: start; }
+.review-preview { grid-column: 1; grid-row: 1; }
+.review-panel { grid-column: 1; grid-row: 2; }
+.review-panel-decide { padding-bottom: 6rem; }
+@media (min-width: 1200px) {
+  .review-bench { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); }
+  .review-panel { grid-column: 2; grid-row: 1; }
+}
+
+/* ------------------------------------------------------------ preview */
+.review-preview { display: grid; gap: var(--s-2); min-width: 0; }
+@media (min-width: 1200px) {
+  .review-preview { position: sticky; top: calc(var(--topbar) + var(--s-4)); height: calc(100dvh - var(--topbar) - var(--s-6)); grid-template-rows: auto minmax(0, 1fr) auto; }
+}
+.review-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.review-devices { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-btn); background: var(--raised-2); border: 1px solid var(--line-1); }
+.review-devbtn[aria-pressed="true"] { background: var(--ink); color: var(--ink-on-ink); }
+.review-devbtn[aria-pressed="true"]:hover { background: var(--ink); color: var(--ink-on-ink); }
+@media (max-width: 719.98px) { .review-devices { display: none; } }
+.review-tools { display: flex; align-items: center; gap: var(--s-1); margin-left: auto; }
+.review-viewport { display: flex; min-height: 0; height: min(72dvh, 46rem); padding: var(--s-3); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+@media (min-width: 1200px) { .review-viewport { height: auto; } }
+@media (max-width: 559.98px) { .review-viewport { padding: 0; border-radius: var(--r-1); } }
+/* The device frame. margin-inline:auto centres it while it fits and keeps it scrollable when it does not. */
+.review-device { flex: none; width: 100%; height: 100%; margin-inline: auto; overflow: hidden; border: 1px solid var(--line-2); border-radius: var(--r-1); background: var(--ground); transition: width var(--t-3) var(--ease); }
+.review-device-phone { width: 390px; }
+.review-device-tablet { width: 820px; }
+.review-device-full { width: 100%; }
+.review-stage { height: 100%; }
+.review-hint { display: flex; align-items: center; gap: var(--s-2); color: var(--ink-3); font-size: var(--fs-meta); }
+
+/* ------------------------------------------------------------ panel */
+.review-panel { display: grid; gap: var(--s-7); min-width: 0; }
+.review-block { display: grid; gap: var(--s-3); min-width: 0; }
+.review-blockhead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
+.review-quote { padding: var(--s-3) var(--s-4); border-left: 2px solid var(--line-3); border-radius: 0 var(--r-1) var(--r-1) 0; background: var(--raised-1); overflow-wrap: anywhere; }
+.review-facts { margin-top: var(--s-1); }
+
+/* ------------------------------------------------------------ diff */
+.review-files { display: grid; gap: var(--s-2); min-width: 0; }
+.review-file { min-width: 0; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+.review-file > summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); min-height: var(--tap); padding: var(--s-2) var(--s-3); cursor: pointer; list-style: none; }
+.review-file > summary::-webkit-details-marker { display: none; }
+.review-file > summary::before { content: ""; flex: none; width: .45rem; height: .45rem; border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3); transform: rotate(-45deg); transition: transform var(--t-2) var(--ease); }
+.review-file[open] > summary::before { transform: rotate(45deg); }
+.review-path { min-width: 0; font: 600 .85rem/1.3 var(--mono); overflow-wrap: anywhere; }
+.review-count { display: inline-flex; gap: .5rem; margin-left: auto; font: 650 .8rem/1 var(--mono); }
+.review-plus { color: var(--ok); }
+.review-minus { color: var(--danger); }
+.review-note { padding: 0 var(--s-3) var(--s-3); color: var(--ink-2); font-size: var(--fs-small); }
+.review-filelink { padding: var(--s-2) var(--s-3); border-top: 1px solid var(--line-1); font-size: var(--fs-small); }
+.review-filelink > a { display: inline-flex; align-items: center; gap: .35rem; min-height: 2rem; }
+.review-diff { max-height: 60dvh; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--line-1); }
+.review-hunk-head { position: sticky; left: 0; padding: .3rem var(--s-3); border-bottom: 1px solid var(--line-1); background: var(--raised-2); color: var(--ink-3); font: 600 var(--fs-meta)/1.4 var(--sans); }
+.review-code { margin: 0; padding: 0; overflow: visible; border: 0; border-radius: 0; background: none; font-size: .8rem; line-height: 1.6; }
+.review-code > code { display: block; min-width: max-content; font: inherit; }
+.review-line { display: grid; grid-template-columns: 3.25rem 3.25rem auto; }
+.review-add { background: var(--ok-tint); }
+.review-del { background: var(--danger-tint); }
+.review-ln { position: sticky; left: 0; padding-right: .6rem; text-align: right; color: var(--ink-3); user-select: none; }
+.review-ln::before { content: attr(data-n); }
+.review-tx { padding-right: var(--s-4); white-space: pre; }
+.review-tx::before { content: " "; display: inline-block; width: 1.75ch; color: var(--ink-3); user-select: none; }
+.review-tx-add::before { content: "+"; color: var(--ok); }
+.review-tx-del::before { content: "−"; color: var(--danger); }
+
+/* ------------------------------------------------------------ decision bar */
+.review-decide { position: sticky; z-index: 20; grid-column: 1; grid-row: 1 / span 2; align-self: end; bottom: calc(var(--tabbar) + env(safe-area-inset-bottom) + var(--s-2)); display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); padding: var(--s-3); border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--raised-1); box-shadow: var(--shadow-float); }
+@media (min-width: 720px) { .review-decide { bottom: var(--s-4); padding: var(--s-3) var(--s-4); } }
+@media (min-width: 1200px) { .review-decide { grid-column: 2; grid-row: 1; } }
+/* the label is left out where it would push the buttons onto a second line */
+.review-decide-what { display: none; min-width: 0; overflow-wrap: anywhere; }
+@media (min-width: 560px) and (max-width: 1199.98px), (min-width: 1500px) { .review-decide-what { display: block; } }
+.review-decide-actions { display: flex; flex: 1 1 auto; justify-content: flex-end; gap: var(--s-2); }
+.review-act { position: relative; flex: 0 0 auto; }
+.review-act-btn { list-style: none; }
+.review-act-btn::-webkit-details-marker { display: none; }
+.review-sheet { position: absolute; z-index: 30; right: 0; bottom: calc(100% + var(--s-3)); width: min(26rem, calc(100vw - 2 * var(--gutter))); display: grid; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--line-2); border-radius: var(--r-3); background: var(--raised-2); box-shadow: var(--shadow-float); animation: pop var(--t-2) var(--ease) both; }
+/* phones: two equal buttons; a sheet opens over the whole bar */
+@media (max-width: 559.98px) {
+  .review-act { position: static; flex: 1 1 0; }
+  .review-act-btn { width: 100%; }
+  .review-sheet { left: 0; right: 0; width: auto; }
+}

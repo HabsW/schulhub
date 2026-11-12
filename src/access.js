@@ -240,6 +240,21 @@ function createAccess(db) {
     );
   }
 
+  // ----- package B -----
+  /**
+   * The request of one app in one class that this user may open in the review
+   * workbench: the user may change the class (its teacher or the admin, never
+   * while archived) and the app's request there is waiting - or was returned,
+   * which the workbench shows read-only. Returns the class_apps row or null.
+   */
+  function reviewRequest(user, classId, appId) {
+    if (typeof classId !== 'string' || typeof appId !== 'string' || !canChangeClass(user, classId)) return null;
+    return db.get(
+      "SELECT * FROM class_apps WHERE class_id = ? AND app_id = ? AND request_state IN ('waiting','returned') AND requested_version_id IS NOT NULL",
+      classId, appId
+    ) || null;
+  }
+
   return {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
@@ -251,6 +266,7 @@ function createAccess(db) {
     canAnnounce, canSeeAnnouncement, canDeleteAnnouncement,
     canJoinRoom,
     visibleApps, visibleClasses,
+    reviewRequest, // package B
   };
 }
 
