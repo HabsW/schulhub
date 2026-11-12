@@ -5,6 +5,7 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -260,6 +261,10 @@ test('Nutzung: keine Namen, keine Zahlen je Klasse, kleine Zahlen bleiben verbor
   assert.ok(usage.includes('weniger als 5'));
   assert.ok(usage.includes('zu wenige Daten'));
   for (const word of ['Mia', 'Ben', '7b', '80 %']) assert.ok(!usage.includes(word), `no ${word}`);
+  // with two people even the openings per day and in total would describe what single persons did
+  assert.ok(!usage.includes('<svg'), 'no daily chart below five people');
+  assert.ok(!/<span class="stat-value">2<\/span>/.test(usage), 'no exact number of openings');
+  assert.ok(usage.includes('erst, wenn mindestens fünf Personen'));
   // with enough people the average appears - still without names or classes
   const others = await Promise.all(['Ole', 'Pia', 'Raul', 'Sina'].map(async (n) => {
     const b = await h.browser().login(h.addUser(`${n} Muster`, 'student'));
@@ -272,6 +277,7 @@ test('Nutzung: keine Namen, keine Zahlen je Klasse, kleine Zahlen bleiben verbor
   }
   usage = section((await L.get(`/apps/${app.id}`)).text, 'nutzung');
   assert.ok(usage.includes('6') && usage.includes('53 %'), 'six people, average (2*80 + 4*40)/6 = 53 %');
+  assert.ok(usage.includes('<svg'), 'the daily chart from five people on');
   for (const word of ['Mia', 'Ben', 'Ole', 'Muster', '7b']) assert.ok(!usage.includes(word), `no ${word}`);
   // previews never count
   const before = h.db.get('SELECT COUNT(*) AS n FROM plays WHERE app_id = ?', app.id).n;
@@ -432,4 +438,130 @@ test('Neue App: ein Fehler führt zurück zum Formular, alle Eingaben bleiben st
   const ok = await M.post('/apps', { name: 'Fallback', emoji: '<svg>', color: '99', category: 'Zauberei' });
   const a = appRow(ok.headers.location.split('/').pop());
   assert.deepEqual([a.emoji, a.color, a.category, a.grade_min], ['🎮', 0, '', null]);
+});
+
+test('Prüfbericht: feindliche Dateien blockieren den Hub nicht – lineare Prüfung mit Zeitbudget', async () => {
+  const { analyzeVersion, BUDGET_MS } = require('../src/checks');
+  const fit = (unit) => Buffer.from(unit.repeat(Math.floor((512 * 1024 - 64) / unit.length)));
+  const timed = (files) => {
+    const list = Object.entries(files).map(([p, buf]) => ({ path: p, size: buf.length, sha256: p }));
+    const ctx = { uploads: { listFiles: () => list, readBlob: (sha) => files[sha] } };
+    const t0 = process.hrtime.bigint();
+    const result = analyzeVersion(ctx, { id: 'v' });
+    return { ms: Number(process.hrtime.bigint() - t0) / 1e6, result, ctx };
+  };
+  // the reviewer's shape: eight 512 KB files of "<a href=" + spaces (once ~600 ms per file)
+  const hostile = fit('<a href=' + ' '.repeat(20));
+  const eight = Object.fromEntries(['index.html', ...Array.from({ length: 7 }, (_, i) => `p${i}.html`)].map((p) => [p, hostile]));
+  const run = timed(eight);
+  assert.ok(run.ms < BUDGET_MS + 60, `eight hostile files took ${Math.round(run.ms)} ms`);
+  // other shapes against the tag scanner, the script and the style patterns
+  for (const [name, file] of [
+    ['unclosed quotes', { 'index.html': fit('<img src="' + 'x'.repeat(30)) }],
+    ['unclosed comments', { 'index.html': fit('<!--') }],
+    ['style attributes', { 'index.html': fit('<p style="background:url(/x.png) url(//e.x/y)">') }],
+    ['import spam', { 'a.js': fit('import ') }],
+    ['fetch spam', { 'a.js': fit('fetch("') }],
+    ['url( spam', { 'a.css': fit('url(') }],
+    ['@import spam', { 'a.css': fit('@import   url(   ') }],
+  ]) {
+    const r = timed(file);
+    assert.ok(r.ms < BUDGET_MS, `${name}: ${Math.round(r.ms)} ms`);
+  }
+  // when the budget is used up, the check stops and says so
+  const cut = analyzeVersion(run.ctx, { id: 'v' }, { budgetMs: -1 });
+  assert.ok(cut.report.items.some((i) => /Prüfung abgebrochen/.test(i.text)));
+
+  // through a real upload: other requests are answered while the hostile zip is checked
+  const app = await h.makeApp(M, 'Bremse?');
+  const zip = makeZip(Object.entries(eight).map(([name, data]) => ({ name, data })));
+  const upload = M.send('POST', `/apps/${app.id}/versionen/zip`, zip, 'application/zip');
+  await new Promise((r) => setTimeout(r, 20));
+  const t0 = Date.now();
+  assert.equal((await h.browser().get('/static/hub.css')).status, 200);
+  const waited = Date.now() - t0;
+  assert.equal((await upload).status, 200);
+  assert.ok(waited < 1000, `a static file waited ${waited} ms during the upload`);
+});
+
+test('Datei-Upload: Fremde werden abgewiesen, bevor der Inhalt gelesen wird', async () => {
+  const app = await h.makeApp(M, 'Nur meins');
+  const v = (await M.send('POST', `/apps/${app.id}/versionen`)).json();
+  const csrfOf = async (b) => /<meta name="csrf" content="([^"]*)"/.exec((await b.page('/start')).text)[1];
+  /** A PUT that announces `declared` bytes but sends only a little and never ends: only a check BEFORE reading can answer. */
+  const partialPut = (b, csrf, url, declared) => new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: url,
+      headers: {
+        host: h.config.hubHost, cookie: [...b.jar].map(([k, val]) => `${k}=${val}`).join('; '),
+        'content-type': 'application/octet-stream', 'content-length': declared, 'x-csrf-token': csrf, accept: 'application/json',
+      },
+    });
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error('no answer: the server waited for the body'));
+    }, 3000);
+    req.on('response', (res) => {
+      clearTimeout(timer);
+      res.resume();
+      resolve({ status: res.statusCode, connection: res.headers.connection });
+      req.destroy();
+    });
+    req.on('error', () => {}); // the server closes the connection while we would still be sending
+    req.write(Buffer.alloc(64 * 1024, 0x41));
+  });
+  const big = 20 * 1024 * 1024; // under the 25 MB file limit: only the permission check can refuse it early
+  const url = `/apps/${app.id}/versionen/${v.id}/datei?pfad=gross.js`;
+  for (const who of [B, L, Y]) {
+    const r = await partialPut(who, await csrfOf(who), url, big);
+    assert.equal(r.status, 404);
+    assert.equal(r.connection, 'close');
+  }
+  // the owner, but a finished version: refused before reading as well
+  const csrfM = await csrfOf(M);
+  assert.equal((await partialPut(M, csrfM, `/apps/${app.id}/versionen/${app.published_version_id}/datei?pfad=a.js`, big)).status, 404);
+  // nothing was stored; the owner's real upload still works
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM app_files WHERE version_id = ?', v.id).n, 0);
+  assert.equal((await M.send('PUT', `/apps/${app.id}/versionen/${v.id}/datei?pfad=index.html`, Buffer.from('<p>ok</p>'), 'application/octet-stream')).status, 200);
+  await M.send('POST', `/apps/${app.id}/versionen/${v.id}/abbrechen`);
+});
+
+test('Kommentare löschen: nur die eigene – oder die Verwaltung; Entscheidungen bleiben', async () => {
+  const app = await submitted(M, 'Kommentar-Test', cls7b);
+  await M.post(`/apps/${app.id}/kommentare`, { text: 'Von Mia' });
+  await L.post(`/apps/${app.id}/kommentare`, { text: 'Von Herrn Lehmann' });
+  await L.post(`/pruefen/${cls7b}/${app.id}/zurueckgeben`, { version: app.published_version_id, grund: 'Bitte noch Farben.' });
+  const id = (body) => h.db.get('SELECT id FROM comments WHERE app_id = ? AND body = ?', app.id, body).id;
+  const exists = (cid) => Boolean(h.db.get('SELECT 1 AS ok FROM comments WHERE id = ?', cid));
+  const del = (b, cid) => b.post(`/apps/${app.id}/kommentare/${cid}/loeschen`);
+  const fromMia = id('Von Mia');
+  const fromTeacher = id('Von Herrn Lehmann');
+  const decision = id('Bitte noch Farben.');
+  // the owner may open the app page, but not delete what the teacher wrote - and the other way round
+  assert.equal((await del(M, fromTeacher)).status, 404);
+  assert.equal((await del(L, fromMia)).status, 404);
+  for (const who of [B, Y]) assert.equal((await del(who, fromMia)).status, 404);
+  assert.ok(exists(fromTeacher) && exists(fromMia));
+  // a decision is the review record: not even its author deletes it
+  assert.equal((await del(L, decision)).status, 404);
+  assert.ok(exists(decision));
+  assert.equal((await del(M, fromMia)).status, 303);
+  assert.equal(exists(fromMia), false);
+  assert.equal((await del(A, fromTeacher)).status, 303, 'the admin may');
+  assert.equal(exists(fromTeacher), false);
+  const { access } = h.hub.ctx;
+  assert.equal(access.canDeleteComment(mia, { kind: 'comment', author_id: lehmann.id }), false);
+  assert.equal(access.canDeleteComment(admin, { kind: 'returned', author_id: lehmann.id }), false);
+  assert.equal(access.isAppOwner(admin, app), false, 'the admin manages, but does not act as the owner');
+  // ... so the admin cannot submit or withdraw in the owner's name
+  assert.equal((await A.post(`/apps/${app.id}/zurueckziehen`, { klasse: cls7b })).status, 404);
+});
+
+test('Veröffentlichen ohne Klasse sagt, wer die App öffnen kann', async () => {
+  const app = await h.makeApp(M, 'Nur für mich');
+  const v2 = await h.uploadFolder(M, app.id, { 'index.html': '<p>v2</p>' });
+  const page = (await M.get(`/apps/${app.id}`)).text;
+  assert.ok(page.includes('Öffnen kann sie dann nur du – bis die App in einer Klasse ist oder für die ganze Schule freigegeben wird.'));
+  assert.ok(!page.includes('wenn jemand die App startet'));
+  assert.ok(page.includes(v2));
 });

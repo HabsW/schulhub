@@ -138,13 +138,18 @@ module.exports = (app, ctx) => {
     const schoolwide = a.schoolwide_version_id && a.schoolwide_version_id !== versionId ? (actor.role === 'admin' ? 'now' : 'wait') : '';
     return { now, wait, schoolwide };
   }
-  function planText(plan) {
+  function planText(plan, a, actor) {
     const parts = [];
     if (plan.now.length) parts.push(`Sofort neu in ${names(plan.now)}.`);
     if (plan.wait.length) parts.push(`In ${names(plan.wait)} wartet sie auf die Lehrkraft – bis zur Freigabe läuft dort die bisherige Version.`);
     if (plan.schoolwide === 'now') parts.push('Für die ganze Schule gilt sie sofort.');
     if (plan.schoolwide === 'wait') parts.push('Für die ganze Schule wartet sie auf die Verwaltung.');
-    if (!parts.length) parts.push('Sie wird zu der Version, die sich öffnet, wenn jemand die App startet. In Klassen ist die App noch nicht.');
+    if (!parts.length) {
+      // In no class and not school-wide: say exactly who can open it.
+      parts.push(a.shared && access.canShareApp(actor, a)
+        ? 'Du und die Kolleg/innen, mit denen du die App teilst, können sie öffnen – Schüler/innen erst, wenn sie in einer Klasse ist.'
+        : `Öffnen kann sie dann nur ${access.isAppOwner(actor, a) ? 'du' : 'die Besitzerin oder der Besitzer'} – bis die App in einer Klasse ist oder für die ganze Schule freigegeben wird.`);
+    }
     return parts.join(' ');
   }
 
@@ -296,17 +301,20 @@ module.exports = (app, ctx) => {
       a.id, since
     );
     const word = (t) => html`<span class="apps-statword">${t}</span>`;
+    // With fewer than five people, how often (and on which days) the app was opened would
+    // describe what single persons did - so those numbers are not shown either.
+    const enough = people >= USAGE_MIN_PEOPLE;
     return html`<section class="section" id="nutzung" aria-labelledby="h-nutzung">
-      ${sectionHead('Nutzung', { id: 'h-nutzung', sub: 'Anonym und grob: ohne Namen, ohne Zahlen einzelner Klassen. Vorschauen zählen nicht.' })}
+      ${sectionHead('Nutzung', { id: 'h-nutzung', sub: 'Anonym und grob: ohne Namen, ohne Zahlen einzelner Klassen, Zahlen erst ab fünf Personen. Vorschauen zählen nicht.' })}
       ${stats([
-        stat({ label: 'Geöffnet', value: opens, sub: 'in 30 Tagen' }),
+        stat({ label: 'Geöffnet', value: enough ? opens : word('zu wenige Daten'), sub: 'in 30 Tagen' }),
         stat({ label: 'Personen', value: people < USAGE_MIN_PEOPLE ? word('weniger als 5') : people, sub: 'in 30 Tagen' }),
         stat({ label: 'Klassen', value: classes, sub: 'nutzen die App' }),
         stat({ label: 'Ergebnis im Schnitt', value: res.people >= USAGE_MIN_PEOPLE && res.avg !== null ? `${Math.round(res.avg * 100)} %` : word('zu wenige Daten'), sub: 'in 30 Tagen' }),
       ])}
-      <div class="apps-usage">${opens
+      <div class="apps-usage">${enough && opens
         ? html`${barChart(bars, { label: 'Öffnungen pro Tag in den letzten 30 Tagen', height: 80, labels: false })}<div class="apps-axis" aria-hidden="true"><span>${formatDay(now - 29 * DAY)}</span><span>heute</span></div>`
-        : html`<p class="meta">In den letzten 30 Tagen hat niemand die App geöffnet.</p>`}</div>
+        : html`<p class="meta">${people ? 'Wie oft die App pro Tag geöffnet wurde, zeigt der Hub erst, wenn mindestens fünf Personen sie in 30 Tagen geöffnet haben.' : 'In den letzten 30 Tagen hat niemand die App geöffnet.'}</p>`}</div>
     </section>`;
   }
 
@@ -332,7 +340,7 @@ module.exports = (app, ctx) => {
 
   function ownerPage(req, a) {
     const user = req.user;
-    const isOwner = a.owner_id === user.id;
+    const isOwner = access.isAppOwner(user, a);
     const isAdmin = access.isAdmin(user);
     const ownerRow = db.get('SELECT name FROM users WHERE id = ?', a.owner_id);
     const versions = db.all("SELECT * FROM app_versions WHERE app_id = ? AND status = 'ready' ORDER BY number DESC", a.id);
@@ -430,8 +438,8 @@ module.exports = (app, ctx) => {
       const plan = live ? null : publishPlan(user, a, v.id, rows);
       // Publishing first; the same three tools always end the row, so they line up from row to row.
       const actions = html`${live ? '' : i === 0
-          ? postButton(req, `/apps/${a.id}/veroeffentlichen`, `Version ${v.number} veröffentlichen`, { kind: 'primary', size: 'sm', fields: { version: v.id }, confirm: `Version ${v.number} veröffentlichen?\n${planText(plan)}`, confirmLabel: 'Veröffentlichen' })
-          : postButton(req, `/apps/${a.id}/veroeffentlichen`, 'Veröffentlichen', { kind: 'quiet', size: 'sm', fields: { version: v.id }, confirm: `Ältere Version ${v.number} veröffentlichen?\n${published ? `Sie ersetzt Version ${published.number}. ` : ''}${planText(plan)}`, confirmLabel: `Version ${v.number} veröffentlichen` })}
+          ? postButton(req, `/apps/${a.id}/veroeffentlichen`, `Version ${v.number} veröffentlichen`, { kind: 'primary', size: 'sm', fields: { version: v.id }, confirm: `Version ${v.number} veröffentlichen?\n${planText(plan, a, user)}`, confirmLabel: 'Veröffentlichen' })
+          : postButton(req, `/apps/${a.id}/veroeffentlichen`, 'Veröffentlichen', { kind: 'quiet', size: 'sm', fields: { version: v.id }, confirm: `Ältere Version ${v.number} veröffentlichen?\n${published ? `Sie ersetzt Version ${published.number}. ` : ''}${planText(plan, a, user)}`, confirmLabel: `Version ${v.number} veröffentlichen` })}
         ${versionTools(v)}
         ${inUse ? html`<span class="apps-iconspace" aria-hidden="true"></span>` : postButton(req, `/apps/${a.id}/versionen/${v.id}/loeschen`, `Version ${v.number} löschen`, { cls: 'btn quiet sm icon danger apps-quietdanger', icon: 'trash', iconOnly: true, confirm: `Version ${v.number} löschen?\nIhre Dateien werden endgültig gelöscht. Das kann nicht rückgängig gemacht werden.`, confirmLabel: 'Löschen' })}`;
       return versionLine(v, { live, marks, actions });
@@ -517,7 +525,7 @@ module.exports = (app, ctx) => {
       ${sectionHead('Verlauf', { id: 'h-verlauf', sub: 'Einreichungen, Entscheidungen der Lehrkräfte und Kommentare.' })}
       ${hist.more ? html`<p class="meta mb-4">Ältere Einträge werden nicht angezeigt.</p>` : ''}
       ${hist.rows.length ? V.historyTimeline(req, hist.rows, {
-        canDelete: (r) => r.kind === 'comment' && (r.author_id === user.id || isAdmin),
+        canDelete: (r) => access.canDeleteComment(user, r),
         deleteAction: (r) => `/apps/${a.id}/kommentare/${r.id}/loeschen`,
       }) : empty({ icon: 'message', title: 'Noch nichts passiert', text: 'Hier stehen Einreichungen, Freigaben, Rückgaben und Kommentare.' })}
       ${V.commentForm(req, `/apps/${a.id}/kommentare`, { hint: 'Lehrkräfte, die die App prüfen, lesen mit.' })}
@@ -603,7 +611,7 @@ module.exports = (app, ctx) => {
         <section class="section" id="versionen" aria-labelledby="h-versionen">${sectionHead('Versionen', { id: 'h-versionen', sub: 'Die Versionen, die in deine Klassen eingereicht oder dort freigegeben wurden.' })}
           ${versions.length ? list(versions.map(versionRow)) : empty({ icon: 'layers', title: 'Keine Version für dich', text: 'Sobald eine Version in deine Klasse eingereicht wird, steht sie hier.' })}</section>
         <section class="section" id="verlauf" aria-labelledby="h-verlauf">${sectionHead('Verlauf', { id: 'h-verlauf' })}
-          ${visible.length ? V.historyTimeline(req, visible, { canDelete: (r) => r.kind === 'comment' && r.author_id === user.id, deleteAction: (r) => `/apps/${a.id}/kommentare/${r.id}/loeschen` }) : empty({ icon: 'message', title: 'Noch kein Verlauf' })}
+          ${visible.length ? V.historyTimeline(req, visible, { canDelete: (r) => access.canDeleteComment(user, r), deleteAction: (r) => `/apps/${a.id}/kommentare/${r.id}/loeschen` }) : empty({ icon: 'message', title: 'Noch kein Verlauf' })}
           ${V.commentForm(req, `/apps/${a.id}/kommentare`, { hint: `${owner ? owner.name : 'Die Besitzerin oder der Besitzer'} liest mit.` })}</section>
       </div><div>
         <section class="section" id="klassen" aria-labelledby="h-klassen">${sectionHead('Deine Klassen', { id: 'h-klassen' })}
@@ -649,11 +657,29 @@ module.exports = (app, ctx) => {
     res.json({ id: v.id, number: v.number });
   });
 
-  app.put('/apps/:id/versionen/:vid/datei', express.raw({ type: 'application/octet-stream', limit: L.maxFileBytes }), (req, res) => {
-    const a = manageApp(req);
-    limiter.guard('uploadFiles', req.user.id);
-    const v = getVersion(a, req.params.vid, 'uploading');
-    if (!req.is('application/octet-stream')) throw new HttpError(415, 'Falsches Format.');
+  /**
+   * Before a file's body is read: this user manages the app, the version belongs
+   * to it and is still being uploaded, the format is right and the rate limit
+   * holds. Only then express.raw reads the body (at most one file's size), so a
+   * stranger's large upload is refused without being buffered. A refused upload
+   * closes the connection instead of receiving the rest.
+   */
+  function uploadTarget(req, res, next) {
+    try {
+      const a = manageApp(req);
+      limiter.guard('uploadFiles', req.user.id);
+      const v = getVersion(a, req.params.vid, 'uploading');
+      if (!req.is('application/octet-stream')) throw new HttpError(415, 'Falsches Format.');
+      req.uploadTarget = { a, v };
+      next();
+    } catch (err) {
+      res.set('Connection', 'close');
+      next(err);
+    }
+  }
+
+  app.put('/apps/:id/versionen/:vid/datei', uploadTarget, express.raw({ type: 'application/octet-stream', limit: L.maxFileBytes }), (req, res) => {
+    const { a, v } = req.uploadTarget;
     const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
     const added = uploads.addFile(v, a.owner_id, req.query.pfad, data);
     res.json({ ok: true, skipped: !added });
@@ -732,7 +758,7 @@ module.exports = (app, ctx) => {
   /** The owner's app and one class it is in (or may go into). */
   function ownerClass(req) {
     const a = manageApp(req);
-    if (a.owner_id !== req.user.id) throw deny();
+    if (!access.isAppOwner(req.user, a)) throw deny();
     const cls = getClass(req.body.klasse);
     if (!cls) throw deny();
     return { a, cls };
@@ -913,8 +939,8 @@ module.exports = (app, ctx) => {
 
   app.post('/apps/:id/kommentare/:cid/loeschen', (req, res) => {
     const a = reviewApp(req);
-    const c = db.get("SELECT * FROM comments WHERE id = ? AND app_id = ? AND kind = 'comment'", String(req.params.cid), a.id);
-    if (!c || !(c.author_id === req.user.id || access.isAdmin(req.user))) throw deny();
+    const c = db.get('SELECT * FROM comments WHERE id = ? AND app_id = ?', String(req.params.cid), a.id);
+    if (!c || !access.canDeleteComment(req.user, c)) throw deny();
     db.run('DELETE FROM comments WHERE id = ?', c.id);
     services.audit(req.user, 'kommentar_geloescht', a.name);
     flash(req, 'Kommentar gelöscht.');

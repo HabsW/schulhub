@@ -275,6 +275,19 @@ function createAccess(db) {
     ) || null;
   }
 
+  /**
+   * The owner's own steps with an app in a class - submit, withdraw, take out.
+   * Only the owner: the admin manages every app, but never acts as its owner.
+   */
+  const isAppOwner = (user, app) => Boolean(user && app) && app.owner_id === user.id;
+
+  /**
+   * Delete a comment on an app: only a plain comment (decisions stay as the
+   * review record), and only by its author or the admin.
+   */
+  const canDeleteComment = (user, comment) =>
+    Boolean(user && comment) && comment.kind === 'comment' && (comment.author_id === user.id || isAdmin(user));
+
   return {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
@@ -287,7 +300,7 @@ function createAccess(db) {
     canJoinRoom,
     visibleApps, visibleClasses,
     canLeaveClass, canSeeClassResults, canMarkFeedbackRead, // package A
-    reviewRequest, // package B
+    reviewRequest, isAppOwner, canDeleteComment, // package B
   };
 }
 

@@ -81,7 +81,7 @@
     if (type) headers['Content-Type'] = type;
     return fetch(url, { method: method, headers: headers, body: body, signal: signal }).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
-        if (!res.ok) throw new Error(data.error || 'Der Upload hat nicht geklappt.');
+        if (!res.ok) throw refused(res.status, data.error);
         return data;
       });
     });
@@ -91,6 +91,21 @@
     var e = new Error('Upload abgebrochen.');
     e.name = 'AbortError';
     return e;
+  }
+  /** An answer of the server; err.status tells whether trying again can help. */
+  function refused(status, message) {
+    var e = new Error(message || 'Der Upload hat nicht geklappt.');
+    e.status = status;
+    return e;
+  }
+  /**
+   * Trying the same files again only helps when nothing was wrong with them:
+   * a cancel, a lost connection, a busy or failing server. A refused file
+   * (wrong type, too big, missing index.html …) has to be changed first.
+   */
+  function canRetry(err) {
+    if (!err || err.name === 'AbortError' || !err.status) return true;
+    return err.status >= 500 || err.status === 408 || err.status === 429;
   }
 
   // ------------------------------------------------------------ the checks
@@ -175,7 +190,7 @@
       var data = {};
       try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
       if (xhr.status >= 200 && xhr.status < 300) done(state, data);
-      else failed(state, new Error(data.error || 'Der Upload hat nicht geklappt.'));
+      else failed(state, refused(xhr.status, data.error));
     };
     xhr.onerror = function () { failed(state, new Error('Die Verbindung ist abgebrochen. Bitte versuch es noch einmal.')); };
     xhr.onabort = function () { failed(state, stopped()); };
@@ -200,8 +215,15 @@
     if (state.versionId) request('POST', base + '/' + encodeURIComponent(state.versionId) + '/abbrechen', null).catch(function () {});
     setBusy(false);
     var aborted = state.aborted || (err && err.name === 'AbortError');
-    show(aborted ? 'Upload abgebrochen. Es wurde nichts gespeichert.' : (err && err.message) || 'Der Upload hat nicht geklappt.', aborted ? 'stopped' : 'error');
-    retryButton.hidden = !job;
+    var retry = Boolean(job) && canRetry(err);
+    var message = aborted ? 'Upload abgebrochen. Es wurde nichts gespeichert.' : (err && err.message) || 'Der Upload hat nicht geklappt.';
+    if (!aborted && !retry) {
+      message += job && job.kind === 'zip'
+        ? ' Ändere das in der ZIP-Datei und wähle sie dann noch einmal aus.'
+        : ' Ändere das in deinem Ordner und wähle ihn dann noch einmal aus.';
+    }
+    show(message, aborted ? 'stopped' : 'error');
+    retryButton.hidden = !retry;
   }
 
   cancelButton.addEventListener('click', function () {
