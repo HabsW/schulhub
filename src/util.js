@@ -26,12 +26,15 @@ const TZ = 'Europe/Berlin';
 const dateFmt = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short', timeZone: TZ });
 const dayFmt = new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: 'numeric', month: 'short', timeZone: TZ });
 const longDayFmt = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ });
+const fullDateFmt = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
 const ymdFmt = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: TZ });
 const formatDate = (ts) => (ts ? dateFmt.format(new Date(ts)) : '–');
 /** "Do., 12. Nov." */
 const formatDay = (ts) => (ts ? dayFmt.format(new Date(ts)) : '–');
 /** "Donnerstag, 12. November" */
 const formatLongDay = (ts) => longDayFmt.format(new Date(ts));
+/** "12. November 2026" */
+const formatFullDate = (ts) => (ts ? fullDateFmt.format(new Date(ts)) : '–');
 /** Calendar day in school time, "2026-11-12". */
 const dayKey = (ts) => ymdFmt.format(new Date(ts));
 /** Whole calendar days from today to ts (negative = in the past), in school time. */
@@ -97,5 +100,5 @@ function safeEqual(a, b) {
 
 module.exports = {
   newId, HttpError, deny, bad, cleanText, safeEqual, isLocalPath,
-  formatDate, formatDay, formatLongDay, formatAgo, formatDue, formatBytes, dayKey, daysFromToday, plural,
+  formatDate, formatDay, formatLongDay, formatFullDate, formatAgo, formatDue, formatBytes, dayKey, daysFromToday, plural,
 };

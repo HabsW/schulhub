@@ -165,7 +165,7 @@ const shelf = (items, label = 'Apps') => html`<ul class="shelf" role="list" aria
 function dataTable({ columns, rows, caption = '', empty: emptyHtml = '', cls = '' }) {
   if (!rows.length && emptyHtml) return emptyHtml;
   const cellOf = (col, r) => (col.render ? col.render(r) : r[col.key]);
-  return html`<div class="table-wrap"><table class="data stack${cls ? ` ${cls}` : ''}">${caption ? html`<caption>${caption}</caption>` : ''}
+  return html`<div class="table-wrap"><table class="data records${cls ? ` ${cls}` : ''}">${caption ? html`<caption>${caption}</caption>` : ''}
     <thead><tr>${columns.map((c) => html`<th scope="col"${c.num ? raw(' class="num"') : ''}>${c.actions ? html`<span class="visually-hidden">${c.label || 'Aktionen'}</span>` : c.label}</th>`)}</tr></thead>
     <tbody>${rows.map((r) => html`<tr>${columns.map((c) => {
       const value = cellOf(c, r);
@@ -199,14 +199,15 @@ function barChart(bars, { label = 'Diagramm', unit = '', height = 120 } = {}) {
   const n = bars.length || 1;
   const gap = 4;
   const bw = (600 - gap * (n - 1)) / n;
-  return html`<figure class="chart-figure"><svg class="chart" viewBox="0 0 600 ${height + 18}" role="img" aria-label="${label}">
+  // Labels are HTML under the SVG: SVG text would shrink to unreadable sizes on phones.
+  return html`<figure class="chart-figure"><svg class="chart" viewBox="0 0 600 ${height + 2}" preserveAspectRatio="none" role="img" aria-label="${label}">
     <line class="axis" x1="0" y1="${height}" x2="600" y2="${height}"/>
     ${bars.map((b, i) => {
       const h = Math.round((b.value / max) * (height - 4));
       return html`<rect class="bar${b.now ? ' now' : ''}" x="${(i * (bw + gap)).toFixed(1)}" y="${height - h}" width="${bw.toFixed(1)}" height="${Math.max(h, b.value > 0 ? 2 : 0)}" rx="2"/>`;
     })}
-    ${bars.length <= 14 ? bars.map((b, i) => html`<text x="${(i * (bw + gap) + bw / 2).toFixed(1)}" y="${height + 14}" text-anchor="middle">${b.label}</text>`) : ''}
-  </svg><figcaption class="visually-hidden">${label}: ${bars.map((b) => `${b.label} ${b.value}${unit}`).join(', ')}</figcaption></figure>`;
+  </svg>${bars.length <= 31 ? html`<div class="chart-labels${bars.length > 8 ? ' many' : ''}" aria-hidden="true">${bars.map((b) => html`<span>${b.label}</span>`)}</div>` : ''}
+  <figcaption class="visually-hidden">${label}: ${bars.map((b) => `${b.label} ${b.value}${unit}`).join(', ')}</figcaption></figure>`;
 }
 
 /** A number with a label. tone: '' | 'ok' | 'wait' | 'danger'. */

@@ -96,6 +96,13 @@
     if (event.target.matches && event.target.matches('input.copy')) event.target.select();
   });
 
+  // ----------------------------------------------------------- tabs
+  // On narrow screens the tab row scrolls sideways: bring the current tab into view.
+  document.querySelectorAll('.tabs [aria-current="page"]').forEach(function (tab) {
+    var row = tab.parentElement;
+    if (row.scrollWidth > row.clientWidth) row.scrollLeft = tab.offsetLeft - (row.clientWidth - tab.offsetWidth) / 2;
+  });
+
   // ----------------------------------------------------- auto-submit filters
   // <form data-autosubmit>: filters and segmented controls apply on change.
   document.addEventListener('change', function (event) {
