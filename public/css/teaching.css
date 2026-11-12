@@ -5,15 +5,6 @@
    tokens only. Heat and app colours come from hub.css classes.
    ===================================================================== */
 
-/* ------------------------------------------------------------- tables
-   dataTable() gives every table the class "stack" (records on phones), and
-   hub.css also has a legacy helper .stack { display: grid }. On wide screens
-   that turns thead and tbody into separate tables whose columns no longer
-   line up. Our tables carry .teach-table and stay real tables there. */
-@media (min-width: 720px) {
-  .teach-table { display: table; }
-}
-
 /* ------------------------------------------------------------ class mark */
 .teach-mark {
   display: inline-grid; place-items: center; flex: none;
@@ -31,6 +22,10 @@
 .teach-subhead:first-of-type { margin-top: 0; }
 
 /* ------------------------------------------------------------ actions */
+/* a POST button in a page head stretches on phones like the link buttons beside it */
+.teach-stretch { display: flex; flex: 1 1 auto; }
+.teach-stretch > form { display: flex; flex: 1 1 auto; }
+@media (min-width: 560px) { .teach-stretch { flex: 0 0 auto; } }
 .teach-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .teach-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
 .teach-push { display: inline-flex; margin-left: var(--s-2); padding-left: var(--s-3); border-left: 1px solid var(--line-1); }
@@ -46,14 +41,16 @@
 .teach-copy > .btn { flex: none; }
 
 /* -------------------------------------------------------------- charts
-   The SVG's own week labels scale with the chart; ours are HTML below it. */
-.teach-chart { display: grid; gap: var(--s-1); }
-.teach-chart text { display: none; }
-.teach-axis { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); column-gap: .67%; margin-top: calc(-1 * var(--s-3)); color: var(--ink-3); font-size: .72rem; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+   barChart(…, { labels: false }) plus our own axis: one label per bar, the
+   columns match the bars (gap 4 of 600 units); on phones only the number. */
+.teach-chart { display: grid; gap: .3rem; }
+.teach-axis { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); column-gap: .67%; color: var(--ink-3); font-size: .72rem; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
 .teach-axis-now { color: var(--ink); font-weight: 700; }
+@media (max-width: 559.98px) { .teach-kw { display: none; } }
 .teach-chart-empty { padding: var(--s-4) 0; }
 .teach-chartpanel { display: grid; gap: var(--s-3); height: 100%; align-content: space-between; }
 .teach-stats2 { grid-template-columns: repeat(2, minmax(0, 1fr)); height: 100%; }
+.teach-stats3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (min-width: 720px) and (max-width: 1099.98px) {
   .teach-results th, .teach-results td { padding-inline: .55rem; }
 }
@@ -72,6 +69,8 @@
 }
 .teach-started { box-shadow: inset 0 0 0 1px var(--line-3); color: var(--ink-2); }
 .teach-cell:hover { box-shadow: 0 0 0 2px var(--line-3); }
+/* touch: every field of the grid is at least 44px tall */
+@media (pointer: coarse) { .teach-heat { height: var(--tap); } }
 .teach-mini { display: none; }
 .teach-mini-text { color: var(--ink-2); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .teach-mini-none { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-meta); }
@@ -94,7 +93,8 @@
 }
 @media (max-width: 719.98px) {
   .teach-heat { display: none; }
-  .teach-cell { padding: .15rem 0; }
+  .teach-matrix td { align-items: center; }
+  .teach-cell { display: grid; align-items: center; min-height: var(--tap); }
   .teach-mini { display: grid; grid-template-columns: minmax(0, 1fr) 2.75rem; align-items: center; gap: var(--s-3); }
 }
 .teach-legend { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); margin-top: var(--s-3); color: var(--ink-3); font-size: var(--fs-meta); }
@@ -118,6 +118,7 @@
 .teach-person { display: inline-flex; align-items: center; gap: .6rem; min-width: 0; }
 
 /* ------------------------------------------------- filter (segmented links) */
+.teach-filterbar { margin-bottom: var(--s-4); }
 .teach-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--r-btn); background: var(--raised-2); border: 1px solid var(--line-1); }
 .teach-seg > a {
   display: inline-flex; align-items: center; gap: .45rem; min-height: 2.5rem; padding: 0 .85rem;
@@ -128,6 +129,11 @@
 .teach-seg > a[aria-current="page"] { background: var(--ink); color: var(--ink-on-ink); }
 .teach-seg-n { font-size: .8rem; font-variant-numeric: tabular-nums; opacity: .72; }
 @media (pointer: coarse) { .teach-seg > a { min-height: var(--tap); } }
+/* phones: one row of equal parts, the count under the word - never two lines of pills */
+@media (max-width: 559.98px) {
+  .teach-seg { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; }
+  .teach-seg > a { flex-direction: column; justify-content: center; gap: 0; min-height: var(--tap); padding: .25rem .2rem; font-size: .8rem; line-height: 1.2; text-align: center; }
+}
 
 /* ----------------------------------------------------- join and invite */
 .teach-join { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4) var(--s-5); align-items: start; }
@@ -152,11 +158,12 @@
 .teach-qrstage { grid-area: stage; min-height: 0; overflow-y: auto; outline: none; }
 .teach-projector { min-height: 100%; padding-block: clamp(var(--s-4), 4vh, var(--s-7)); grid-template-areas: "title" "qr" "text"; }
 .teach-qrtitle { grid-area: title; }
-.teach-qrcode { grid-area: qr; }
+.teach-qrcode { grid-area: qr; width: min(80vw, 48dvh, 40rem); }
 .teach-qrtext, .teach-qrempty { grid-area: text; display: grid; justify-items: center; gap: var(--s-3); }
 .teach-qrlead { margin-inline: 0; }
 .teach-qrlink { max-width: 44rem; font: 600 clamp(.85rem, .7rem + .8vw, 1.35rem)/1.4 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
 .teach-qrcount { font-weight: 720; font-size: clamp(1.1rem, .9rem + 1vw, 1.75rem); font-variant-numeric: tabular-nums; }
+.teach-qrvalid { color: var(--ink-2); font-weight: 600; font-size: clamp(1rem, .85rem + .6vw, 1.5rem); font-variant-numeric: tabular-nums; }
 .teach-qrflash { margin: var(--s-3) var(--gutter) 0; }
 .teach-qrform { justify-content: center; }
 @media (min-width: 900px) and (min-aspect-ratio: 5/4) {
@@ -173,10 +180,15 @@
 }
 
 /* ------------------------------------------------------------ results */
-.teach-pager { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--s-3); margin: calc(-1 * var(--s-3)) 0 var(--s-6); }
-.teach-pager > a { justify-self: start; max-width: 100%; }
-.teach-pager > :last-child { justify-self: end; }
-.teach-pager-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teach-nowrap { white-space: nowrap; }
+@media (min-width: 720px) {
+  .teach-results th:first-child { width: 13rem; }
+}
+/* previous, next and the position as one group; names wrap to a new line instead of being cut */
+.teach-pager { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); margin: calc(-1 * var(--s-2)) 0 var(--s-6); }
+.teach-pager-btn { max-width: 100%; }
+.teach-pager-btn > span { overflow: hidden; text-overflow: ellipsis; }
+.teach-pager-pos { padding-inline: var(--s-1); }
 .teach-resultlist { border-top: 1px solid var(--line-1); }
 .teach-result-title { display: grid; gap: .1rem; flex: 1 1 auto; min-width: 0; }
 .teach-yes { color: var(--ok); font-weight: 760; }
@@ -205,3 +217,7 @@
 .teach-switch-text { display: grid; gap: .15rem; font-weight: 640; }
 .teach-switch-text > small { color: var(--ink-3); font-size: var(--fs-meta); font-weight: 400; }
 .teach-reset, .teach-leave { padding: clamp(var(--s-4), 3vw, var(--s-5)); border-radius: var(--r-2); }
+.teach-reset { max-width: 40rem; }
+.teach-radios { display: grid; padding: 0 var(--s-4); border: 1px solid var(--line-2); border-radius: var(--r-btn); background: var(--raised-1); }
+.teach-radio { border-top: 1px solid var(--line-1); }
+.teach-radio:first-child { border-top: 0; }

@@ -6,7 +6,7 @@
 // access.js; everything written by people is rendered through html``.
 
 const { html, raw, csrfField, postButton, timeline, badge, field, formValue, icon, barChart } = require('./html');
-const { deny, plural, dayKey, formatAgo, isLocalPath } = require('./util');
+const { deny, plural, dayKey, formatAgo, formatFullDate, isLocalPath } = require('./util');
 
 const TZ = 'Europe/Berlin';
 const DAY = 86_400_000;
@@ -45,7 +45,6 @@ function classMark(cls) {
 // Forms work in school time (Europe/Berlin), whatever the server's zone is.
 
 const wallFmt = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-const yearDayFmt = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ });
 
 function wallParts(ts) {
   const p = {};
@@ -87,11 +86,8 @@ function schoolDateTime(value) {
   return m ? schoolTime(m[1], m[2]) : null;
 }
 
-/** "12. November 2027" (a day far away: with the year). */
-const formatYearDay = (ts) => yearDayFmt.format(new Date(ts));
-
 /** The day an archived class will be deleted by the retention rule. */
-const deletionDay = (ctx, cls) => (cls.archived_at ? formatYearDay(cls.archived_at + ctx.settings.get('retention.archivedClassDays') * DAY) : '');
+const deletionDay = (ctx, cls) => (cls.archived_at ? formatFullDate(cls.archived_at + ctx.settings.get('retention.archivedClassDays') * DAY) : '');
 
 // -------------------------------------------------------------------- weeks
 
@@ -123,14 +119,23 @@ const weekParams = (ws) => ws.flatMap((w) => [w.start, w.end]);
 const weekBars = (ws, counts) => ws.map((w, i) => ({ label: w.label, value: (counts && counts[`w${i}`]) || 0, now: w.now }));
 
 /**
- * Results per week as columns. The week labels are HTML under the chart, so
- * they stay readable at every width (the chart's own SVG labels scale with
- * it); the chart keeps its text alternative. No results: one calm sentence.
+ * Results per week as columns, with exactly one row of week labels: our own
+ * axis ("KW 46" on wider screens, "46" on phones so the labels never run into
+ * each other; the current week in bold). The chart keeps its text alternative
+ * with the full labels. No results: one calm sentence instead of an empty chart.
  */
 function weekChart(bars, label) {
   if (!bars.some((b) => b.value > 0)) return html`<p class="muted teach-chart-empty">In den letzten ${bars.length} Wochen gab es keine Ergebnisse.</p>`;
-  return html`<div class="teach-chart">${barChart(bars, { label })}<div class="teach-axis" aria-hidden="true">${bars.map((b) => html`<span${b.now ? raw(' class="teach-axis-now"') : ''}>${b.label}</span>`)}</div></div>`;
+  return html`<div class="teach-chart">${barChart(bars, { label, labels: false })}<div class="teach-axis" aria-hidden="true">${bars.map((b) => {
+    const [prefix, number] = String(b.label).split(' ');
+    return html`<span${b.now ? raw(' class="teach-axis-now"') : ''}>${number ? html`<span class="teach-kw">${prefix} </span>${number}` : b.label}</span>`;
+  })}</div></div>`;
 }
+
+// ---------------------------------------------------------------- buttons
+
+/** A POST button for a page head: on phones it stretches like the link buttons beside it. */
+const headPostButton = (req, action, label, opts = {}) => html`<span class="teach-stretch">${postButton(req, action, label, { ...opts, block: true })}</span>`;
 
 // --------------------------------------------------------------- returning
 
@@ -201,8 +206,8 @@ function feedbackForm(req, ctx, { cls, student = null, students = null, chosen =
 module.exports = {
   DURATIONS, DAY,
   loadClass, studentsText, classEyebrow, classMark,
-  inputDate, inputTime, inputDateTime, schoolTime, schoolDateTime, formatYearDay, deletionDay,
+  inputDate, inputTime, inputDateTime, schoolTime, schoolDateTime, deletionDay,
   weeks, weekSums, weekParams, weekBars, weekChart,
-  backTo, percentOf,
+  headPostButton, backTo, percentOf,
   feedbackTimeline, feedbackForm,
 };

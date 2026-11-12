@@ -37,8 +37,10 @@ function slug(s) {
   );
 }
 
-const scoreText = (score, max) => (score === null || score === undefined ? '' : max === null || max === undefined ? String(score) : `${score} / ${max}`);
-const pctText = (v) => (v === null || v === undefined ? '' : `${Math.round(Math.max(0, Math.min(1, v)) * 100)} %`);
+// Numbers and their units never break apart ("100 %", "8 / 8"): non-breaking spaces.
+const NB = '\u00a0';
+const scoreText = (score, max) => (score === null || score === undefined ? '' : max === null || max === undefined ? String(score) : `${score}${NB}/${NB}${max}`);
+const pctText = (v) => (v === null || v === undefined ? '' : `${Math.round(Math.max(0, Math.min(1, v)) * 100)}${NB}%`);
 
 /** A key without a label from schulhub.json, made readable: "richtig-gesamt" -> "Richtig gesamt", "maxScore" -> "Max Score". */
 function readableKey(k) {
@@ -46,13 +48,16 @@ function readableKey(k) {
   return s ? s[0].toUpperCase() + s.slice(1) : String(k);
 }
 
+/** The label from schulhub.json for a key, else the key made readable. */
+const labelFor = (labels, k) => (labels && Object.hasOwn(labels, k) && typeof labels[k] === 'string' ? labels[k] : readableKey(k));
+
 /**
  * Result details as readable text: keys get the labels from schulhub.json,
  * true/false become ✓/✗. Lists of flat objects become a table (records on
  * phones). Nothing is ever interpreted as HTML.
  */
 function detailView(value, labels, depth = 0) {
-  const name = (k) => (Object.hasOwn(labels, k) ? labels[k] : readableKey(k));
+  const name = (k) => labelFor(labels, k);
   const flat = (o) => o && typeof o === 'object' && !Array.isArray(o) && Object.values(o).every((v) => v === null || typeof v !== 'object');
   const cell = (v) =>
     v === true
@@ -65,7 +70,7 @@ function detailView(value, labels, depth = 0) {
   if (depth > 2) return html`<pre class="code">${JSON.stringify(value, null, 2)}</pre>`;
   if (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(flat)) {
     const cols = [...new Set(value.flatMap((o) => Object.keys(o)))].slice(0, 12);
-    return dataTable({ cls: 'teach-table teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });
+    return dataTable({ cls: 'teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });
   }
   if (Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')) {
     if (value.length > 40) return html`<pre class="code">${JSON.stringify(value)}</pre>`;
@@ -150,14 +155,14 @@ module.exports = (app, ctx) => {
     const hasSettings = manifest.settings.length > 0;
 
     const table = dataTable({
-      cls: 'teach-table teach-results',
+      cls: 'teach-results',
       columns: [
         { label: 'Name', primary: true, render: (s) => html`<a href="${base}/${s.id}">${s.name}</a>` },
-        { label: 'Letztes Ergebnis', render: (s) => (s.last_title ? html`${s.last_title}${s.last_score !== null ? html` <span class="faint">${scoreText(s.last_score, s.last_max)}</span>` : ''}` : '') },
+        { label: 'Letztes Ergebnis', render: (s) => (s.last_title ? html`${s.last_title}${s.last_score !== null ? html` <span class="faint teach-nowrap">${scoreText(s.last_score, s.last_max)}</span>` : ''}` : '') },
         { label: 'Bestes', num: true, render: (s) => pctText(s.best) },
         { label: 'Ergebnisse', num: true, render: (s) => (s.results ? String(s.results) : '') },
         { label: 'Fortschritt', render: (s) => (s.progress === null ? '' : html`<span class="teach-prog">${meter(s.progress, { label: `${pctText(s.progress)} geschafft` })}<span class="num">${pctText(s.progress)}</span></span>`) },
-        { label: 'Zuletzt aktiv', render: (s) => (s.active_at ? formatAgo(s.active_at) : html`<span class="faint">noch nie</span>`) },
+        { label: 'Zuletzt aktiv', render: (s) => (s.active_at ? html`<span class="teach-nowrap">${formatAgo(s.active_at)}</span>` : html`<span class="faint teach-nowrap">noch nie</span>`) },
       ],
       rows: shown,
       empty: filter
@@ -191,12 +196,10 @@ module.exports = (app, ctx) => {
         stat({ label: 'Bestes im Schnitt', value: average === null ? '–' : pctText(average), sub: average === null ? 'noch keine Punkte' : 'mit Punkten' }),
       ]}</div></section>
       <section aria-labelledby="s-week"><h2 class="visually-hidden" id="s-week">Ergebnisse pro Woche</h2>
-        <div class="panel teach-chartpanel"><span class="teach-charttitle">Ergebnisse pro Woche</span>${kit.weekChart(bars, `Ergebnisse pro Woche in ${a.name}, ${cls.name}`)}</div></section>
+        <div class="panel teach-chartpanel"><span class="teach-charttitle">Ergebnisse pro Kalenderwoche</span>${kit.weekChart(bars, `Ergebnisse pro Woche in ${a.name}, ${cls.name}`)}</div></section>
     </div>
-    <section class="section" aria-labelledby="s-people">${sectionHead('Schüler/innen', {
-      id: 's-people',
-      actions: html`<nav class="teach-seg" aria-label="Filter"><a href="${base}"${filter ? '' : html` aria-current="page"`}>Alle <span class="teach-seg-n">${all.length}</span></a><a href="${base}?filter=offen"${filter ? html` aria-current="page"` : ''}>Nicht begonnen <span class="teach-seg-n">${all.length - started}</span></a></nav>`,
-    })}
+    <section class="section" aria-labelledby="s-people">${sectionHead('Schüler/innen', { id: 's-people' })}
+      <div class="teach-filterbar"><nav class="teach-seg" aria-label="Filter"><a href="${base}"${filter ? '' : html` aria-current="page"`}>Alle <span class="teach-seg-n">${all.length}</span></a><a href="${base}?filter=offen"${filter ? html` aria-current="page"` : ''}>Nicht begonnen <span class="teach-seg-n">${all.length - started}</span></a></nav></div>
       ${table}</section>`;
     res.send(page(req, { title: `Ergebnisse ${a.name}`, body, active: 'klassen', classId: cls.id, styles: ['css/teaching.css'] }));
   });
@@ -269,11 +272,12 @@ module.exports = (app, ctx) => {
     const best = results.map((r) => kit.percentOf(r.score, r.max_score)).filter((p) => p !== null);
     const lastActive = Math.max(played ? played.last_at : 0, results[0] ? results[0].created_at : 0, progress ? progress.updated_at : 0) || null;
 
+    // One compact group: previous, next, position - nothing floats alone, names are never cut short.
     const pager = peers.length > 1
-      ? html`<nav class="teach-pager" aria-label="Andere Schüler/innen">
-          ${prev ? html`<a class="btn sm" href="${listUrl}/${prev.id}" rel="prev">${icon('chevronLeft')}<span class="teach-pager-name">${prev.name}</span></a>` : html`<span></span>`}
-          <span class="meta">${at + 1} von ${peers.length}</span>
-          ${next ? html`<a class="btn sm" href="${listUrl}/${next.id}" rel="next"><span class="teach-pager-name">${next.name}</span>${icon('chevronRight')}</a>` : html`<span></span>`}</nav>`
+      ? html`<nav class="teach-pager" aria-label="Andere Schüler/innen dieser Klasse">
+          ${prev ? html`<a class="btn sm teach-pager-btn" href="${listUrl}/${prev.id}" rel="prev" aria-label="Vorherige Person: ${prev.name}">${icon('chevronLeft')}<span>${prev.name}</span></a>` : ''}
+          ${next ? html`<a class="btn sm teach-pager-btn" href="${listUrl}/${next.id}" rel="next" aria-label="Nächste Person: ${next.name}"><span>${next.name}</span>${icon('chevronRight')}</a>` : ''}
+          <span class="meta teach-pager-pos">${at + 1} von ${peers.length}</span></nav>`
       : '';
 
     const achievements = manifest.achievements || [];
@@ -287,7 +291,7 @@ module.exports = (app, ctx) => {
     ${pager}
     <section class="section" aria-label="Zahlen">${stats([
       stat({ label: 'Ergebnisse', value: results.length, sub: 'in dieser Klasse' }),
-      stat({ label: 'Bestes Ergebnis', value: best.length ? `${Math.max(...best)} %` : '–' }),
+      stat({ label: 'Bestes Ergebnis', value: best.length ? `${Math.max(...best)}${NB}%` : '–' }),
       stat({ label: progress && progress.label ? progress.label : 'Fortschritt', value: progress ? pctText(progress.value) : '–', sub: progress ? formatAgo(progress.updated_at) : '' }),
       stat({ label: 'Erfolge', value: achievements.length ? `${achievements.filter((x) => unlocked.has(x.id)).length}/${achievements.length}` : '–' }),
     ])}</section>
@@ -298,7 +302,7 @@ module.exports = (app, ctx) => {
             ? html`<div class="teach-resultlist">${results.map((r) => {
                 const p = kit.percentOf(r.score, r.max_score);
                 return html`<details class="disclosure teach-result"><summary><span class="teach-result-title"><strong>${r.title}</strong><span class="meta">${formatDate(r.created_at)}</span></span>
-                  ${r.score !== null ? badge(html`${scoreText(r.score, r.max_score)}${p !== null ? ` · ${p} %` : ''}`) : ''}</summary>
+                  ${r.score !== null ? badge(html`${scoreText(r.score, r.max_score)}${p !== null ? ` · ${p}${NB}%` : ''}`) : ''}</summary>
                   <div class="disclosure-body">${r.details ? detailView(parse(r.details), labels) : html`<p class="meta">Keine Einzelheiten gespeichert.</p>`}</div></details>`;
               })}</div>`
             : empty({ icon: 'chart', title: 'Noch keine Ergebnisse', text: `${student.name} hat in dieser Klasse noch kein Ergebnis in „${a.name}“.` })}</section>
@@ -307,10 +311,10 @@ module.exports = (app, ctx) => {
             ? html`<div class="achievement-strip">${achievements.filter((x) => unlocked.has(x.id)).map((x) => html`<span class="achievement" title="${formatDate(unlocked.get(x.id))}"><span class="emoji" aria-hidden="true">${x.emoji}</span>${x.title}</span>`)}</div>`
             : html`<p class="muted">Noch kein Erfolg freigeschaltet.</p>`}</section>` : ''}
         ${scores.length ? html`<section class="section" aria-labelledby="s-scores">${sectionHead('Bestenlisten', { id: 's-scores' })}
-          ${dataTable({ cls: 'teach-table', columns: [{ label: 'Liste', key: 'board', primary: true }, { label: 'Bestwert', num: true, render: (s) => String(s.score) }, { label: 'Erreicht', render: (s) => formatDate(s.updated_at) }], rows: scores })}</section>` : ''}
+          ${dataTable({ columns: [{ label: 'Liste', primary: true, render: (s) => labelFor(labels, s.board) }, { label: 'Bestwert', num: true, render: (s) => String(s.score) }, { label: 'Erreicht', render: (s) => formatDate(s.updated_at) }], rows: scores })}</section>` : ''}
         <section class="section" aria-labelledby="s-saves">${sectionHead('Spielstände', { id: 's-saves', count: saves.length ? String(saves.length) : null })}
           ${saves.length
-            ? html`<div>${saves.map((s) => html`<details class="disclosure"><summary><span class="teach-result-title"><strong>${s.key}</strong><span class="meta">${formatDate(s.updated_at)}</span></span></summary>
+            ? html`<div>${saves.map((s) => html`<details class="disclosure"><summary><span class="teach-result-title"><strong>${labelFor(labels, s.key)}</strong><span class="meta">${formatDate(s.updated_at)}</span></span></summary>
                 <div class="disclosure-body">${detailView(parse(s.value), labels)}</div></details>`)}</div>`
             : html`<p class="muted">Keine Spielstände.</p>`}</section>
       </div>
