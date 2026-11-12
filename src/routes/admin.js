@@ -9,7 +9,7 @@ const {
 } = require('../html');
 const { deny, bad, isLocalPath, formatDate, formatDay, formatAgo, formatBytes, plural, dayKey } = require('../util');
 const { auditLabel, actorLabel } = require('../auditLabels');
-const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, likePattern, parseDay, dayStart } = require('../formKit');
+const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart } = require('../formKit');
 const backup = require('../backup');
 
 const DAY = 86_400_000;
@@ -213,14 +213,21 @@ module.exports = (app, ctx) => {
     const users = db.all(`SELECT u.* FROM users u ${where} ORDER BY u.name COLLATE NOCASE, u.id LIMIT ?5 OFFSET ?6`, ...args, PER_PAGE, (pageNo - 1) * PER_PAGE);
     const filtered = Boolean(q || rolle || status);
 
-    const body = html`<form method="get" action="/admin/konten" class="school-filters" data-autosubmit aria-label="Konten filtern">
-        <div class="school-filter-grid">
-          <div class="field school-filter-q"><label for="f-q">Name oder E-Mail</label>
-            <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" autocomplete="off">
-            <button class="btn icon" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
-          <div class="field"><label for="f-rolle">Rolle</label>${selectControl(req, { name: 'rolle', value: rolle, options: [['', 'Alle Rollen'], ['student', 'Schüler/innen'], ['teacher', 'Lehrkräfte'], ['admin', 'Admins']] })}</div>
-          <div class="field"><label for="f-status">Status</label>${selectControl(req, { name: 'status', value: status, options: [['', 'Alle'], ['gesperrt', 'Gesperrt'], ['inaktiv', 'Inaktiv markiert']] })}</div>
-        </div>
+    const roleOptions = [['', 'Alle Rollen'], ['student', 'Schüler/innen'], ['teacher', 'Lehrkräfte'], ['admin', 'Admins']];
+    const statusOptions = [['', 'Alle'], ['gesperrt', 'Gesperrt'], ['inaktiv', 'Inaktiv markiert']];
+    const active = [q && `„${q}“`, rolle && roleOptions.find(([v]) => v === rolle)[1], status && statusOptions.find(([v]) => v === status)[1]].filter(Boolean);
+    const body = html`<form method="get" action="/admin/konten" class="school-filters school-filters-fold" data-autosubmit aria-label="Konten filtern">
+        ${filterPanel({
+          summary: active.length ? active.join(' · ') : 'Alle Konten',
+          open: req.query.offen === '1',
+          body: html`<div class="school-filter-grid">
+            <div class="field school-filter-q"><label for="f-q">Name oder E-Mail</label>
+              <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" autocomplete="off">
+              <button class="btn icon school-search-btn" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
+            <div class="field"><label for="f-rolle">Rolle</label>${selectControl(req, { name: 'rolle', value: rolle, options: roleOptions })}</div>
+            <div class="field"><label for="f-status">Status</label>${selectControl(req, { name: 'status', value: status, options: statusOptions })}</div>
+          </div>`,
+        })}
       </form>
       <section class="section" aria-labelledby="s-konten">
         ${sectionHead(plural(total, 'Konto', 'Konten'), { id: 's-konten', sub: pages > 1 ? `Seite ${pageNo} von ${pages}, sortiert nach Name.` : '', actions: filtered ? linkButton('/admin/konten', 'Filter zurücksetzen', { kind: 'quiet', size: 'sm', icon: 'x' }) : '' })}
@@ -230,8 +237,9 @@ module.exports = (app, ctx) => {
             { label: 'Rolle', render: (u) => ROLE_LABEL[u.role] },
             { label: 'Letzte Anmeldung', render: (u) => (u.last_login_at ? formatAgo(u.last_login_at) : 'nie') },
             {
+              // An account without a special state is simply "aktiv" (phones show every label, so never leave it empty).
               label: 'Status', render: (u) => html`<span class="admin-badges">${u.id === req.user.id ? badge('Du') : ''}${u.disabled ? badge('gesperrt', 'danger') : ''}${u.flagged_inactive_at
-                ? html`${badge('inaktiv markiert', 'wait')}<span class="admin-mail">seit ${formatDay(u.flagged_inactive_at)}</span>` : ''}</span>`,
+                ? html`${badge('inaktiv markiert', 'wait')}<span class="admin-mail">seit ${formatDay(u.flagged_inactive_at)}</span>` : ''}${!u.disabled && !u.flagged_inactive_at ? html`<span class="muted">aktiv</span>` : ''}</span>`,
             },
             { label: 'Verwalten', actions: true, render: (u) => linkButton(`/admin/konten/${u.id}`, 'Verwalten', { size: 'sm' }) },
           ],
@@ -290,7 +298,7 @@ module.exports = (app, ctx) => {
         ${list(ROLES.map((r) => row({
           title: ROLE_LABEL[r],
           sub: ROLE_HELP[r],
-          end: r === u.role ? badge('aktuelle Rolle', 'solid')
+          end: r === u.role ? badge('aktuelle Rolle')
             : lastAdmin ? ''
               : postButton(req, `/admin/nutzer/${u.id}/rolle`, 'Diese Rolle geben', { size: 'sm', fields: { rolle: r }, confirm: roleConfirm(r), confirmLabel: `Zu ${ROLE_LABEL[r]} ändern` }),
           cls: 'wrap',
@@ -394,7 +402,7 @@ module.exports = (app, ctx) => {
         <div class="school-filter-grid">
           <div class="field school-filter-q"><label for="f-q">Name der Klasse</label>
             <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" autocomplete="off">
-            <button class="btn icon" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
+            <button class="btn icon school-search-btn" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
         </div>
         ${segmented({ name: 'archiv', legend: 'Zeigen', value: archiv ? '1' : '', options: [['', `Aktiv (${counts.active})`], ['1', `Archiviert (${counts.archived})`]] })}
       </form>
@@ -499,7 +507,7 @@ module.exports = (app, ctx) => {
         <div class="school-filter-grid">
           <div class="field school-filter-q"><label for="f-q">App oder Besitzer/in</label>
             <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" autocomplete="off">
-            <button class="btn icon" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
+            <button class="btn icon school-search-btn" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
         </div>
         ${segmented({ name: 'filter', legend: 'Zeigen', value: filter, scroll: true, options: [['', `Alle (${counts.n})`], ['schulweit', `Schulweit (${counts.sw})`], ['update', `Update wartet (${counts.upd})`], ['entwurf', `Unveröffentlicht (${counts.draft})`]] })}
       </form>
@@ -559,13 +567,19 @@ module.exports = (app, ctx) => {
     const filtered = Boolean(action || person || from || to);
     const days = settings.get('retention.auditDays');
 
-    const body = html`<form method="get" action="/admin/protokoll" class="school-filters" data-autosubmit aria-label="Protokoll filtern">
-        <div class="school-filter-grid">
-          <div class="field"><label for="f-aktion">Vorgang</label>${selectControl(req, { name: 'aktion', value: action, options: [['', 'Alle Vorgänge'], ...codes.map((c) => [c, auditLabel(c)])] })}</div>
-          <div class="field"><label for="f-person">Person</label><input id="f-person" type="search" name="person" value="${person}" maxlength="60" autocomplete="off" placeholder="Wer oder für wen"></div>
-          <div class="field"><label for="f-von">Von</label><input id="f-von" type="date" name="von" value="${params.von}"></div>
-          <div class="field"><label for="f-bis">Bis</label><input id="f-bis" type="date" name="bis" value="${params.bis}"></div>
-        </div>
+    const range = from && to ? `${formatDay(from)} – ${formatDay(to - 1)}` : from ? `ab ${formatDay(from)}` : to ? `bis ${formatDay(to - 1)}` : '';
+    const active = [action && auditLabel(action), person && `„${person}“`, range].filter(Boolean);
+    const body = html`<form method="get" action="/admin/protokoll" class="school-filters school-filters-fold" data-autosubmit aria-label="Protokoll filtern">
+        ${filterPanel({
+          summary: active.length ? active.join(' · ') : 'Alle Einträge',
+          open: req.query.offen === '1',
+          body: html`<div class="school-filter-grid">
+            <div class="field"><label for="f-aktion">Vorgang</label>${selectControl(req, { name: 'aktion', value: action, options: [['', 'Alle Vorgänge'], ...codes.map((c) => [c, auditLabel(c)])] })}</div>
+            <div class="field"><label for="f-person">Person</label><input id="f-person" type="search" name="person" value="${person}" maxlength="60" autocomplete="off" placeholder="Wer oder für wen"></div>
+            <div class="field"><label for="f-von">Von</label><input id="f-von" type="date" name="von" value="${params.von}"></div>
+            <div class="field"><label for="f-bis">Bis</label><input id="f-bis" type="date" name="bis" value="${params.bis}"></div>
+          </div>`,
+        })}
       </form>
       <section class="section" aria-labelledby="s-log">
         ${sectionHead(before ? 'Ältere Einträge' : 'Neueste Einträge', {

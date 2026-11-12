@@ -11,7 +11,7 @@ const {
 const { deny, bad, cleanText, newId, formatAgo, formatDay, plural, dayKey } = require('../util');
 const { CATEGORIES } = require('../manifest');
 const {
-  queryText, queryChoice, pageNumber, pager, selectControl, segmented, likePattern, parseDay, dayStart, DISPLAY_PREFS,
+  queryText, queryChoice, pageNumber, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, DISPLAY_PREFS,
 } = require('../formKit');
 
 const DAY = 86_400_000;
@@ -188,8 +188,8 @@ module.exports = (app, ctx) => {
         <input id="suche-q" type="search" name="q" value="${q}" maxlength="60" placeholder="${staff ? 'App, Klasse, Person' : 'App oder Klasse'}" autocomplete="off"${searching ? '' : raw(' autofocus')}>
         <button class="btn primary">${icon('search')}<span>Suchen</span></button>
       </form>
-      ${searching ? results : q.length === 1 ? notice({ text: 'Bitte gib mindestens 2 Zeichen ein.' }) : html`<p class="school-note">Mindestens 2 Zeichen. ${staff ? 'Schüler/innen findest du nur aus Klassen, die du unterrichtest.' : ''}</p>`}`;
-    res.send(page(req, { title: q ? `Suche: ${q}` : 'Suchen', body, width: 'narrow', styles: STYLES, scripts: ['school.js'] }));
+      ${searching ? results : q.length === 1 ? notice({ text: 'Bitte gib mindestens 2 Zeichen ein.' }) : html`<p class="school-note">Gib oben einen Suchbegriff ein – mindestens 2 Zeichen. ${staff ? 'Schüler/innen findest du nur aus Klassen, die du unterrichtest.' : ''}</p>`}`;
+    res.send(page(req, { title: q ? `Suche: ${q}` : 'Suchen', body, width: 'narrow', styles: STYLES }));
   });
 
   // ================================================================ catalogue
@@ -253,15 +253,20 @@ module.exports = (app, ctx) => {
     const shown = apps.slice((pageNo - 1) * per, pageNo * per);
     const targetsFor = addTargets(u);
 
-    const filters = html`<form method="get" action="/katalog" class="school-filters" data-autosubmit aria-label="Apps filtern">
-      <div class="school-filter-grid">
-        <div class="field school-filter-q"><label for="f-q">Suchen</label>
-          <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" placeholder="Name oder Beschreibung" autocomplete="off">
-          <button class="btn icon" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
-        <div class="field"><label for="f-fach">Fach</label>${selectControl(req, { name: 'fach', options: [['', 'Alle Fächer'], ...CATEGORIES.map((c) => [c, c])], value: fach })}</div>
-        <div class="field"><label for="f-stufe">Klassenstufe</label>${selectControl(req, { name: 'stufe', options: [['', 'Alle Stufen'], ...GRADES.map((g) => [String(g), `Klasse ${g}`])], value: stufe ? String(stufe) : '' })}</div>
-      </div>
-      ${segmented({ name: 'zeige', legend: 'Zeigen', options: sources, value: zeige, scroll: true })}
+    const active = [q && `„${q}“`, fach, stufe && `Klasse ${stufe}`, zeige && sources.find(([v]) => v === zeige)[1]].filter(Boolean);
+    const filters = html`<form method="get" action="/katalog" class="school-filters school-filters-fold" data-autosubmit aria-label="Apps filtern">
+      ${filterPanel({
+        summary: active.length ? active.join(' · ') : 'Alle Apps',
+        open: req.query.offen === '1',
+        body: html`<div class="school-filter-grid">
+          <div class="field school-filter-q"><label for="f-q">Suchen</label>
+            <div class="school-inline"><input id="f-q" type="search" name="q" value="${q}" maxlength="60" placeholder="Name oder Beschreibung" autocomplete="off">
+            <button class="btn icon school-search-btn" aria-label="Suchen" title="Suchen">${icon('search')}</button></div></div>
+          <div class="field"><label for="f-fach">Fach</label>${selectControl(req, { name: 'fach', options: [['', 'Alle Fächer'], ...CATEGORIES.map((c) => [c, c])], value: fach })}</div>
+          <div class="field"><label for="f-stufe">Klassenstufe</label>${selectControl(req, { name: 'stufe', options: [['', 'Alle Stufen'], ...GRADES.map((g) => [String(g), `Klasse ${g}`])], value: stufe ? String(stufe) : '' })}</div>
+        </div>
+        ${segmented({ name: 'zeige', legend: 'Zeigen', options: sources, value: zeige, scroll: true })}`,
+      })}
     </form>`;
 
     const body = html`${pageHead({
@@ -282,7 +287,7 @@ module.exports = (app, ctx) => {
           })}
       ${pager({ base: '/katalog', params: { q, fach, stufe: stufe || '', zeige }, page: pageNo, pages })}
     </section>`;
-    res.send(page(req, { title: 'Entdecken', body, active: 'entdecken', styles: STYLES, scripts: ['school.js'] }));
+    res.send(page(req, { title: 'Entdecken', body, active: 'entdecken', styles: STYLES }));
   });
 
   // ================================================================ announcements
@@ -346,24 +351,28 @@ module.exports = (app, ctx) => {
         ? 'Kurze Nachrichten an die ganze Schule oder an eine Klasse. Sie stehen oben auf der Startseite, bis sie ablaufen, gelöscht oder ausgeblendet werden.'
         : 'Kurze Nachrichten an deine Klassen. Sie stehen oben auf der Startseite deiner Schüler/innen, bis sie ablaufen, gelöscht oder ausgeblendet werden.',
     })}
-    <div class="grid-2 even">
+    <div class="school-ann-grid">
       <section class="section" aria-labelledby="s-neu">${sectionHead('Neue Ankündigung', { id: 's-neu' })}${form}</section>
       <section class="section" aria-labelledby="s-liste">${sectionHead(admin ? 'Alle Ankündigungen' : 'Ankündigungen deiner Klassen', { id: 's-liste', count: items.length ? String(items.length) : null })}
         ${items.length ? list(items.map((an) => {
           const expired = an.expires_at && an.expires_at <= now;
-          return html`<li class="row wrap school-announcement${expired ? ' dim' : ''}"><span class="school-icon" aria-hidden="true">${icon('megaphone')}</span>
+          // Everything about the announcement sits in the text column; the row end holds only the delete button.
+          const meta = [an.class_name || 'Ganze Schule', an.author_name || 'Gelöschtes Konto', formatAgo(an.created_at),
+            expired ? 'abgelaufen' : an.expires_at ? `sichtbar bis ${formatDay(an.expires_at - 1)}` : '',
+            an.hidden ? `von ${an.hidden} ausgeblendet` : ''].filter(Boolean).join(' · ');
+          return html`<li class="row school-announcement${expired ? ' dim' : ''}"><span class="school-icon" aria-hidden="true">${icon('megaphone')}</span>
             <div class="row-main"><span class="row-title">${an.title}</span>
               ${an.body ? html`<span class="row-sub pre clamp">${an.body}</span>` : ''}
-              <span class="school-meta">${an.class_name || 'Ganze Schule'} · ${an.author_name || 'Gelöschtes Konto'} · ${formatAgo(an.created_at)}${an.hidden ? ` · von ${an.hidden} ausgeblendet` : ''}</span></div>
-            <div class="row-end school-ann-end">${expired ? badge('abgelaufen') : an.expires_at ? badge(`bis ${formatDay(an.expires_at - 1)}`) : ''}
-              ${postButton(req, `/ankuendigungen/${an.id}/loeschen`, `„${an.title}“ löschen`, {
-                kind: 'danger', size: 'sm', icon: 'trash', iconOnly: true,
-                confirm: `Ankündigung „${an.title}“ löschen?\nSie verschwindet sofort von allen Startseiten.`, confirmLabel: 'Löschen',
-              })}</div></li>`;
+              <span class="school-meta">${meta}</span></div>
+            <div class="row-end">${postButton(req, `/ankuendigungen/${an.id}/loeschen`, `„${an.title}“ löschen`, {
+              kind: 'danger', size: 'sm', icon: 'trash', iconOnly: true,
+              confirm: `Ankündigung „${an.title}“ löschen?\nSie verschwindet sofort von allen Startseiten.`, confirmLabel: 'Löschen',
+            })}</div></li>`;
         })) : empty({ icon: 'megaphone', title: 'Noch keine Ankündigungen', text: 'Was du hier veröffentlichst, erscheint oben auf der Startseite.' })}
       </section>
     </div>`;
-    res.send(page(req, { title: 'Ankündigungen', body, styles: STYLES }));
+    // Teachers reach announcements from their classes, the admin from the Verwaltung.
+    res.send(page(req, { title: 'Ankündigungen', body, active: admin ? 'admin' : 'klassen', styles: STYLES }));
   });
 
   app.post('/ankuendigungen', (req, res) => {
