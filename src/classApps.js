@@ -78,7 +78,7 @@ function createClassApps(ctx) {
       }
       timeline(actor, app, cls, 'submitted', v);
       services().audit(actor, 'app_eingereicht', app.name, `${cls.name}, Version ${versionNumber(v)}`);
-      services().notify(teachersOf(cls.id), 'pruefen', `„${app.name}“ (Version ${versionNumber(v)}) wartet auf deine Prüfung in ${cls.name}.`, `/apps/${app.id}`);
+      services().notify(teachersOf(cls.id), 'pruefen', `„${app.name}“ (Version ${versionNumber(v)}) wartet auf deine Prüfung in ${cls.name}.`, `/pruefen/${cls.id}/${app.id}`);
     });
   }
 
@@ -187,7 +187,7 @@ function createClassApps(ctx) {
           version.id, row.class_id, app.id
         );
         timeline(actor, app, { id: row.class_id }, 'submitted', version.id);
-        services().notify(teachersOf(row.class_id), 'pruefen', `Neue Version ${version.number} von „${app.name}“ wartet auf deine Prüfung in ${row.name}.`, `/apps/${app.id}`);
+        services().notify(teachersOf(row.class_id), 'pruefen', `Neue Version ${version.number} von „${app.name}“ wartet auf deine Prüfung in ${row.name}.`, `/pruefen/${row.class_id}/${app.id}`);
       }
     }
   }

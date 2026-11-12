@@ -932,7 +932,8 @@
 /* page changes: a short cross-fade; navigation and top bar stay put */
 @view-transition { navigation: auto; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 140ms; animation-timing-function: var(--ease); }
-.main { animation: rise var(--t-3) var(--ease) both; }
+/* 'backwards', not 'both': a transform left on <main> would make it the containing block of every position:fixed element inside */
+.main { animation: rise var(--t-3) var(--ease) backwards; }
 
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-motion="full"]) *, :root:not([data-motion="full"]) *::before, :root:not([data-motion="full"]) *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
