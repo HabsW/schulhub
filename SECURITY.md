@@ -98,6 +98,19 @@ Tests: *Editor-Entwurf…*
 
 Tests: *Prüfen: Zurückgeben…*, *Entfernte Apps…*, *Kolleg/innen teilen Apps…*, *Lehrkraft-Einladung…*, *Archivierte Klassen…*
 
+### Page shell
+
+| Threat | Handling |
+|---|---|
+| Form errors as an open redirect | A failed form (400/409/413 only) goes back to the page it came from, taken from the `Referer` and accepted only if it has the Hub's own origin and is a plain local path (`isLocalPath`: never `//host`). Permission errors (401/403/404/429) are never turned into redirects. What the person typed is kept for one page view (text fields only, capped, never the CSRF token) and shown escaped. |
+| Display settings as an injection channel | `data-theme`, `data-text`, `data-motion`, `data-contrast` on `<html>` come only from columns with `CHECK` constraints. |
+| Favourites | Only for apps the person can open (`resolvePlay`); the return path is checked against local Hub paths. |
+| In-Hub messages | Written only by the server (`services.notify`), shown escaped, links must be local paths. Each person sees and marks only their own; marking read is a POST. |
+| Announcements | Shown and dismissable only if `access.canSeeAnnouncement` (school-wide, or a class the person can see); others answer 404. |
+| The owner's editor draft in the player | `?entwurf=1` and draft tokens only for `canManageApp` and only if a draft exists; the token is always a preview (`p: 1`, `v: 'draft'`), so nothing is stored and nothing counts as a play. |
+
+Tests: `test/shell.test.js`
+
 ### Uploads
 
 | Threat | Handling |

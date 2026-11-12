@@ -3,20 +3,21 @@
 // The app (via hub-sdk.js) says "hello"; we answer with a short-lived token
 // that the server issued for exactly this user in exactly this app.
 // Messages are accepted only from the app's own origin AND only from our frame,
-// and answers are sent only to that origin.
+// and answers are sent only to that origin. In a preview, the SDK also sends
+// its console messages here; they are shown as plain text (textContent).
 (function () {
   'use strict';
-  var player = document.getElementById('player');
+  var stage = document.getElementById('stage');
   var frame = document.getElementById('appframe');
   var note = document.getElementById('player-note');
-  var appOrigin = player.dataset.origin;
+  var appOrigin = stage.dataset.origin;
   var csrf = document.querySelector('meta[name="csrf"]').content;
 
   function fetchToken(first) {
-    return fetch(player.dataset.tokenUrl, {
+    return fetch(stage.dataset.tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrf },
-      body: JSON.stringify({ klasse: player.dataset.class || null, version: player.dataset.version || null, first: first }),
+      body: JSON.stringify({ klasse: stage.dataset.class || null, version: stage.dataset.version || null, entwurf: stage.dataset.draft === '1', first: first }),
     }).then(function (res) {
       if (!res.ok) throw new Error('token');
       return res.json();
@@ -30,10 +31,64 @@
     frame.contentWindow.postMessage(message, appOrigin);
   }
 
+  // ------------------------------------------------------------- console
+  var consoleBox = document.getElementById('console');
+  var consoleLog = document.getElementById('console-log');
+  var toggle = document.getElementById('console-toggle');
+  var counter = document.getElementById('console-count');
+  var problems = 0;
+  var lines = 0;
+  var LEVELS = { log: 'log', info: 'info', warn: 'Warnung', error: 'Fehler' };
+
+  function setOpen(open) {
+    if (!consoleBox) return;
+    consoleBox.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  if (toggle) toggle.addEventListener('click', function () { setOpen(consoleBox.hidden); });
+  var clear = document.getElementById('console-clear');
+  if (clear) clear.addEventListener('click', function () {
+    consoleLog.textContent = '';
+    problems = 0;
+    lines = 0;
+    counter.hidden = true;
+  });
+
+  function log(msg) {
+    if (!consoleLog || lines >= 500) return;
+    lines++;
+    var level = Object.prototype.hasOwnProperty.call(LEVELS, msg.level) ? msg.level : 'log';
+    var li = document.createElement('li');
+    li.className = level;
+    var lvl = document.createElement('span');
+    lvl.className = 'lvl';
+    lvl.textContent = LEVELS[level];
+    var text = document.createElement('span');
+    text.textContent = String(msg.text || '').slice(0, 2000);
+    if (msg.where) {
+      var where = document.createElement('span');
+      where.className = 'where';
+      where.textContent = '  ' + String(msg.where).slice(0, 200);
+      text.appendChild(where);
+    }
+    li.append(lvl, text);
+    consoleLog.appendChild(li);
+    consoleLog.scrollTop = consoleLog.scrollHeight;
+    if (level === 'warn' || level === 'error') {
+      problems++;
+      counter.textContent = String(problems);
+      counter.hidden = false;
+    }
+  }
+
+  // ------------------------------------------------------------ messages
   window.addEventListener('message', function (event) {
     if (event.origin !== appOrigin || event.source !== frame.contentWindow) return;
     var msg = event.data;
-    if (!msg || typeof msg !== 'object' || typeof msg.id !== 'string' || msg.id.length > 64) return;
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.hub === 'log') return log(msg);
+    if (typeof msg.id !== 'string' || msg.id.length > 64) return;
 
     if (msg.hub === 'hello') {
       current.then(
@@ -49,8 +104,16 @@
     }
   });
 
-  document.getElementById('fullscreen').addEventListener('click', function () {
+  // ------------------------------------------------------- loading, fullscreen
+  frame.addEventListener('load', function () { stage.classList.add('ready'); });
+  setTimeout(function () { stage.classList.add('ready'); }, 4000);
+
+  var fs = document.getElementById('fullscreen');
+  fs.addEventListener('click', function () {
     if (document.fullscreenElement) document.exitFullscreen();
-    else if (frame.requestFullscreen) frame.requestFullscreen();
+    else if (frame.requestFullscreen) frame.requestFullscreen().catch(function () {});
+  });
+  document.addEventListener('fullscreenchange', function () {
+    fs.setAttribute('aria-label', document.fullscreenElement ? 'Vollbild beenden' : 'Vollbild');
   });
 })();

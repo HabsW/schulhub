@@ -6,9 +6,7 @@ const express = require('express');
 const fs = require('node:fs');
 const { html, raw, page, flash, csrfField, postButton, appIcon, EMOJIS, COLORS } = require('../html');
 const { deny, bad, cleanText, formatDate, formatBytes, newId, HttpError } = require('../util');
-const { sidHash } = require('../sessions');
 
-const SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-pointer-lock';
 
 module.exports = (app, ctx) => {
   const { db, config, access, services, uploads, limiter, tokens } = ctx;
@@ -321,60 +319,5 @@ module.exports = (app, ctx) => {
     res.redirect(303, `/apps/${a.id}`);
   });
 
-  // ---------- player ----------
-  const str = (v) => (typeof v === 'string' && v ? v : null);
-
-  app.get('/apps/:id/spielen', (req, res) => {
-    const a = getApp(req.params.id);
-    const play = access.resolvePlay(req.user, a, { classId: str(req.query.klasse), versionId: str(req.query.version) });
-    if (!play) throw deny();
-    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
-    // The file token only unlocks the static files of exactly this version.
-    const fileToken = tokens.sign('files', { a: a.id, v: play.version.id }, config.fileTokenSeconds);
-    const origin = config.appOrigin(a.origin_key);
-    const back = play.preview ? `/apps/${a.id}` : cls ? `/klassen/${cls.id}` : '/start';
-    const body = html`<div id="player" data-origin="${origin}" data-token-url="/apps/${a.id}/token"
-        data-class="${play.classId || ''}" data-version="${play.preview ? play.version.id : ''}">
-      <div class="playerbar"><a class="btn small ghost" href="${back}">‹ Zurück</a>
-        ${appIcon(a, 'sm')}<strong>${a.name}</strong>${cls ? html`<span class="muted">${cls.name}</span>` : ''}
-        ${play.preview ? html`<span class="badge warn">Vorschau · Version ${play.version.number}</span>` : ''}
-        <span class="grow"></span>
-        ${access.canReviewApp(req.user, a) ? html`<a class="btn small ghost" href="/apps/${a.id}">Verwalten</a>` : ''}
-        <button class="btn small" id="fullscreen" type="button">Vollbild</button></div>
-      <iframe id="appframe" title="${a.name}" src="${origin}/~${fileToken}/index.html" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe>
-      <div id="player-note" class="overlay" hidden><p>Deine Sitzung ist abgelaufen.</p><p><a class="btn primary" href="/">Neu anmelden</a></p></div>
-    </div>`;
-    res.send(page(req, { title: a.name, body, bare: true, scripts: ['player.js'] }));
-  });
-
-  /**
-   * The player page asks for the short-lived SDK token here (and again before it
-   * expires). Permission is checked again on every call. The token is valid only
-   * for this user, in this app, in this session.
-   */
-  app.post('/apps/:id/token', (req, res) => {
-    const a = getApp(req.params.id);
-    const play = access.resolvePlay(req.user, a, { classId: str(req.body.klasse), versionId: str(req.body.version) });
-    if (!play) throw deny();
-    const user = req.user;
-    const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
-    // A preview is not a real use of the app: it is never counted, and its
-    // token makes the SDK keep everything in memory (see sdkStore.js).
-    if (req.body.first === true && !play.preview) services.recordPlay(a.id, user.id);
-    const token = tokens.sign('sdk', { u: user.id, a: a.id, v: play.version.id, c: play.classId, s: sidHash(req.sessionID), p: play.preview ? 1 : 0 }, config.sdkTokenSeconds);
-    res.json({
-      token,
-      expiresIn: config.sdkTokenSeconds,
-      mode: play.preview ? 'preview' : 'live',
-      // Apps get a name and an id that is different in every app - no e-mail, no global id.
-      user: {
-        id: tokens.pseudonym('user', `${a.id}:${user.id}`),
-        name: user.name,
-        isTeacher: Boolean(play.classId) && access.canManageClass(user, play.classId),
-        isOwner: a.owner_id === user.id,
-      },
-      class: cls ? { id: tokens.pseudonym('class', `${a.id}:${cls.id}`), name: cls.name } : null,
-      app: { name: a.name, version: play.version.number },
-    });
-  });
+  // The player (/apps/:id/spielen) and the SDK token route live in routes/player.js.
 };

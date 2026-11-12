@@ -383,7 +383,7 @@ test('Datenbank: Version 1 wird ohne Datenverlust auf Version 2 gehoben', () => 
     assert.equal(db.get('PRAGMA user_version').user_version, 2);
     const row = db.get('SELECT * FROM class_apps');
     assert.deepEqual([row.status, row.version_id, row.requested_version_id, row.request_state], ['approved', 'v1', 'v2', 'waiting']);
-    assert.equal(db.get('SELECT pref_theme FROM users').pref_theme, 'auto');
+    assert.equal(db.get('SELECT pref_theme FROM users').pref_theme, 'dark');
   } finally {
     db.close();
     fs.rmSync(dir, { recursive: true, force: true });

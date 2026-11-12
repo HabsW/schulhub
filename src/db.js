@@ -176,7 +176,7 @@ const MIGRATIONS = [
   // ---------------------------------------------------------------- 1 -> 2
   `
   -- People: display and accessibility choices (made by the person, shown in "Meine Daten").
-  ALTER TABLE users ADD COLUMN pref_theme TEXT NOT NULL DEFAULT 'auto' CHECK (pref_theme IN ('auto','dark','light'));
+  ALTER TABLE users ADD COLUMN pref_theme TEXT NOT NULL DEFAULT 'dark' CHECK (pref_theme IN ('auto','dark','light'));
   ALTER TABLE users ADD COLUMN pref_text TEXT NOT NULL DEFAULT 'normal' CHECK (pref_text IN ('normal','large','larger'));
   ALTER TABLE users ADD COLUMN pref_motion TEXT NOT NULL DEFAULT 'auto' CHECK (pref_motion IN ('auto','reduce'));
   ALTER TABLE users ADD COLUMN pref_contrast TEXT NOT NULL DEFAULT 'normal' CHECK (pref_contrast IN ('normal','high'));

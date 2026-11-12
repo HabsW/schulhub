@@ -18,10 +18,11 @@ const { createServices } = require('./services');
 const { createUserFiles } = require('./userFiles');
 const { createClassApps } = require('./classApps');
 const { createSettings } = require('./settings');
+const { createAssignments } = require('./assignments');
 const { createAuth } = require('./auth');
 const { createAppsHost } = require('./appsHost');
-const { HttpError } = require('./util');
-const { html, page } = require('./html');
+const { HttpError, isLocalPath } = require('./util');
+const { html, page, flash, empty, linkButton } = require('./html');
 
 // Pages that work without being signed in. Everything else is denied by default.
 const PUBLIC = new Set(['/', '/auth/login', '/auth/callback', '/auth/logout', '/dev/login', '/datenschutz']);
@@ -87,6 +88,7 @@ function createHubApp(ctx) {
   require('./routes/home')(app, ctx);
   require('./routes/classes')(app, ctx);
   require('./routes/apps')(app, ctx);
+  require('./routes/player')(app, ctx);
   require('./routes/results')(app, ctx);
   require('./routes/privacy')(app, ctx);
   require('./routes/admin')(app, ctx);
@@ -111,12 +113,28 @@ function createHubApp(ctx) {
       console.error(err);
     }
     if (res.headersSent) return res.end();
+    // A form that failed validation goes back to the page it came from, with
+    // the message and what the person typed - instead of a dead-end error page.
+    // Only for plain validation problems; never for 401/403/404/429 or JSON.
+    if (req.method === 'POST' && !wantsJson(req) && [400, 409, 413].includes(status) && req.session) {
+      const back = sameOriginPath(req, config);
+      if (back) {
+        flash(req, message, 'error');
+        req.session.formState = { path: back.split('?')[0], fields: keptFields(req.body) };
+        return res.redirect(303, back);
+      }
+    }
     res.status(status);
     if (wantsJson(req)) return res.json({ error: message });
-    const body = html`<section class="narrow center"><h1>${status === 404 ? 'Nicht gefunden' : status === 429 ? 'Kurz durchatmen' : 'Das hat nicht geklappt'}</h1>
-      <p>${message}</p><p><a class="btn" href="/">Zur Startseite</a></p></section>`;
+    const titles = { 401: 'Bitte melde dich an', 403: 'Das ist nicht erlaubt', 404: 'Nicht gefunden', 413: 'Das war zu groß', 429: 'Kurz durchatmen' };
+    const body = html`<div class="error-page">${empty({
+      icon: status === 404 ? 'search' : status === 429 ? 'timer' : 'alert',
+      title: titles[status] || 'Das hat nicht geklappt',
+      text: message,
+      actions: linkButton(req.user ? '/start' : '/', 'Zur Startseite', { kind: 'primary' }),
+    })}</div>`;
     try {
-      res.send(page(req, { title: 'Hinweis', body }));
+      res.send(page(req, { title: titles[status] || 'Hinweis', body, width: 'narrow' }));
     } catch {
       res.type('text/plain').send(message);
     }
@@ -126,6 +144,31 @@ function createHubApp(ctx) {
 }
 
 const wantsJson = (req) => String(req.headers.accept || '').includes('application/json');
+
+/** The Hub page a form was sent from (same origin only), or null. */
+function sameOriginPath(req, config) {
+  try {
+    const ref = new URL(String(req.headers.referer || ''));
+    if (ref.origin !== config.hubOrigin) return null;
+    const p = ref.pathname + ref.search;
+    return isLocalPath(p) ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What the person typed, to show it again after an error: text fields only, bounded, never the CSRF token. */
+function keptFields(body) {
+  const out = {};
+  let total = 0;
+  for (const [k, v] of Object.entries(body && typeof body === 'object' ? body : {})) {
+    if (k === '_csrf' || typeof v !== 'string' || v.length > 5000 || !/^[A-Za-z0-9_.:-]{1,64}$/.test(k)) continue;
+    total += v.length;
+    if (total > 20000) break;
+    out[k] = v;
+  }
+  return out;
+}
 
 /** Create everything. Returns { ctx, start(), stop() }. */
 function createHub(config) {
@@ -139,6 +182,7 @@ function createHub(config) {
   ctx.userFiles = createUserFiles(ctx);
   ctx.services = createServices(ctx);
   ctx.classApps = createClassApps(ctx);
+  ctx.assignments = createAssignments(ctx);
   ctx.auth = createAuth(ctx);
 
   const hubApp = createHubApp(ctx);
