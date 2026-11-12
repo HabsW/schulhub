@@ -26,6 +26,7 @@ module.exports = (app, ctx) => {
         <h1>Apps von unserer Schule. Für unsere Schule.</h1>
         <p class="lead">Lern-Apps und Spiele, die Lehrkräfte und Schüler/innen selbst bauen. Einmal anmelden – und deine Klassen, deine Apps und dein Fortschritt sind da.</p>
         ${joining ? notice({ tone: 'wait', icon: 'userPlus', text: 'Melde dich an, um der Klasse beizutreten.' }) : ''}
+        ${req.query.geloescht === '1' ? notice({ tone: 'ok', text: 'Dein Konto und alle Daten dazu sind gelöscht. Wenn du dich wieder anmeldest, beginnt ein neues, leeres Konto.', role: 'status' }) : ''}
         ${auth.enabled
           ? html`<div class="actions">${linkButton('/auth/login', 'Mit Microsoft-Schulkonto anmelden', { kind: 'primary', size: 'lg', icon: 'arrowRight' })}</div>
              <p class="meta">Es gibt keine eigenen Passwörter: Du meldest dich mit deinem Schulkonto an.</p>`
