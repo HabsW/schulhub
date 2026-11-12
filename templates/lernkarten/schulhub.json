@@ -1,0 +1,27 @@
+{
+  "category": "Fächerübergreifend",
+  "achievements": [
+    { "id": "erste-karte", "title": "Erste Karte", "description": "Die erste Karte gewusst.", "emoji": "🌱" },
+    { "id": "alle-karten", "title": "Alles sitzt", "description": "Jede Karte sitzt sicher.", "emoji": "🏆" }
+  ],
+  "settings": [
+    {
+      "key": "karten",
+      "label": "Karten",
+      "help": "Eine Karte pro Zeile: Vorderseite = Rückseite.",
+      "type": "pairs",
+      "columns": ["Vorderseite", "Rückseite"],
+      "default": [
+        ["der Hund", "the dog"],
+        ["die Katze", "the cat"],
+        ["das Haus", "the house"],
+        ["die Schule", "the school"],
+        ["der Freund", "the friend"],
+        ["das Buch", "the book"],
+        ["das Fenster", "the window"],
+        ["der Apfel", "the apple"]
+      ]
+    },
+    { "key": "umgedreht", "label": "Rückseite zuerst zeigen", "type": "boolean", "default": false }
+  ]
+}

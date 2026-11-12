@@ -1,0 +1,47 @@
+[
+  {
+    "id": "leer",
+    "name": "Leere App",
+    "appName": "Meine App",
+    "description": "Das Nötigste für den Anfang: eine Seite, die dich begrüßt und einen Zähler in deinem Konto speichert. Der beste Start für eine eigene Idee.",
+    "emoji": "📝",
+    "color": 7,
+    "category": "Fächerübergreifend"
+  },
+  {
+    "id": "quiz",
+    "name": "Quiz",
+    "appName": "Quiz",
+    "description": "Multiple-Choice-Fragen, die die Lehrkraft für ihre Klasse festlegt. Jede Runde landet mit allen Antworten in der Auswertung, dazu gibt es Erfolge.",
+    "emoji": "🧠",
+    "color": 4,
+    "category": "Fächerübergreifend"
+  },
+  {
+    "id": "lernkarten",
+    "name": "Lernkarten",
+    "appName": "Lernkarten",
+    "description": "Karteikarten zum Umdrehen. Die Lehrkraft legt die Karten fest, der Lernstand wird pro Person gespeichert und als Fortschritt gezeigt.",
+    "emoji": "📚",
+    "color": 1,
+    "category": "Fächerübergreifend"
+  },
+  {
+    "id": "spiel",
+    "name": "Spiel",
+    "appName": "Apfelernte",
+    "description": "Apfelernte: ein kleines Spiel auf einer Zeichenfläche (Canvas). Mit Pfeiltasten, Maus oder Finger spielbar, mit Bestenliste und Erfolgen.",
+    "emoji": "🎮",
+    "color": 2,
+    "category": "Freizeit"
+  },
+  {
+    "id": "spielwiese",
+    "name": "Spielwiese",
+    "appName": "Spielwiese",
+    "description": "Ein Knopf für jede Funktion des SDK: drück drauf und sieh sofort, was zurückkommt. Zum Ausprobieren und Nachschlagen.",
+    "emoji": "🧪",
+    "color": 5,
+    "category": "Informatik"
+  }
+]

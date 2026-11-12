@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meine App</title>
+<!-- hub-ui.css bringt Schrift, Farben und Bausteine wie hub-btn mit (im Hub liefert der Hub die Datei). -->
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page hub-stack">
+  <header>
+    <p class="hub-eyebrow">Meine App</p>
+    <h1 id="hallo">Hallo!</h1>
+    <p class="hub-muted" id="wo"></p>
+  </header>
+
+  <section class="hub-card hub-stack">
+    <p class="zahl" id="zahl" aria-live="polite">0</p>
+    <p class="hub-muted">So oft hast du schon geklickt. Der Zähler wird in deinem Konto gespeichert.</p>
+    <div class="hub-row">
+      <button class="hub-btn hub-primary hub-big" id="klick" disabled>Klick mich!</button>
+      <button class="hub-btn hub-quiet" id="zurueck" disabled>Zurücksetzen</button>
+    </div>
+  </section>
+</main>
+
+<!-- hub-sdk.js verbindet die App mit dem Hub. Auf deinem PC läuft sie mit einer Testperson. -->
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{
+  "category": "Fächerübergreifend",
+  "achievements": [
+    { "id": "erster-klick", "title": "Erster Klick", "description": "Du hast zum ersten Mal geklickt.", "emoji": "👏" }
+  ]
+}

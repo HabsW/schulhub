@@ -1,0 +1,28 @@
+{
+  "category": "Informatik",
+  "achievements": [
+    { "id": "ausprobiert", "title": "Ausprobiert", "description": "Einen Erfolg auf der Spielwiese freigeschaltet.", "emoji": "🧩" },
+    { "id": "geheim", "title": "Gefunden", "description": "Einen geheimen Erfolg entdeckt.", "emoji": "🦉", "secret": true }
+  ],
+  "settings": [
+    { "key": "begruessung", "label": "Begrüßung", "type": "text", "default": "Willkommen auf der Spielwiese!" },
+    { "key": "runden", "label": "Runden", "type": "number", "min": 1, "max": 10, "default": 3 },
+    { "key": "ton", "label": "Ton an", "type": "boolean", "default": true },
+    {
+      "key": "farbe",
+      "label": "Farbe",
+      "type": "choice",
+      "options": [
+        { "value": "himmel", "label": "Himmel" },
+        { "value": "wiese", "label": "Wiese" },
+        { "value": "sonne", "label": "Sonne" }
+      ],
+      "default": "himmel"
+    },
+    { "key": "teams", "label": "Teams", "type": "list", "maxItems": 10, "default": ["Füchse", "Eulen"] },
+    { "key": "woerter", "label": "Wörter", "type": "pairs", "columns": ["Deutsch", "Englisch"], "default": [["Hund", "dog"], ["Katze", "cat"]] }
+  ],
+  "results": {
+    "labels": { "versuch": "Versuch", "zeit": "Zeit in Sekunden" }
+  }
+}

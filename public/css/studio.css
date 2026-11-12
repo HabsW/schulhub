@@ -1,0 +1,251 @@
+/* =====================================================================
+   Bauen: the editor (/studio/:id), its start page and the template list.
+   Unlayered: wins over hub.css and over CodeMirror's injected base theme
+   (which sits in @layer codemirror, see scripts/vendor/README.md).
+   ===================================================================== */
+
+/* ------------------------------------------------------------ the bar */
+.studio-bar { gap: var(--s-1); padding-right: var(--s-2); z-index: 30; }
+.studio-app { flex: 0 1 auto; max-width: 14rem; display: none; }
+.studio-app::after { content: "/"; margin-left: .35rem; color: var(--ink-3); font-weight: 400; }
+.studio-tablet-only { display: none; }
+.studio-current { flex: 1 1 auto; display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.studio-file-menu { min-width: 0; }
+.studio-file-summary {
+  display: inline-flex; align-items: center; gap: .35rem; min-width: 0; max-width: 100%;
+  min-height: 2.25rem; padding: 0 .55rem; border-radius: var(--r-btn);
+  font: 600 .875rem/1.2 var(--mono); color: var(--ink);
+}
+.studio-file-summary:hover { background: var(--raised-2); }
+.studio-file-summary .ico { color: var(--ink-3); }
+.studio-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-state { flex: none; }
+.studio-state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.studio-tools { display: flex; align-items: center; gap: var(--s-1); flex: none; }
+.studio-save-label { display: none; }
+.studio-hide-phone { display: none; }
+.studio-wide { display: none; }
+.studio-narrow { display: inline; }
+.studio-more-btn { color: var(--ink-2); }
+.studio-menu-danger { color: var(--danger); }
+.studio-menu-danger .ico { color: var(--danger); }
+
+@media (min-width: 560px) {
+  .studio-state-text { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+}
+@media (min-width: 720px) {
+  .studio-bar { gap: var(--s-2); }
+  .studio-hide-phone { display: inline-flex; }
+  .studio-phone-only { display: none; }
+  .studio-save-label { display: inline; }
+  .studio-file-panel { left: 0; right: auto; transform-origin: top left; }
+}
+@media (min-width: 1200px) {
+  .studio-app { display: inline-flex; }
+  .studio-wide { display: inline; }
+  .studio-narrow { display: none; }
+}
+@media (pointer: coarse) { .studio-file-summary { min-height: var(--tap); } }
+
+/* ------------------------------------------------------- the workspace
+   Phones: one pane at a time (switch: Dateien / Code / Vorschau).
+   Tablets: the files are a drawer, code and preview switch.
+   From 1200px: three panes side by side. */
+.studio {
+  grid-area: stage; position: relative; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
+  background: var(--ground);
+}
+.studio-files, .studio-code, .studio-preview { grid-row: 2; grid-column: 1; min-width: 0; min-height: 0; }
+.studio-switch {
+  display: flex; gap: 2px; margin: var(--s-2) var(--s-3); padding: 3px;
+  border: 1px solid var(--line-1); border-radius: var(--r-btn); background: var(--raised-2);
+}
+.studio-seg {
+  position: relative; flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
+  min-width: 0; min-height: 2.5rem; padding: 0 .4rem; border: 0; border-radius: calc(var(--r-btn) - 2px);
+  background: none; color: var(--ink-2); font: 620 .9rem/1 var(--sans);
+  transition: background-color var(--t-1), color var(--t-1);
+}
+.studio-seg:hover { color: var(--ink); }
+.studio-seg[aria-pressed="true"] { background: var(--ink); color: var(--ink-on-ink); }
+.studio-seg .ico { display: none; width: 1.05rem; height: 1.05rem; }
+@media (min-width: 420px) { .studio-seg .ico { display: inline; } }
+@media (pointer: coarse) { .studio-seg { min-height: var(--tap); } }
+/* tablets: the files are a drawer opened from the bar; the switch is code / preview only */
+@media (min-width: 720px) and (max-width: 1199.98px) {
+  .studio-tablet-only { display: inline-flex; }
+  .studio-seg-files { display: none; }
+}
+.studio-scrim { grid-row: 2; grid-column: 1; z-index: 19; background: var(--scrim); animation: fade var(--t-2) both; }
+
+@media (min-width: 720px) and (max-width: 1199.98px) {
+  .studio-files {
+    position: absolute; z-index: 20; top: 0; bottom: 0; left: 0; width: min(20rem, 86%);
+    grid-row: 2; border-right: 1px solid var(--line-2); box-shadow: var(--shadow-float);
+    animation: studio-drawer var(--t-3) var(--ease) both;
+  }
+}
+@keyframes studio-drawer { from { transform: translateX(-100%); } }
+
+@media (min-width: 1200px) {
+  .studio { grid-template-columns: 16.5rem minmax(0, 1fr) minmax(22rem, 40%); grid-template-rows: minmax(0, 1fr); }
+  .studio-switch, .studio-scrim { display: none; }
+  .studio-files { grid-row: 1; grid-column: 1; border-right: 1px solid var(--line-1); }
+  .studio-code { grid-row: 1; grid-column: 2; }
+  .studio-preview { grid-row: 1; grid-column: 3; border-left: 1px solid var(--line-1); }
+}
+
+/* pane heads */
+.studio-head {
+  display: flex; align-items: center; gap: var(--s-2); min-height: 2.75rem; padding: 0 var(--s-2) 0 var(--s-4);
+  border-bottom: 1px solid var(--line-1);
+}
+.studio-head h2 { margin-right: auto; font-size: var(--fs-small); font-weight: 680; letter-spacing: 0; color: var(--ink); }
+.studio-count { color: var(--ink-3); font-size: var(--fs-meta); }
+
+/* ------------------------------------------------------------- files */
+.studio-files { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; background: var(--ground); }
+.studio-file-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: var(--s-3) var(--s-3) var(--s-2); }
+.studio-file-actions .btn { flex: 1 1 0; gap: .35rem; padding-inline: .5rem; }
+.studio-tree-wrap { min-height: 0; overflow: auto; padding: 0 var(--s-2) var(--s-3); overscroll-behavior: contain; }
+.studio-tree { margin: 0; padding: 0; list-style: none; }
+.studio-subtree { margin-left: .95rem; padding-left: .35rem; border-left: 1px solid var(--line-1); }
+.studio-dir-name {
+  display: flex; align-items: center; gap: .5rem; min-height: 2rem; padding: 0 .55rem;
+  color: var(--ink-3); font: 600 .8125rem/1.2 var(--mono);
+}
+.studio-file {
+  display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.25rem; padding: 0 .55rem;
+  border: 0; border-radius: var(--r-1); background: none; color: var(--ink-2);
+  font: 500 .875rem/1.2 var(--mono); text-align: left;
+  transition: background-color var(--t-1), color var(--t-1);
+}
+.studio-file:hover { background: var(--raised-1); color: var(--ink); }
+.studio-file[aria-current="true"] { background: var(--raised-2); color: var(--ink); font-weight: 650; }
+.studio-file .ico { color: var(--ink-3); }
+.studio-file-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.studio-dot { flex: none; width: .5rem; height: .5rem; margin-left: auto; border-radius: 50%; background: var(--wait); }
+.studio-tree-empty { padding: var(--s-3) .55rem; color: var(--ink-3); font-size: var(--fs-small); }
+.studio-hint { padding: var(--s-3) var(--s-4); border-top: 1px solid var(--line-1); color: var(--ink-3); font-size: var(--fs-meta); line-height: 1.45; }
+@media (pointer: coarse) { .studio-file { min-height: var(--tap); } }
+
+/* -------------------------------------------------------------- code */
+.studio-code { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); background: var(--raised-1); }
+/* minmax(0, 1fr): long lines scroll inside CodeMirror instead of widening the pane */
+.studio-editor { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; }
+.studio-info { place-self: center; display: grid; justify-items: start; gap: var(--s-3); width: min(34rem, 100%); padding: var(--s-6) var(--gutter); }
+.studio-info-icon { display: grid; place-items: center; width: 3rem; height: 3rem; border: 1px solid var(--line-2); border-radius: 50%; color: var(--ink-2); }
+.studio-info-name { font: 700 1.05rem/1.3 var(--mono); overflow-wrap: anywhere; }
+.studio-info-snippet { width: 100%; }
+.studio-blank { place-self: center; width: min(30rem, 100%); padding: var(--gutter); }
+
+/* ------------------------------------------------------------ preview */
+.studio-preview { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); background: var(--ground); }
+/* phones: the switch above already says "Vorschau" */
+.studio-preview-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (min-width: 720px) { .studio-preview-title { position: static; width: auto; height: auto; overflow: visible; clip-path: none; } }
+.studio-stage { grid-area: auto; min-height: 0; }
+.studio-console-btn { flex: none; }
+
+/* Which pane shows below 1200px is set by public/studio.js (after the panes' own display rules). */
+.studio-pane-off { display: none; }
+@media (min-width: 1200px) { .studio-pane-off { display: grid; } }
+
+/* ------------------------------------------------- dialogs and toasts */
+.studio-dialog form { display: grid; gap: var(--s-4); }
+.studio-dialog h2 { margin-bottom: 0; }
+.studio-dialog .actions { margin-top: var(--s-2); }
+.studio-toasts {
+  position: fixed; z-index: 60; left: 50%; bottom: calc(var(--s-4) + env(safe-area-inset-bottom));
+  display: grid; gap: var(--s-2); width: min(30rem, calc(100vw - 2rem)); transform: translateX(-50%);
+  pointer-events: none;
+}
+.studio-toast { pointer-events: auto; cursor: pointer; background: var(--raised-2); box-shadow: var(--shadow-float); animation: rise var(--t-3) var(--ease) both; }
+
+/* -------------------------------------- start page and template list */
+.studio-tpl-meta { display: block; margin-top: .3rem; color: var(--ink-3); font-size: var(--fs-meta); }
+.studio-tpl-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); min-width: 0; }
+.studio-panels { display: grid; gap: var(--s-5); margin-top: var(--s-6); }
+@media (min-width: 1000px) { .studio-panels { grid-template-columns: 1fr 1fr; } }
+.studio-panels code { white-space: nowrap; }
+.studio-panels > section { margin: 0; } /* side by side: no stacking margin from .panel + .panel */
+.studio-version-note { display: block; margin-top: .25rem; color: var(--ink-2); white-space: pre-line; }
+
+/* =====================================================================
+   CodeMirror in Hub colours. Class names are CodeMirror's own; token
+   colours use the tok-* classes of the vendored bundle. Calm on purpose:
+   keywords by weight, strings green, numbers amber, comments faint, markup
+   in two app colours mixed with the ink so they read in both themes.
+   ===================================================================== */
+.cm-editor { height: 100%; min-height: 0; min-width: 0; background: var(--raised-1); color: var(--ink); font-size: .875rem; }
+.cm-editor.cm-focused { outline: 2px solid var(--line-3); outline-offset: -2px; }
+.cm-scroller { overflow: auto; font-family: var(--mono); line-height: 1.6; }
+.cm-content { padding: var(--s-3) 0 var(--s-8); caret-color: var(--ink); }
+.cm-line { padding: 0 var(--s-5) 0 var(--s-2); }
+.cm-gutters { background: var(--raised-1); color: var(--ink-3); border-right: 1px solid var(--line-1); }
+.cm-lineNumbers .cm-gutterElement { min-width: 2.6rem; padding: 0 .55rem 0 .9rem; font-variant-numeric: tabular-nums; }
+/* fold markers only while the pointer is over the gutter (less noise while reading) */
+.cm-foldGutter .cm-gutterElement { padding: 0 .25rem; color: var(--ink-3); opacity: 0; transition: opacity var(--t-1); }
+.cm-gutters:hover .cm-gutterElement { opacity: 1; }
+@media (pointer: coarse) { .cm-foldGutter .cm-gutterElement { opacity: 1; } }
+.cm-activeLine { background: color-mix(in srgb, var(--ink) 4.5%, transparent); }
+.cm-activeLineGutter { background: color-mix(in srgb, var(--ink) 4.5%, transparent); color: var(--ink); }
+.cm-cursor, .cm-dropCursor { border-left: 2px solid var(--ink); }
+.cm-selectionBackground { background: color-mix(in srgb, var(--ink) 15%, transparent); }
+.cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--ink) 24%, transparent); }
+.cm-content ::selection { background: transparent; }
+.cm-selectionMatch { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.cm-matchingBracket { color: inherit; background: color-mix(in srgb, var(--ink) 14%, transparent); outline: 1px solid var(--line-3); }
+.cm-nonmatchingBracket { color: var(--danger); }
+.cm-searchMatch { background: color-mix(in srgb, var(--ink) 18%, transparent); outline: 1px solid var(--line-3); }
+.cm-searchMatch-selected { background: color-mix(in srgb, var(--ink) 34%, transparent); }
+.cm-specialChar { color: var(--danger); }
+.cm-foldPlaceholder { margin: 0 .2rem; padding: 0 .35rem; border: 1px solid var(--line-2); border-radius: var(--r-1); background: var(--raised-3); color: var(--ink-2); }
+
+.cm-tooltip { border: 1px solid var(--line-2); border-radius: var(--r-1); background: var(--raised-3); color: var(--ink); box-shadow: var(--shadow-float); }
+.cm-tooltip-autocomplete ul { max-height: 15rem; font-family: var(--mono); font-size: .8125rem; }
+.cm-tooltip-autocomplete ul li { padding: .2rem .6rem; }
+.cm-tooltip-autocomplete ul li[aria-selected] { background: var(--ink); color: var(--ink-on-ink); }
+.cm-completionIcon { opacity: .6; }
+.cm-completionDetail { margin-left: .6rem; color: var(--ink-3); font-style: normal; }
+.cm-completionMatchedText { text-decoration: none; font-weight: 750; }
+
+.cm-panels { background: var(--raised-2); color: var(--ink); }
+.cm-panels-top { border-bottom: 1px solid var(--line-2); }
+.cm-panels-bottom { border-top: 1px solid var(--line-2); }
+/* The search panel: hub.css's form rules would make its fields full width and 48px tall. */
+.cm-panel.cm-search { padding: .5rem 3rem .5rem .75rem; font: 500 .875rem/1.4 var(--sans); }
+.cm-panel.cm-search .cm-textfield {
+  display: inline-block; width: 13rem; max-width: 100%; min-height: 2.25rem; margin: .2rem .4rem .2rem 0; padding: .25rem .6rem;
+  border: 1px solid var(--line-2); border-radius: var(--r-1); background: var(--raised-1); color: var(--ink);
+  font: 400 .875rem/1.3 var(--mono); vertical-align: middle;
+}
+.cm-panel.cm-search .cm-textfield:focus { border-color: var(--ink); box-shadow: none; }
+.cm-panel.cm-search .cm-button {
+  min-height: 2.25rem; margin: .2rem .4rem .2rem 0; padding: 0 .75rem;
+  border: 1px solid var(--line-3); border-radius: var(--r-1); background: transparent; background-image: none;
+  color: var(--ink); font: 620 .8125rem/1 var(--sans); vertical-align: middle;
+}
+.cm-panel.cm-search .cm-button:hover { background: var(--raised-3); }
+.cm-panel.cm-search label { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.25rem; margin: .2rem .7rem .2rem 0; color: var(--ink-2); font-size: .8125rem; vertical-align: middle; }
+.cm-panel.cm-search input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; }
+.cm-panel.cm-search [name="close"] { top: .55rem; right: .5rem; width: 2.25rem; height: 2.25rem; border-radius: var(--r-1); color: var(--ink-2); font-size: 1.3rem; line-height: 1; cursor: pointer; }
+.cm-panel.cm-search [name="close"]:hover { background: var(--raised-3); color: var(--ink); }
+
+.tok-keyword { color: var(--ink); font-weight: 720; }
+.tok-string { color: var(--ok); }
+.tok-number { color: var(--wait); }
+.tok-comment { color: var(--ink-3); }
+.tok-tag { color: color-mix(in oklab, var(--app-0) 68%, var(--ink)); }
+.tok-attr { color: color-mix(in oklab, var(--app-4) 68%, var(--ink)); }
+.tok-property { color: var(--ink-2); }
+.tok-variable { color: var(--ink); }
+.tok-function { color: var(--ink); font-weight: 600; }
+.tok-operator { color: var(--ink-2); }
+.tok-punct { color: var(--ink-3); }
+.tok-meta { color: var(--ink-3); }
+.tok-invalid { color: var(--danger); text-decoration: underline wavy var(--danger-line); }
+
+/* Touch screens: 16px text, so phones do not zoom in when the editor gets focus. */
+@media (pointer: coarse) { .cm-editor { font-size: 1rem; } }

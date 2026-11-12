@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apfelernte</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page hub-stack">
+  <header class="kopf">
+    <h1>Apfelernte</h1>
+    <p class="hub-muted">Fang die Äpfel mit dem Korb. Goldene Äpfel zählen drei Punkte.</p>
+  </header>
+
+  <div class="buehne" id="buehne">
+    <canvas id="feld" tabindex="-1" role="img" aria-label="Spielfeld: Äpfel fallen, unten steht der Korb"></canvas>
+    <div class="anzeige" aria-hidden="true"><span id="punkte">0 Punkte</span><span id="zeit"></span></div>
+    <div class="schild" id="schild">
+      <h2 id="schild-titel">Bereit?</h2>
+      <p class="hub-muted" id="schild-text" aria-live="polite">Steuerung: Pfeiltasten, Maus oder Finger.</p>
+      <button class="hub-btn hub-primary hub-big" id="start" disabled>Spielen</button>
+    </div>
+  </div>
+
+  <section class="hub-stack">
+    <h2>Bestenliste</h2>
+    <ol class="hub-leaderboard" id="bestenliste"></ol>
+    <p class="hub-muted" id="leer" hidden>Noch niemand – sei die oder der Erste!</p>
+  </section>
+</main>
+
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
