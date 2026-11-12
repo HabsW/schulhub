@@ -1,8 +1,9 @@
 /* Lernkarten – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
 
-/* Farbe der App ("Türkis"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+/* Farbe der App ("Türkis"). Im hellen Modus (Gerät oder Einstellung im Hub) dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
 :root { --hub-accent: #2ec4b6; --right: var(--hub-ok); --wrong: var(--hub-danger); }
-@media (prefers-color-scheme: light) { :root { --hub-accent: #0b7268; } }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --hub-accent: #0b7268; } }
+:root[data-theme="light"] { --hub-accent: #0b7268; }
 
 [hidden] { display: none !important; }
 .app { display: grid; gap: 1.25rem; padding-bottom: 5rem; }
@@ -79,6 +80,37 @@
 .review li.wrong .mark { color: var(--wrong); }
 
 /* Ohne Bewegung: die Karte wechselt ohne Drehung. */
+/* Wenig Platz in der Höhe (Handy quer, kleine Fenster): Beim Üben zählt jeder Pixel. Titel und Gruß
+   werden dann nur noch vorgelesen (der Hub zeigt den App-Namen ohnehin oben an). */
+@media (max-height: 720px) {
+  body[data-screen="learn"] .head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .learn { gap: .7rem; }
+}
+@media (max-height: 520px) {
+  .head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .app { gap: .6rem; padding-top: .6rem; padding-bottom: 1rem; }
+  .hub-stack { gap: .6rem; }
+  .hub-card { padding: .85rem 1rem; }
+  .mode-note, .teacher-note { padding: .35rem .6rem; font-size: .8125rem; }
+  .hero { gap: .35rem; }
+  .big-num { font-size: 2.3rem; }
+  .hub-btn.hub-big { min-height: var(--hub-tap); }
+  .hero .hub-btn.hub-big, .hero .actions { margin-top: .2rem; }
+  .boxes { margin: .5rem 0 .4rem; }
+  .box-bar { height: 3rem; }
+  .hero-title { font-size: 1.15rem; }
+}
+/* ... und quer: Karte links, „Gewusst“/„Nicht gewusst“ rechts. */
+@media (max-height: 520px) and (min-width: 560px) {
+  .learn { max-width: 48rem; grid-template-columns: minmax(0, 1fr) 12rem; grid-template-areas: "top top" "bar bar" "card judge"; gap: .45rem 1rem; }
+  .learn-top { grid-area: top; }
+  #learn-progress { grid-area: bar; }
+  .flashcard { grid-area: card; min-height: 0; height: calc(100dvh - 6rem); }
+  .face-text { font-size: 1.6rem; }
+  .hint { display: none; }
+  .judge { grid-area: judge; grid-template-columns: 1fr; align-content: end; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
   .face { backface-visibility: visible; transform: none !important; }

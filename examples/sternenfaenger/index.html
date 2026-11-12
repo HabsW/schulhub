@@ -14,31 +14,34 @@
   <p class="sr-only" id="live" role="status"></p>
 
   <section class="panel" id="panel" aria-labelledby="title">
-    <header class="panel-head">
-      <p class="hub-eyebrow" id="where">Sternenfänger</p>
-      <h1 id="title">Sternenfänger</h1>
-      <p class="message" id="message">Verbinde mit dem Hub …</p>
-    </header>
-    <p class="mode-note" id="mode-note" hidden></p>
-    <dl class="facts">
-      <div><dt>Rekord</dt><dd id="record">–</dd></div>
-      <div><dt>Bestes Level</dt><dd id="best-level">–</dd></div>
-      <div><dt>Schwierigkeit</dt><dd id="difficulty">–</dd></div>
-    </dl>
-    <p class="hub-muted small" id="save-state" role="status"></p>
-    <button class="hub-btn hub-primary hub-big play" id="play" type="button" disabled>Spielen</button>
-    <p class="hub-muted small hint">Ziehen mit Finger oder Maus · Pfeiltasten · P pausiert</p>
-
-    <section class="block" aria-labelledby="h-board">
-      <h2 id="h-board">Bestenliste</h2>
-      <ol class="hub-leaderboard" id="board"></ol>
-      <p class="hub-muted small" id="board-empty" hidden>Noch niemand – sei die oder der Erste!</p>
-    </section>
-    <section class="block" aria-labelledby="h-ach">
-      <h2 id="h-ach">Erfolge</h2>
-      <ul class="achievements" id="achievements"></ul>
-      <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn das Spiel im Hub läuft.</p>
-    </section>
+    <div class="panel-main">
+      <header class="panel-head">
+        <p class="hub-eyebrow" id="where">Sternenfänger</p>
+        <h1 id="title">Sternenfänger</h1>
+        <p class="message" id="message">Verbinde mit dem Hub …</p>
+      </header>
+      <p class="hub-muted small save-state" id="save-state" role="status"></p>
+      <p class="mode-note" id="mode-note" hidden></p>
+      <button class="hub-btn hub-primary hub-big play" id="play" type="button" disabled>Spielen</button>
+      <dl class="facts">
+        <div><dt>Rekord</dt><dd id="record">–</dd></div>
+        <div><dt>Level</dt><dd id="best-level" title="Bestes Level, das du erreicht hast">–</dd></div>
+        <div><dt>Modus</dt><dd id="difficulty">–</dd></div>
+      </dl>
+      <p class="hub-muted small hint">Ziehen mit Finger oder Maus · Pfeiltasten · P pausiert</p>
+    </div>
+    <div class="panel-more">
+      <section class="block" aria-labelledby="h-board">
+        <h2 id="h-board">Bestenliste</h2>
+        <ol class="hub-leaderboard" id="board"></ol>
+        <p class="hub-muted small" id="board-empty" hidden>Noch niemand – sei die oder der Erste!</p>
+      </section>
+      <section class="block" aria-labelledby="h-ach">
+        <h2 id="h-ach">Erfolge</h2>
+        <ul class="achievements" id="achievements"></ul>
+        <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn das Spiel im Hub läuft.</p>
+      </section>
+    </div>
   </section>
 </div>
 <div class="hub-toast" id="toast" role="status" hidden></div>

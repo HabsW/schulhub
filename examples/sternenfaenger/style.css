@@ -1,8 +1,9 @@
 /* Sternenfänger – eigenes CSS. Die Bausteine (hub-btn, hub-leaderboard …) kommen aus hub-ui.css. */
 
-/* Farbe des Spiels ("Flieder"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+/* Farbe des Spiels ("Flieder"). Im hellen Modus (Gerät oder Einstellung im Hub) dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
 :root { --hub-accent: #b48cff; --sky-top: #0b0f2e; --sky-bottom: #2a1a5e; }
-@media (prefers-color-scheme: light) { :root { --hub-accent: #6236c4; } }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --hub-accent: #6236c4; } }
+:root[data-theme="light"] { --hub-accent: #6236c4; }
 
 [hidden] { display: none !important; }
 html, body { height: 100%; overflow: hidden; }
@@ -18,17 +19,20 @@ canvas:focus { outline: none; }
 .pause { position: absolute; top: .5rem; left: 50%; transform: translateX(-50%); width: 2.75rem; height: 2.75rem; border: 1px solid rgb(255 255 255 / .25); border-radius: 50%; background: rgb(10 11 12 / .45); color: #f4f5f2; font: 700 .9rem var(--hub-sans); cursor: pointer; }
 .pause:focus-visible { outline: 2px solid #f4f5f2; outline-offset: 2px; }
 
-/* Das Menü liegt über dem Spiel und scrollt, wenn der Platz knapp ist. */
-.panel { position: absolute; z-index: 2; width: min(26rem, calc(100% - 1.5rem)); max-height: calc(100% - 1.5rem); overflow-y: auto; overscroll-behavior: contain; display: grid; gap: .9rem; padding: clamp(1rem, 4vw, 1.5rem); border: 1px solid var(--hub-line-2); border-radius: 14px; background: color-mix(in srgb, var(--hub-raised-1) 94%, transparent); box-shadow: 0 18px 48px rgb(0 0 0 / .5); }
+/* Das Menü liegt über dem Spiel und scrollt, wenn der Platz knapp ist. Der Knopf "Spielen" steht
+   gleich unter der Überschrift, damit er auch auf kleinen Bildschirmen ohne Scrollen sichtbar ist. */
+.panel { position: absolute; z-index: 2; inset: .75rem; margin: auto; width: min(26rem, calc(100% - 1.5rem)); height: fit-content; max-height: calc(100% - 1.5rem); overflow-y: auto; overscroll-behavior: contain; display: grid; gap: .9rem; padding: clamp(1rem, 4vw, 1.5rem); border: 1px solid var(--hub-line-2); border-radius: 14px; background: color-mix(in srgb, var(--hub-raised-1) 95%, transparent); box-shadow: 0 18px 48px rgb(0 0 0 / .5); }
+.panel-main, .panel-more { display: grid; gap: .8rem; align-content: start; min-width: 0; }
 .panel-head { display: grid; gap: .15rem; }
 .panel-head h1 { margin: 0; }
 .message { margin: 0; font-weight: 620; }
-.mode-note { margin: 0; padding: .5rem .75rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .875rem; }
+.panel p { margin: 0; }
+.save-state:empty { display: none; }
+.mode-note { padding: .5rem .75rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .875rem; }
 .mode-note.preview { border-color: color-mix(in srgb, var(--hub-wait) 55%, transparent); color: var(--hub-wait); }
-.panel > p { margin: 0; }
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin: 0; }
-.facts div { padding: .5rem .6rem; border: 1px solid var(--hub-line-1); border-radius: var(--hub-r-btn); background: var(--hub-raised-2); }
-.facts dt { font: 650 .66rem/1.3 var(--hub-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--hub-ink-3); }
+.facts div { min-width: 0; padding: .5rem .6rem; border: 1px solid var(--hub-line-1); border-radius: var(--hub-r-btn); background: var(--hub-raised-2); }
+.facts dt { font: 650 .66rem/1.3 var(--hub-mono); letter-spacing: .04em; text-transform: uppercase; color: var(--hub-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .facts dd { margin: .15rem 0 0; font-size: 1.15rem; font-weight: 760; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .play { width: 100%; }
 .hint { text-align: center; }
@@ -44,5 +48,26 @@ canvas:focus { outline: none; }
 .achievements li.on .ach-emoji { filter: none; opacity: 1; }
 .ach-text { display: grid; line-height: 1.3; }
 .ach-text small { color: var(--hub-ink-2); font-size: .8125rem; }
+
+/* Wenig Höhe, aber Breite (Handy quer): zwei Spalten. Links Start und Werte, rechts scrollen
+   Bestenliste und Erfolge für sich. */
+@media (max-height: 520px) and (min-width: 560px) {
+  .panel { width: min(48rem, calc(100% - 1.5rem)); height: calc(100% - 1.5rem); grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.25rem; padding: .9rem 1.1rem; overflow: hidden; }
+  .panel-main, .panel-more { gap: .55rem; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  .panel-more .block:first-child { padding-top: 0; border-top: 0; }
+  .panel-head h1 { font-size: 1.45rem; }
+  .message { font-size: .9rem; }
+  .mode-note { padding: .35rem .6rem; font-size: .8125rem; }
+  .play.hub-big { min-height: var(--hub-tap); }
+  .facts div { padding: .35rem .5rem; }
+  .facts dd { font-size: 1rem; }
+  .hint { display: none; }
+}
+/* Sehr wenig Höhe und schmal: alles in einer Spalte, aber knapper. */
+@media (max-height: 520px) and (max-width: 559.98px) {
+  .panel { gap: .6rem; padding: .9rem; }
+  .panel-head h1 { font-size: 1.4rem; }
+  .hint { display: none; }
+}
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

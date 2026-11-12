@@ -1,8 +1,9 @@
 /* Quiz-Werkstatt – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
 
-/* Farbe der App ("Himmel"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+/* Farbe der App ("Himmel"). Im hellen Modus (Gerät oder Einstellung im Hub) dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
 :root { --hub-accent: #5aa9ff; --right: var(--hub-ok); --wrong: var(--hub-danger); }
-@media (prefers-color-scheme: light) { :root { --hub-accent: #1d5fae; } }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --hub-accent: #1d5fae; } }
+:root[data-theme="light"] { --hub-accent: #1d5fae; }
 
 [hidden] { display: none !important; }
 .app { display: grid; gap: 1.25rem; padding-bottom: 5rem; }
@@ -81,5 +82,39 @@
 .review .mark { font-weight: 800; }
 .review li.right .mark { color: var(--right); }
 .review li.wrong .mark { color: var(--wrong); }
+
+/* Wenig Platz in der Höhe (Handy quer, kleine Fenster): Beim Üben zählt jeder Pixel. Titel und Gruß
+   werden dann nur noch vorgelesen (der Hub zeigt den App-Namen ohnehin oben an). */
+@media (max-height: 720px) {
+  body[data-screen="question"] .head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
+@media (max-height: 520px) {
+  .head { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .app { gap: .6rem; padding-top: .6rem; padding-bottom: 1rem; }
+  .hub-stack { gap: .6rem; }
+  .hub-card { padding: .85rem 1rem; }
+  .mode-note, .teacher-note { padding: .35rem .6rem; font-size: .8125rem; }
+  .hero { gap: .35rem; }
+  .big-num { font-size: 2.3rem; }
+  .hub-btn.hub-big { min-height: var(--hub-tap); }
+  .hero .hub-btn.hub-big, .hero .actions { margin-top: .2rem; }
+  .question-card { padding: .7rem .9rem; gap: .5rem; }
+  .question { font-size: 1.15rem; margin: 0; }
+  .choices { gap: .35rem; }
+  .choice { min-height: var(--hub-tap); padding: .3rem .7rem; font-size: .95rem; }
+  .choice .letter { width: 1.6rem; height: 1.6rem; }
+  .keys { display: none; }
+}
+/* ... und quer: Frage links, Antworten rechts. */
+@media (max-height: 520px) and (min-width: 560px) {
+  .question-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); grid-template-areas: "q c" "fb c" "nx c"; grid-template-rows: auto auto 1fr; column-gap: 1.25rem; align-items: start; }
+  .question { grid-area: q; }
+  .choices, .answer { grid-area: c; }
+  .choices { grid-template-columns: 1fr; }
+  .feedback { grid-area: fb; }
+  .feedback:empty { margin-top: 0; }
+  .next { grid-area: nx; justify-self: start; }
+  #quiz-progress { display: none; }
+}
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
