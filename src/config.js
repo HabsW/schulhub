@@ -103,10 +103,11 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
     },
     // [max events, per milliseconds]
     rate: {
-      login: [3000, 10 * 60_000], // per IP, only a backstop: a whole school signs in through one address (no passwords to guess)
-      loginFail: [300, 10 * 60_000], // failed sign-in callbacks per IP
-      joinFail: [8, 10 * 60_000], // wrong join codes per user
-      joinFailIp: [300, 10 * 60_000], // ... and per IP (high: a whole school shares one address)
+      // Sign-in (see routes/home.js): nothing here can lock out a school that shares one address.
+      loginSession: [20, 10 * 60_000], // starting a Microsoft sign-in, per browser session
+      loginAnon: [300, 10 * 60_000], // starts from a browser without a session, per address; over it: sent to the start page, never refused
+      loginFailAudit: [300, 10 * 60_000], // failed sign-ins written to the audit log, per address; never blocks a sign-in
+      joinFail: [8, 10 * 60_000], // wrong join codes per person (never per address: see routes/classes.js)
       write: [240, 60_000], // state-changing Hub requests per user
       uploadFiles: [6000, 60 * 60_000], // per user
       uploadVersions: [30, 60 * 60_000], // per user
@@ -114,7 +115,6 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       sdkFiles: [120, 60_000], // hub.files uploads per user and app
       appFiles: [3000, 60_000], // static app files per person (from the file token)
       appFilesBad: [600, 60_000], // requests with an invalid file token, per address (never blocks valid ones)
-      loginSession: [20, 10 * 60_000], // starting a Microsoft sign-in, per browser session
       publish: [60, 60 * 60_000], // publishing versions, per person
       submit: [30, 60 * 60_000], // submissions to classes per person
       draftWrites: [600, 60_000], // editor saves per user

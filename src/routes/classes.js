@@ -919,7 +919,9 @@ module.exports = (app, ctx) => {
   // accounts (access.joinRoleFor). Nothing in the request can change that.
   function findCode(req) {
     const key = req.user.id;
-    if (limiter.blocked('joinFail', key) || limiter.blocked('joinFailIp', req.ip)) {
+    // Wrong codes are limited per person only. Codes are 192-bit, so guessing is hopeless anyway, and a
+    // per-address limit would let a group at the school's shared address close joining for everybody.
+    if (limiter.blocked('joinFail', key)) {
       throw new HttpError(429, 'Zu viele Versuche mit ungültigen Codes. Bitte warte ein paar Minuten.');
     }
     const sent = String(req.params.code || '');
@@ -928,7 +930,6 @@ module.exports = (app, ctx) => {
     // an old code learns nothing about the class (no name, no teachers).
     if (!found || !safeEqual(found.code, sent) || access.isArchived(found.class_id)) {
       limiter.hit('joinFail', key);
-      limiter.hit('joinFailIp', req.ip);
       throw bad('Dieser Beitrittscode ist ungültig oder abgelaufen. Bitte frag deine Lehrkraft nach einem neuen Code.');
     }
     return { row: found, cls: getClass(found.class_id) };

@@ -22,10 +22,11 @@ tests that try to break it. Things checked by hand in a real browser are marked 
 | Passwords leaking | The Hub has none. No self-registration. Microsoft tokens are discarded after sign-in; only `openid profile email` is requested. |
 | Session fixation / theft | New session id at login. Cookie is `HttpOnly`, `SameSite=Lax`, `Secure` under HTTPS, and named `__Host-…` under HTTPS so no subdomain can set or shadow it. Absolute lifetime 8 hours. Logout destroys the session server-side. The database stores only a hash of the session id. |
 | Login CSRF / code injection | `state` and PKCE verifier live in the server-side session and are single-use. |
+| Locking everybody out of sign-in | A whole school shares one address, so no limit on the way in can refuse a sign-in because of what somebody else at that address did. Starting a sign-in is limited per browser session (every Hub page has already given the browser one). A start from a browser without a session (a direct link on a first visit, or a script) counts per address; over that limit it is sent to the start page, which gives it a session, instead of being refused. A callback is only looked at when that browser really started a sign-in; any other callback is refused without counting and without asking Microsoft. Failed sign-ins never block anyone; their per-address count only keeps a flood of them out of the audit log. |
 | Open redirect after login | Return target must be a local path. |
 | Test login reaching production | `/dev/login` only exists with `--dev`; `--dev` refuses to start unless `BASE_URL` is localhost and `NODE_ENV` is not `production`, and listens on loopback only. Real mode refuses to start with incomplete configuration. |
 
-Tests: *Sitzung…*, *Testmodus…*, *Microsoft-Anmeldung…*
+Tests: *Sitzung…*, *Testmodus…*, *Microsoft-Anmeldung…*, *Anmeldung: wer an der Schuladresse flutet, sperrt niemanden aus* (`test/hardening.test.js`, with a stand-in for Microsoft's two endpoints)
 
 ### Permissions
 
@@ -279,7 +280,14 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 
 ### Abuse and operations
 
-- **Rate limits** on logins, wrong join codes, state-changing requests, uploads, app files, SDK calls, editor writes, `hub.files` uploads and class submissions. A whole school usually shares one public address, so no limit that real use can hit counts per address: app files count against the **person** the file token was issued to, and requests with an invalid file token count in their own per-address bucket that only ever blocks invalid requests; starting a Microsoft sign-in is limited per browser session, only **failed** sign-in callbacks count per address, and a high per-address backstop remains (there are no passwords to guess here). A person can submit a bounded number of apps to classes and publish a bounded number of versions per hour; re-publishing a version that already waits adds no history; the same unread notice is never repeated. Tests: *Gefälschte Datei-Links blockieren nur sich selbst…*, *Veröffentlichen hin und her…* Tests: *SDK-Aufrufe werden gebremst*, *Beitrittscodes…*, *Grenzen gelten pro Person…*, *Einreichen lässt sich nicht als Flut…*
+- **Rate limits** on sign-in, wrong join codes, state-changing requests, uploads, app files, SDK calls, editor writes, `hub.files` uploads and class submissions. A whole school usually shares one public address, so nothing that real use goes through can be blocked per address:
+  - Sign-in is limited per browser session (see *Locking everybody out of sign-in* above).
+  - Wrong join codes are limited per person. Codes are 192-bit, so a per-address limit would not slow down guessing; it would only let a group close joining for everybody.
+  - App files count against the **person** the file token was issued to.
+  - The only per-address counts are for invalid file tokens, for sign-in starts from a browser without a session (over the limit it is sent to the start page) and for failed sign-ins written to the audit log. None of them can refuse a valid request.
+  - A person can submit a bounded number of apps to classes and publish a bounded number of versions per hour. Re-publishing a version that already waits adds no history, and the same unread notice is never repeated.
+
+  Tests: *SDK-Aufrufe werden gebremst*, *Beitrittscodes…*, *Grenzen gelten pro Person…*, *Anmeldung: wer an der Schuladresse flutet…*, *Beitreten: falsche Codes anderer…*, *Gefälschte Datei-Links blockieren nur sich selbst…*, *Einreichen lässt sich nicht als Flut…*, *Veröffentlichen hin und her…*
 - **Quotas** per user and app for saves, shared data, results, leaderboards, comments, files (`hub.files`: per app and 50 MB per account across apps). Test: *Dateien aus Apps: Obergrenze pro Konto…*
 - **Personal pages are never cached**: every response to a signed-in person carries `Cache-Control: no-store` (shared school PCs, back button after logout). Test: *Persönliche Seiten…*
 - **Audit log** of sign-ins, refused sign-ins, role changes, blocks, uploads, refused uploads, publishing, approvals, rejections, deletions and data exports. Readable by the admin only, pruned after `AUDIT_RETENTION_DAYS`.
@@ -326,6 +334,9 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 - **Leaderboards as a covert channel.** An approved app could encode what it learns about its users into leaderboard scores (numbers only, at most 20 boards) that its author reads. Teacher review of the code is the control; scores never carry text.
 - **Where permission decisions live.** Every decision about one object goes through `src/access.js`. List queries (search, catalogue, start page, queues) pre-filter in SQL with the same rules, and objects opened from them are checked again through `access.js`.
 - **Rate limits and login state are in memory**, per process. Run one process, or move them to a shared store before scaling out.
+- **Floods of sign-in attempts are not throttled per address**, on purpose: that would let one person lock the whole school out. Each attempt costs the sender a session and a start, and the server asks Microsoft at most once per started sign-in. Against raw request floods, use the limits of the reverse proxy in front of the Hub.
+- **The review history can be pushed along.** One pupil can add about 60 "eingereicht" entries per hour to a class (publishing is limited to 60 versions an hour). Older entries stay stored but drop out of view (the app page shows 60, the workbench 80).
+- **After an account deletion, a confirmation naming the person can still wait in the admin's own session** (for example "… ist jetzt Schüler/in."). It shows once on the admin's next page and is gone at the latest when that session expires (8 hours).
 - **Cookie isolation between Hub and apps** relies on the `__Host-` cookie under HTTPS. Use a separate registrable domain for apps in production. On plain-HTTP localhost this protection is weaker.
 - **Frame navigation blocking** was verified in Chromium only. Browsers that do not apply the parent's `frame-src` to later navigations would allow an app to navigate its own frame away (and leak what it knows about its own user).
 - **App CSP allows inline scripts, `eval` and WASM** inside the app's own origin, because game engines need them. Containment is the origin and the sandbox, not the app's CSP.

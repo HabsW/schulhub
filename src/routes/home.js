@@ -28,6 +28,7 @@ module.exports = (app, ctx) => {
         <p class="lead">Lern-Apps und Spiele, die Lehrkräfte und Schüler/innen selbst bauen. Einmal anmelden – und deine Klassen, deine Apps und dein Fortschritt sind da.</p>
         ${joining ? notice({ tone: 'wait', icon: 'userPlus', text: 'Melde dich an, um der Klasse beizutreten.' }) : ''}
         ${wanted ? notice({ icon: 'lock', text: 'Bitte melde dich an – danach geht es auf der Seite weiter, die du öffnen wolltest.' }) : ''}
+        ${req.query.anmelden === '1' ? notice({ icon: 'lock', text: 'Bitte klicke noch einmal auf „Mit Microsoft-Schulkonto anmelden“. Landest du immer wieder hier, erlaube Cookies für diese Seite – ohne sie ist keine Anmeldung möglich.' }) : ''}
         ${req.query.geloescht === '1' ? notice({ tone: 'ok', text: 'Dein Konto und alle Daten dazu sind gelöscht. Wenn du dich wieder anmeldest, beginnt ein neues, leeres Konto.', role: 'status' }) : ''}
         ${auth.enabled
           ? html`<div class="actions">${linkButton('/auth/login', 'Mit Microsoft-Schulkonto anmelden', { kind: 'primary', size: 'lg', icon: 'arrowRight' })}</div>
@@ -54,23 +55,33 @@ module.exports = (app, ctx) => {
   });
 
   // ---------------------------------------------------------- Microsoft sign-in
-  // Sign-in limits: a whole school shares one address, so the per-address limit is a high backstop;
-  // starting a sign-in is limited per browser session, and only FAILED callbacks count per address.
+  // A whole school signs in through ONE address, so no limit on the way in may be one that anybody
+  // there can fill up for everybody else:
+  //  - Starting a sign-in is limited per browser session. A real sign-in starts from a Hub page, and
+  //    every Hub page has already given the browser its session (the CSRF token lives there).
+  //  - A start WITHOUT a session (a direct link on a first visit, or a script) counts per address. Over
+  //    that limit it is not refused but sent to the start page, which gives the browser its session.
+  //  - A callback is only looked at when this browser really started a sign-in. Failures never block
+  //    anyone; their per-address count only keeps a flood of them out of the audit log.
   app.get('/auth/login', async (req, res, next) => {
-    ctx.limiter.guard('loginSession', req.sessionID);
-    ctx.limiter.guard('login', req.ip);
+    if (req.session.csrf) ctx.limiter.guard('loginSession', req.sessionID);
+    else if (!ctx.limiter.hit('loginAnon', req.ip)) return res.redirect('/?anmelden=1');
     const url = await auth.loginUrl(req.session);
     req.session.save((err) => (err ? next(err) : res.redirect(url)));
   });
 
   app.get('/auth/callback', async (req, res, next) => {
-    if (ctx.limiter.blocked('loginFail', req.ip)) return next(new HttpError(429, 'Zu viele fehlgeschlagene Anmeldungen. Bitte warte ein paar Minuten.'));
+    // Not the end of a sign-in this browser started (an old tab, a reload, a forged link): nothing is
+    // checked or counted, and Microsoft is not asked.
+    if (!req.session.authFlow) {
+      if (req.user) return res.redirect('/start');
+      return next(new HttpError(400, 'Diese Anmeldung ist abgelaufen. Bitte melde dich noch einmal an. Passiert das immer wieder, erlaube Cookies für diese Seite – ohne sie ist keine Anmeldung möglich.'));
+    }
     let user;
     try {
       user = auth.upsertUser(await auth.handleCallback(req.session, req.query));
     } catch (err) {
-      ctx.limiter.hit('loginFail', req.ip);
-      if (err instanceof HttpError) services.audit(null, 'anmeldung_abgelehnt');
+      if (err instanceof HttpError && ctx.limiter.hit('loginFailAudit', req.ip)) services.audit(null, 'anmeldung_abgelehnt');
       return next(err);
     }
     auth.establishSession(req, user, (err, target) => (err ? next(err) : res.redirect(target)));

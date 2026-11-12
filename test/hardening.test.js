@@ -4,10 +4,12 @@
 // archived classes cannot be written through the SDK, limits are per person
 // (a school shares one address), submissions cannot flood teachers, files have
 // an account cap, personal pages are not cached, results stay in their class,
-// and archived classes do not reveal names on leaderboards.
+// archived classes do not reveal names on leaderboards, and nobody at the
+// school's shared address can lock the others out of signing in.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 const { startHub } = require('./helpers');
 
 const teacherClass = (h, userId) => h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher' ORDER BY joined_at DESC LIMIT 1", userId).id;
@@ -100,6 +102,96 @@ test('Grenzen gelten pro Person: wer flutet, sperrt nicht die ganze Schule (glei
     for (let i = 0; i < 5; i++) assert.equal(await get(A, mia), 200);
     assert.equal(await get(A, mia), 429, 'Mia hit her own limit');
     assert.equal(await get(B, ben), 200, 'Ben, from the same address, is not affected');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Anmeldung: wer an der Schuladresse flutet, sperrt niemanden aus', async () => {
+  const h = await startHub({ studentDomains: ['schueler.schule.example'], rate: { loginAnon: [3, 60_000], loginSession: [2, 60_000], loginFailAudit: [2, 60_000] } });
+  try {
+    // Stand-ins for Microsoft only (the test server has no Microsoft connection): the start hands out a
+    // state, and the token endpoint accepts the code "echt". Which browser may start, and when a callback
+    // counts, is the real route code - and every other callback goes through the real check.
+    const { auth } = h.hub.ctx;
+    auth.loginUrl = async (session) => {
+      session.authFlow = { state: randomUUID(), verifier: 'v' };
+      return `https://login.microsoftonline.com/schule/oauth2/v2.0/authorize?state=${session.authFlow.state}`;
+    };
+    const realCallback = auth.handleCallback;
+    auth.handleCallback = async (session, query) => {
+      const flow = session.authFlow;
+      if (!flow || query.code !== 'echt' || query.state !== flow.state) return realCallback(session, query);
+      delete session.authFlow;
+      return { oid: 'oid-mia', name: 'Mia Schmidt', email: 'mia@schueler.schule.example' };
+    };
+    const toMicrosoft = (res) => res.status === 302 && String(res.headers.location).startsWith('https://login.microsoftonline.com/');
+    const stateOf = (res) => new URL(res.headers.location).searchParams.get('state');
+    const rejected = () => h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'anmeldung_abgelehnt'").n;
+
+    // (a) Starts from browsers without a Hub session, past their limit: never refused - sent to the start page.
+    const anon = [];
+    for (let i = 0; i < 6; i++) anon.push(await h.browser().get('/auth/login'));
+    assert.equal(anon.filter(toMicrosoft).length, 3);
+    for (const r of anon.slice(3)) assert.deepEqual([r.status, r.headers.location], [302, '/?anmelden=1']);
+    assert.match((await h.browser().page('/?anmelden=1')).text, /noch einmal auf/);
+
+    // (b) Callbacks that no sign-in was started for: refused, not counted, not in the audit log.
+    for (let i = 0; i < 6; i++) assert.equal((await h.browser().get('/auth/callback?code=x&state=y')).status, 400);
+    assert.equal(rejected(), 0);
+
+    // (c) Failures of sign-ins that were really started, each from its own session: logged up to the cap.
+    for (let i = 0; i < 4; i++) {
+      const E = h.browser();
+      await E.page('/');
+      assert.ok(toMicrosoft(await E.get('/auth/login')));
+      assert.equal((await E.get('/auth/callback?code=x&state=falsch')).status, 403);
+    }
+    assert.equal(rejected(), 2, 'failures are logged - a flood of them only up to the cap');
+
+    // After all of that, a pupil at the same address signs in normally.
+    const M = h.browser();
+    await M.page('/');
+    const start = await M.get('/auth/login');
+    assert.ok(toMicrosoft(start), 'her start is not affected by anybody else');
+    const done = await M.get(`/auth/callback?code=echt&state=${stateOf(start)}`);
+    assert.deepEqual([done.status, done.headers.location], [302, '/start']);
+    assert.equal((await M.page('/start')).status, 200, 'signed in');
+    assert.ok(h.db.get("SELECT 1 AS ok FROM users WHERE oid = 'oid-mia' AND role = 'student'"));
+    assert.equal((await M.get(`/auth/callback?code=echt&state=${stateOf(start)}`)).headers.location, '/start', 'an old callback just leads home');
+
+    // Starting is limited per browser session - for that browser only.
+    const T = h.browser();
+    await T.page('/');
+    for (let i = 0; i < 2; i++) assert.ok(toMicrosoft(await T.get('/auth/login')));
+    assert.equal((await T.get('/auth/login')).status, 429, 'one browser hit its own limit');
+    const U = h.browser();
+    await U.page('/');
+    assert.ok(toMicrosoft(await U.get('/auth/login')), 'another browser at the same address is not affected');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Beitreten: falsche Codes anderer an derselben Adresse sperren niemanden aus', async () => {
+  // joinFailIp is a trap: should anyone add a per-address limit back under that name, it trips here.
+  const h = await startHub({ rate: { joinFail: [2, 60_000], joinFailIp: [5, 60_000] } });
+  try {
+    const lehmann = h.addUser('Herr Lehmann', 'teacher');
+    const L = await h.browser().login(lehmann);
+    await L.post('/klassen', { name: '7b' });
+    const cls = teacherClass(h, lehmann.id);
+    // Five pupils at the school's address try wrong codes until each one of them is stopped.
+    for (let i = 0; i < 5; i++) {
+      const G = await h.browser().login(h.addUser(`Rater ${i}`, 'student'));
+      for (let j = 0; j < 2; j++) assert.equal((await G.post(`/beitreten/${'A'.repeat(31)}${j}`)).status, 400);
+      assert.equal((await G.post(`/beitreten/${joinCode(h, cls)}`)).status, 429, 'a guesser is stopped - even with the right code');
+    }
+    // A classmate at the same address joins with the real code.
+    const mia = h.addUser('Mia', 'student');
+    const M = await h.browser().login(mia);
+    assert.equal((await M.post(`/beitreten/${joinCode(h, cls)}`)).status, 303);
+    assert.ok(h.db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", cls, mia.id));
   } finally {
     await h.stop();
   }
@@ -306,12 +398,25 @@ test('Konto löschen: Mitteilungen anderer, die die Person nennen, verschwinden 
     const app = await h.makeApp(M, 'Mias App', { 'index.html': 'x' });
     await M.page(`/apps/${app.id}`);
     await M.post(`/apps/${app.id}/einreichen`, { klasse: cls });
-    // The teacher comments on HER app: her notice names him and points to her (surviving) app.
-    await L.page(`/apps/${app.id}`);
-    assert.equal((await L.post(`/apps/${app.id}/kommentare`, { text: 'Schön!' })).status, 303);
-    assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND text LIKE '%Quastenflosser%'", mia.id), 'precondition');
+    // Every route that tells her something about him, each checked on its own: his notices name him and
+    // point to HER (surviving) app or page. The same unread text is kept only once, so she reads each
+    // notice before the next one arrives.
+    const naming = () => h.db.get("SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND text LIKE '%Quastenflosser%'", mia.id).n;
+    const steps = [
+      ['comment at the review workbench', `/pruefen/${cls}/${app.id}`, `/pruefen/${cls}/${app.id}/kommentar`, { text: 'Schön!' }],
+      ['comment on the app page', `/apps/${app.id}`, `/apps/${app.id}/kommentare`, { text: 'Noch schöner!' }],
+      ['feedback', `/klassen/${cls}`, `/klassen/${cls}/rueckmeldungen`, { schueler: mia.id, text: 'Gut gemacht.' }],
+    ];
+    for (const [label, pageUrl, url, fields] of steps) {
+      const before = naming();
+      await L.page(pageUrl);
+      assert.equal((await L.post(url, fields)).status, 303, label);
+      assert.equal(naming(), before + 1, `precondition: the ${label} names him`);
+      await M.page('/mitteilungen');
+      assert.equal((await M.post('/mitteilungen/gelesen')).status, 303);
+    }
     h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', lehrer.id));
-    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE text LIKE '%Quastenflosser%'").n, 0, 'the notice naming him is gone');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE text LIKE '%Quastenflosser%'").n, 0, 'every notice naming him is gone');
   } finally {
     await h.stop();
   }
