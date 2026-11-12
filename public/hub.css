@@ -208,7 +208,9 @@
   a { color: inherit; text-decoration-line: underline; text-decoration-color: var(--line-3); text-decoration-thickness: 1px; text-underline-offset: .22em; transition: text-decoration-color var(--t-1); }
   a:hover { text-decoration-color: currentColor; }
   code, kbd, samp { font: .9em/1 var(--mono); }
-  :not(pre) > code { padding: .12em .36em; border-radius: var(--r-1); background: var(--raised-2); border: 1px solid var(--line-1); white-space: break-spaces; }
+  /* inline code is short (names, files): never break inside it - long snippets belong in <pre> */
+  :not(pre) > code { padding: .12em .36em; border-radius: var(--r-1); background: var(--raised-2); border: 1px solid var(--line-1); white-space: nowrap; }
+  :not(pre) > code.wrap { white-space: normal; overflow-wrap: anywhere; }
   kbd { padding: .1em .4em; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: var(--r-1); font-size: .82em; }
   hr { border: 0; border-top: 1px solid var(--line-1); margin: var(--s-6) 0; }
   * { scrollbar-color: var(--line-3) transparent; }
@@ -523,6 +525,8 @@
   .panel { background: var(--raised-1); border: 1px solid var(--line-1); border-radius: var(--r-2); }
   .panel > h2, .panel > .section-head { margin-bottom: var(--s-4); }
   .panel + .panel, .panel + .section, .section + .panel { margin-top: var(--s-5); }
+  /* side by side in a grid the gap does the spacing */
+  .grid-2 > .panel, .form-row > .panel, .grid-2 > .section { margin-top: 0; }
   /* attention: someone has to decide */
   .attention { position: relative; border-color: var(--wait-line); }
   .attention::before { content: ""; position: absolute; left: -1px; top: -1px; bottom: -1px; width: 3px; border-radius: var(--r-2) 0 0 var(--r-2); background: var(--wait); }

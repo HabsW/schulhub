@@ -129,6 +129,15 @@ function sdkReference(config) {
           example: "if (hub.mode === 'preview') zeigeHinweis('Vorschau – nichts wird gespeichert.');",
         },
         {
+          name: 'hub.theme',
+          sig: 'hub.theme',
+          kind: 'property',
+          text: 'Die Darstellung, die die Person im Hub gewählt hat. Apps mit `hub-ui.css` (und `<body class="hub-ui">`) übernehmen sie automatisch.',
+          returns: "`'dark'`, `'light'` oder `'auto'` (wie das Gerät)",
+          example: "if (hub.theme === 'light') zeichneHellenHintergrund();",
+          local: "Lokal `'auto'` – oder was du mit `Hub.connect({ local: { theme: 'light' } })` angibst.",
+        },
+        {
           name: 'hub.app',
           sig: 'hub.app',
           kind: 'property',

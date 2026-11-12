@@ -87,6 +87,8 @@
     if (event.origin !== appOrigin || event.source !== frame.contentWindow) return;
     var msg = event.data;
     if (!msg || typeof msg !== 'object') return;
+    // The app is talking to us, so it has loaded (the frame's load event can be missed behind big scripts).
+    stage.classList.add('ready');
 
     if (msg.hub === 'log') return log(msg);
     if (typeof msg.id !== 'string' || msg.id.length > 64) return;

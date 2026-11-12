@@ -121,43 +121,75 @@
       token = welcome.token;
       // get a fresh token shortly before the current one runs out
       setInterval(function () { refresh().catch(function () {}); }, Math.max(60, welcome.expiresIn - 90) * 1000);
-      if (welcome.mode === 'preview') forwardConsole(hubOrigin);
+      if (welcome.mode === 'preview') consoleTap.start(hubOrigin);
+      else consoleTap.stop();
       return { call: call, files: files, mode: welcome.mode, user: welcome.user, class: welcome.class, app: welcome.app, theme: welcome.theme === 'light' || welcome.theme === 'dark' ? welcome.theme : 'auto' };
     });
   }
 
   /**
-   * In a preview (the owner or a reviewing teacher), show the app's console
-   * messages and errors in the Hub's console panel. Text only, capped.
+   * Console messages and errors of the app, for the Hub's console panel in a
+   * preview. Captured from the moment this file loads (inside a frame), so
+   * errors before Hub.connect() finishes are not lost; forwarded only once the
+   * Hub says this is a preview, otherwise dropped. Text only, capped.
    */
-  function forwardConsole(hubOrigin) {
+  var consoleTap = (function () {
+    var framed = global.parent && global.parent !== global;
+    if (!framed || !global.console) return { start: function () {}, stop: function () {} };
+    var buffer = [];
+    var target = null; // hub origin once forwarding is on
     var sent = 0;
-    function send(level, parts, where) {
-      if (sent >= 300) return;
-      sent++;
-      var text = parts.map(function (p) {
+    var originals = {};
+    function text(parts) {
+      return parts.map(function (p) {
         if (p instanceof Error) return p.name + ': ' + p.message;
         if (typeof p === 'string') return p;
         try { return JSON.stringify(p); } catch (e) { return String(p); }
       }).join(' ').slice(0, 2000);
-      try { global.parent.postMessage({ hub: 'log', level: level, text: text, where: where || '' }, hubOrigin); } catch (e) { /* ignore */ }
+    }
+    function emit(level, parts, where) {
+      var msg = { hub: 'log', level: level, text: text(parts), where: where || '' };
+      if (target) {
+        if (sent >= 300) return;
+        sent++;
+        try { global.parent.postMessage(msg, target); } catch (e) { /* ignore */ }
+      } else if (buffer && buffer.length < 100) buffer.push(msg);
     }
     ['log', 'info', 'warn', 'error'].forEach(function (level) {
-      var original = global.console && global.console[level];
+      var original = global.console[level];
       if (!original) return;
+      originals[level] = original;
       global.console[level] = function () {
-        send(level, Array.prototype.slice.call(arguments));
+        emit(level, Array.prototype.slice.call(arguments));
         return original.apply(global.console, arguments);
       };
     });
-    global.addEventListener('error', function (e) {
+    function onError(e) {
       var where = e.filename ? String(e.filename).replace(/^.*\/~[^/]+\//, '') + ':' + e.lineno : '';
-      send('error', [e.message || 'Fehler'], where);
-    });
-    global.addEventListener('unhandledrejection', function (e) {
-      send('error', ['Unbehandelter Fehler: ', e.reason && e.reason.message ? e.reason.message : String(e.reason)]);
-    });
-  }
+      emit('error', [e.message || 'Fehler'], where);
+    }
+    function onRejection(e) {
+      emit('error', ['Unbehandelter Fehler: ', e.reason && e.reason.message ? e.reason.message : String(e.reason)]);
+    }
+    global.addEventListener('error', onError);
+    global.addEventListener('unhandledrejection', onRejection);
+    return {
+      /** Preview: send what was captured so far, then forward live. */
+      start: function (hubOrigin) {
+        target = hubOrigin;
+        var pending = buffer || [];
+        buffer = null;
+        pending.forEach(function (m) { if (sent < 300) { sent++; try { global.parent.postMessage(m, hubOrigin); } catch (e) { /* ignore */ } } });
+      },
+      /** Not a preview (or local mode): stop capturing and put the console back. */
+      stop: function () {
+        buffer = null;
+        Object.keys(originals).forEach(function (k) { global.console[k] = originals[k]; });
+        global.removeEventListener('error', onError);
+        global.removeEventListener('unhandledrejection', onRejection);
+      },
+    };
+  })();
 
   // ----------------------------------------------------------------- lokal
 
@@ -429,7 +461,9 @@
       : Promise.resolve(null);
     connection = detect
       .then(function (info) {
-        return info && info.hub === true && typeof info.hubOrigin === 'string' ? hubBackend(info.hubOrigin) : localBackend(options);
+        if (info && info.hub === true && typeof info.hubOrigin === 'string') return hubBackend(info.hubOrigin);
+        consoleTap.stop();
+        return localBackend(options);
       })
       .then(buildApi)
       .then(function (hub) {

@@ -39,6 +39,8 @@
   --hub-ok: #137a43; --hub-wait: #925600; --hub-danger: #c0291b;
 }
 
+[hidden] { display: none !important; }
+
 /* opt-in page base */
 .hub-ui { margin: 0; min-height: 100dvh; background: var(--hub-ground); color: var(--hub-ink); font: 400 1rem/1.55 var(--hub-sans); -webkit-font-smoothing: antialiased; }
 .hub-ui *, .hub-ui *::before, .hub-ui *::after { box-sizing: border-box; }
