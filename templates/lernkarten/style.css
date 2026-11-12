@@ -1,8 +1,5 @@
 /* Eigenes CSS für die Lernkarten. Die Bausteine kommen aus hub-ui.css. */
 
-/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
-[hidden] { display: none !important; }
-
 .kopf { gap: .5rem; }
 .kopf h1 { margin: 0; }
 
