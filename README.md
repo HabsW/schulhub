@@ -27,7 +27,8 @@ npm install     # nur beim ersten Mal
 npm run dev
 ```
 
-Dann <http://localhost:3000> öffnen.
+Dann <http://localhost:3000> öffnen. `npm run demo` macht dasselbe und öffnet den Browser von selbst,
+sobald der Hub bereit ist.
 
 `npm run dev` startet den **lokalen Testmodus**: ohne Microsoft, mit Beispieldaten und einer
 Anmeldung als Testperson (ein Klick auf der Startseite). Beim ersten Start mit leerer Datenbank:

@@ -38,9 +38,24 @@ hub.start().then(
     console.log(`${config.hubName} läuft: ${config.hubOrigin}`);
     console.log(`Apps laufen isoliert unter: ${config.appsOriginPattern}`);
     if (dev) console.log('LOKALER TESTMODUS: Testpersonen-Anmeldung aktiv, Server nur auf diesem Rechner erreichbar.');
+    if (dev && process.argv.includes('--open')) openBrowser(config.hubOrigin);
   },
   (err) => {
     console.error(err.code === 'EADDRINUSE' ? `Port ${config.listenPort} ist schon belegt.` : err.message);
     process.exit(1);
   }
 );
+
+/** Local demo only (`npm run demo`): open the start page in the default browser once the Hub is ready. */
+function openBrowser(url) {
+  const { spawn } = require('node:child_process');
+  const [cmd, args] =
+    process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+    : process.platform === 'darwin' ? ['open', [url]]
+    : ['xdg-open', [url]];
+  try {
+    spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
+  } catch {
+    // no browser to open: the address is printed above
+  }
+}
