@@ -4,18 +4,66 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pixel-Studio</title>
+<link rel="stylesheet" href="hub-ui.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-<main>
-  <h1>🎨 Pixel-Studio</h1>
-  <p id="who"></p>
-  <div id="slots" class="row"></div>
-  <div id="grid" aria-label="Zeichenfläche"></div>
-  <div id="palette" class="row"></div>
-  <p class="row"><button id="clear">Bild leeren</button><span id="state"></span></p>
+<body class="hub-ui">
+<main class="hub-page app">
+  <header class="head">
+    <p class="hub-eyebrow" id="where">Pixel-Studio</p>
+    <h1>Pixel-Studio</h1>
+    <p class="hub-muted" id="who">Verbinde mit dem Hub …</p>
+  </header>
+  <p class="mode-note" id="mode-note" hidden></p>
+
+  <div class="slots" id="slots" role="group" aria-label="Welches Bild?"></div>
+
+  <div class="studio">
+    <div class="canvas-wrap">
+      <canvas id="canvas" tabindex="0" aria-label="Zeichenfläche, 16 mal 16 Pixel" aria-describedby="canvas-help"></canvas>
+      <p class="hub-muted small" id="canvas-help">Malen mit Finger oder Maus. Tastatur: Pfeiltasten bewegen, Leertaste malt, Strg+Z macht rückgängig.</p>
+      <p class="sr-only" id="cursor-live" role="status"></p>
+    </div>
+
+    <div class="tools">
+      <section aria-labelledby="h-colors">
+        <h2 id="h-colors" class="tool-head">Farbe</h2>
+        <div class="palette" id="palette" role="radiogroup" aria-labelledby="h-colors"></div>
+      </section>
+      <section aria-labelledby="h-tools">
+        <h2 id="h-tools" class="tool-head">Werkzeug</h2>
+        <div class="toolbar" id="toolbar" role="radiogroup" aria-labelledby="h-tools">
+          <button type="button" class="tool" data-tool="stift" role="radio" aria-checked="true">Stift</button>
+          <button type="button" class="tool" data-tool="radierer" role="radio" aria-checked="false">Radierer</button>
+          <button type="button" class="tool" data-tool="eimer" role="radio" aria-checked="false">Farbeimer</button>
+        </div>
+      </section>
+      <div class="row-actions">
+        <button type="button" class="hub-btn" id="undo" disabled>Rückgängig</button>
+        <button type="button" class="hub-btn hub-quiet" id="clear">Leeren</button>
+      </div>
+      <button type="button" class="hub-btn hub-primary hub-big" id="export">Als Bild speichern</button>
+      <p class="hub-muted small" id="state" role="status"></p>
+    </div>
+  </div>
+
+  <section class="gallery-wrap" aria-labelledby="h-gallery">
+    <div class="section-head">
+      <h2 id="h-gallery">Galerie</h2>
+      <span class="hub-muted small" id="gallery-count"></span>
+    </div>
+    <ul class="gallery" id="gallery"></ul>
+    <p class="hub-muted gallery-empty" id="gallery-empty" hidden>Noch leer. Mit „Als Bild speichern“ kommt dein Bild als PNG hierher – eins pro Leinwand.</p>
+  </section>
+
+  <section class="hub-card" aria-labelledby="h-ach">
+    <h2 id="h-ach">Erfolge</h2>
+    <ul class="achievements" id="achievements"></ul>
+    <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn die App im Hub läuft.</p>
+  </section>
 </main>
+<div class="hub-toast" id="toast" role="status" hidden></div>
 <script src="hub-sdk.js"></script>
-<script src="studio.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

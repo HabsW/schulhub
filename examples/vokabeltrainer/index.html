@@ -4,43 +4,86 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vokabeltrainer</title>
+<link rel="stylesheet" href="hub-ui.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-<main>
-  <header><h1>🔤 Vokabeltrainer</h1><p id="who"></p></header>
+<body class="hub-ui">
+<main class="hub-page app">
+  <header class="head">
+    <p class="hub-eyebrow" id="where">Vokabeltrainer</p>
+    <h1>Vokabeltrainer</h1>
+    <p class="hub-muted" id="who">Verbinde mit dem Hub …</p>
+  </header>
+  <p class="mode-note" id="mode-note" hidden></p>
 
-  <section id="menu" class="card" hidden>
-    <p id="progress-text"></p>
-    <div class="bar"><div id="progress-bar"></div></div>
-    <button id="start" class="primary">Übungsrunde starten</button>
-    <button id="edit" hidden>Wortliste der Klasse bearbeiten</button>
-    <h2>Bestenliste: richtig beantwortet</h2>
-    <ol id="board"></ol>
+  <!-- Übersicht -->
+  <section data-view="menu" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="big-num"><span id="learned">0</span><small> von <span id="total">0</span></small></p>
+      <p class="hub-muted hero-sub">Wörtern gelernt</p>
+      <progress class="hub-progress" id="progress" max="1" value="0" aria-label="Gelernte Wörter"></progress>
+      <p class="hub-muted small" id="round-info"></p>
+      <button class="hub-btn hub-primary hub-big" id="start" type="button">Übungsrunde starten</button>
+    </div>
+    <p class="teacher-note" id="teacher-note" hidden></p>
+    <div class="grid">
+      <section class="hub-card" aria-labelledby="h-board">
+        <h2 id="h-board">Bestenliste</h2>
+        <p class="hub-muted small">Richtige Antworten insgesamt</p>
+        <ol class="hub-leaderboard" id="board"></ol>
+        <p class="hub-muted small" id="board-empty" hidden>Noch niemand – sei die oder der Erste!</p>
+      </section>
+      <section class="hub-card" aria-labelledby="h-ach">
+        <h2 id="h-ach">Erfolge</h2>
+        <ul class="achievements" id="achievements"></ul>
+        <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn die App im Hub läuft.</p>
+      </section>
+    </div>
+    <details class="hub-card words">
+      <summary>Wortliste <span class="hub-muted" id="word-count"></span></summary>
+      <ul class="word-list" id="word-list"></ul>
+    </details>
   </section>
 
-  <section id="quiz" class="card" hidden>
-    <p class="small" id="count"></p>
-    <p class="word" id="word"></p>
-    <form id="answer-form"><input id="answer" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="auf Englisch …">
-      <button class="primary">Prüfen</button></form>
-    <p id="feedback" class="feedback"></p>
+  <!-- Abfrage -->
+  <section data-view="quiz" class="hub-stack" hidden>
+    <div class="quiz-top">
+      <span id="count" class="count"></span>
+      <span id="streak" class="streak" aria-live="polite"></span>
+      <button class="hub-btn hub-quiet" id="cancel" type="button">Abbrechen</button>
+    </div>
+    <progress class="hub-progress" id="quiz-progress" max="1" value="0" aria-label="Fortschritt der Runde"></progress>
+    <div class="hub-card prompt-card">
+      <p class="hub-eyebrow" id="ask-label"></p>
+      <p class="prompt" id="prompt"></p>
+      <form id="answer-form" class="answer" autocomplete="off">
+        <label class="sr-only" for="answer">Deine Antwort</label>
+        <input class="hub-input" id="answer" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
+        <button class="hub-btn hub-primary" id="check" type="submit">Prüfen</button>
+      </form>
+      <p class="feedback" id="feedback" role="status"></p>
+    </div>
   </section>
 
-  <section id="done" class="card" hidden>
-    <h2 id="done-title"></h2>
-    <ul id="done-list"></ul>
-    <button id="again" class="primary">Zurück zur Übersicht</button>
-  </section>
-
-  <section id="editor" class="card" hidden>
-    <h2>Wortliste für <span id="class-name"></span></h2>
-    <p class="small">Ein Wortpaar pro Zeile: <code>deutsch = englisch</code></p>
-    <textarea id="list" rows="12" spellcheck="false"></textarea>
-    <p><button id="save-list" class="primary">Speichern</button> <button id="cancel-list">Abbrechen</button></p>
-    <p id="editor-note" class="small"></p>
+  <!-- Ergebnis -->
+  <section data-view="done" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow">Runde geschafft</p>
+      <p class="big-num" id="score"></p>
+      <p class="verdict" id="verdict"></p>
+      <p class="hub-muted small" id="save-state" role="status"></p>
+      <div class="actions">
+        <button class="hub-btn hub-primary hub-big" id="again" type="button">Noch eine Runde</button>
+        <button class="hub-btn hub-big" id="back" type="button">Zur Übersicht</button>
+      </div>
+    </div>
+    <section class="hub-card" aria-labelledby="h-review">
+      <h2 id="h-review">Deine Antworten</h2>
+      <ul class="review" id="review"></ul>
+    </section>
   </section>
 </main>
+<div class="hub-toast" id="toast" role="status" aria-live="polite" hidden></div>
 <script src="hub-sdk.js"></script>
 <script src="app.js"></script>
 </body>

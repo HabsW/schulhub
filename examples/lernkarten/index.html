@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lernkarten</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page app">
+  <header class="head">
+    <p class="hub-eyebrow" id="where">Lernkarten</p>
+    <h1 id="title">Lernkarten</h1>
+    <p class="hub-muted" id="who">Verbinde mit dem Hub …</p>
+  </header>
+  <p class="mode-note" id="mode-note" hidden></p>
+
+  <!-- Übersicht -->
+  <section data-view="menu" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow">Heute</p>
+      <p class="hero-title" id="due-text"></p>
+      <p class="hub-muted" id="due-sub"></p>
+      <div class="actions">
+        <button class="hub-btn hub-primary hub-big" id="start" type="button">Lernen</button>
+        <button class="hub-btn hub-primary hub-big" id="extra" type="button" hidden>Trotzdem üben</button>
+      </div>
+    </div>
+
+    <section class="hub-card" aria-labelledby="h-boxes">
+      <div class="card-head">
+        <h2 id="h-boxes">Deine Lernkartei</h2>
+        <span class="hub-muted small" id="mastered"></span>
+      </div>
+      <ol class="boxes" id="boxes" aria-describedby="boxes-help"></ol>
+      <p class="hub-muted small" id="boxes-help">Gewusst: Die Karte rückt ein Fach weiter und kommt später wieder (Fach 2 nach einem Tag, Fach 5 nach zwei Wochen). Nicht gewusst: zurück in Fach 1.</p>
+    </section>
+
+    <p class="teacher-note" id="teacher-note" hidden></p>
+
+    <div class="grid">
+      <section class="hub-card" aria-labelledby="h-ach">
+        <h2 id="h-ach">Erfolge</h2>
+        <ul class="achievements" id="achievements"></ul>
+        <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn die App im Hub läuft.</p>
+      </section>
+      <details class="hub-card deck">
+        <summary>Alle Karten <span class="hub-muted" id="card-count"></span></summary>
+        <ul class="deck-list" id="deck-list"></ul>
+      </details>
+    </div>
+  </section>
+
+  <!-- Keine Karten -->
+  <section data-view="empty" class="hub-card" hidden>
+    <h2>Noch keine Karten</h2>
+    <p class="hub-muted" id="empty-text">Deine Lehrkraft legt die Karten im Hub an. Schau später noch einmal vorbei.</p>
+  </section>
+
+  <!-- Lernen -->
+  <section data-view="learn" class="learn" hidden>
+    <div class="learn-top">
+      <span class="count" id="count"></span>
+      <button class="hub-btn hub-quiet" id="cancel" type="button">Beenden</button>
+    </div>
+    <progress class="hub-progress" id="learn-progress" max="1" value="0" aria-label="Fortschritt der Lernrunde"></progress>
+    <button class="flashcard" id="card" type="button" aria-describedby="card-hint">
+      <span class="face front"><span class="face-label" id="front-label"></span><span class="face-text" id="front-text"></span><span class="box-tag" id="box-tag"></span></span>
+      <span class="face back"><span class="face-label" id="back-label"></span><span class="face-text" id="back-text"></span></span>
+    </button>
+    <p class="hub-muted small hint" id="card-hint">Tippe auf die Karte (oder Leertaste), um sie umzudrehen.</p>
+    <p class="sr-only" id="announce" role="status"></p>
+    <div class="judge">
+      <button class="hub-btn hub-big no" id="no" type="button" disabled>Nicht gewusst</button>
+      <button class="hub-btn hub-primary hub-big" id="yes" type="button" disabled>Gewusst</button>
+    </div>
+  </section>
+
+  <!-- Ergebnis -->
+  <section data-view="done" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow">Lernrunde geschafft</p>
+      <p class="big-num" id="score"></p>
+      <p class="verdict" id="verdict"></p>
+      <p class="hub-muted small" id="save-state" role="status"></p>
+      <div class="actions">
+        <button class="hub-btn hub-primary hub-big" id="back" type="button">Zur Lernkartei</button>
+      </div>
+    </div>
+    <section class="hub-card" aria-labelledby="h-review">
+      <h2 id="h-review">Diese Runde</h2>
+      <ul class="review" id="review"></ul>
+    </section>
+  </section>
+</main>
+<div class="hub-toast" id="toast" role="status" hidden></div>
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

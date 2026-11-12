@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kopfrechnen</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page app">
+  <header class="head">
+    <p class="hub-eyebrow" id="where">Kopfrechnen</p>
+    <h1>Kopfrechnen</h1>
+    <p class="hub-muted" id="who">Verbinde mit dem Hub …</p>
+  </header>
+  <p class="mode-note" id="mode-note" hidden></p>
+
+  <!-- Übersicht -->
+  <section data-view="menu" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow" id="level-eyebrow"></p>
+      <p class="hero-title" id="level-info"></p>
+      <p class="hub-muted" id="level-best"></p>
+      <button class="hub-btn hub-primary hub-big" id="start" type="button">Sprint starten</button>
+      <p class="hub-muted small">Pro Fehler kommen 3 Sekunden dazu. Mit höchstens 2 Fehlern ist die Stufe geschafft.</p>
+    </div>
+
+    <section class="hub-card" aria-labelledby="h-levels">
+      <div class="card-head">
+        <h2 id="h-levels">Stufen</h2>
+        <span class="hub-muted small" id="levels-done"></span>
+      </div>
+      <progress class="hub-progress" id="progress" max="1" value="0" aria-label="Geschaffte Stufen"></progress>
+      <ol class="levels" id="levels"></ol>
+    </section>
+
+    <p class="teacher-note" id="teacher-note" hidden></p>
+
+    <div class="grid">
+      <section class="hub-card" aria-labelledby="h-board">
+        <h2 id="h-board">Bestzeiten</h2>
+        <p class="hub-muted small" id="board-sub"></p>
+        <ol class="hub-leaderboard" id="board"></ol>
+        <p class="hub-muted small" id="board-empty" hidden>Noch keine Bestzeit – sei die oder der Erste!</p>
+      </section>
+      <section class="hub-card" aria-labelledby="h-ach">
+        <h2 id="h-ach">Erfolge</h2>
+        <ul class="achievements" id="achievements"></ul>
+        <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn die App im Hub läuft.</p>
+      </section>
+    </div>
+  </section>
+
+  <!-- Sprint -->
+  <section data-view="sprint" class="sprint" hidden>
+    <div class="sprint-top">
+      <span class="count" id="count"></span>
+      <span class="clock" id="clock" aria-label="Zeit">0,0 s</span>
+      <button class="hub-btn hub-quiet" id="cancel" type="button">Abbrechen</button>
+    </div>
+    <progress class="hub-progress" id="sprint-progress" max="1" value="0" aria-label="Fortschritt im Sprint"></progress>
+    <div class="task-card" id="task-card">
+      <p class="task" id="task" aria-live="polite"></p>
+      <p class="typed" id="typed" aria-label="Deine Antwort"></p>
+      <p class="sprint-feedback" id="sprint-feedback" role="status"></p>
+    </div>
+    <div class="keypad" id="keypad" aria-label="Zahlenfeld">
+      <button type="button" data-key="7">7</button><button type="button" data-key="8">8</button><button type="button" data-key="9">9</button>
+      <button type="button" data-key="4">4</button><button type="button" data-key="5">5</button><button type="button" data-key="6">6</button>
+      <button type="button" data-key="1">1</button><button type="button" data-key="2">2</button><button type="button" data-key="3">3</button>
+      <button type="button" data-key="Backspace" aria-label="Löschen">⌫</button><button type="button" data-key="0">0</button><button type="button" data-key="Enter" class="ok">OK</button>
+    </div>
+    <p class="hub-muted small keys">Tastatur: Zahlen tippen, Enter prüft, Rücktaste löscht.</p>
+  </section>
+
+  <!-- Ergebnis -->
+  <section data-view="done" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow" id="done-eyebrow"></p>
+      <p class="big-num" id="time"></p>
+      <p class="hub-muted" id="time-detail"></p>
+      <p class="verdict" id="verdict"></p>
+      <p class="hub-muted small" id="save-state" role="status"></p>
+      <div class="actions">
+        <button class="hub-btn hub-primary hub-big" id="again" type="button">Noch einmal</button>
+        <button class="hub-btn hub-big" id="back" type="button">Zur Übersicht</button>
+      </div>
+    </div>
+    <details class="hub-card">
+      <summary>Alle Aufgaben ansehen</summary>
+      <ol class="review" id="review"></ol>
+    </details>
+  </section>
+</main>
+<div class="hub-toast" id="toast" role="status" hidden></div>
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

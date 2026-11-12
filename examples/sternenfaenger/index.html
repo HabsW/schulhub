@@ -4,21 +4,44 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sternenfänger</title>
+<link rel="stylesheet" href="hub-ui.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-<div id="wrap">
-  <canvas id="game" width="480" height="640"></canvas>
-  <div id="panel">
-    <h1>⭐ Sternenfänger</h1>
-    <p id="message">Fang die Sterne, weich den Meteoriten aus!</p>
-    <p id="best"></p>
-    <button id="play">Spielen</button>
-    <p class="hint">Steuerung: Maus, Finger oder Pfeiltasten</p>
-    <h2>Bestenliste</h2>
-    <ol id="board"></ol>
-  </div>
+<body class="hub-ui">
+<div class="stage" id="stage">
+  <canvas id="game" tabindex="-1" role="img" aria-label="Spielfeld: Sterne und Meteoriten fallen von oben, unten fängt deine Schale."></canvas>
+  <button class="pause" id="pause" type="button" aria-label="Pause" hidden><span aria-hidden="true">❚❚</span></button>
+  <p class="sr-only" id="live" role="status"></p>
+
+  <section class="panel" id="panel" aria-labelledby="title">
+    <header class="panel-head">
+      <p class="hub-eyebrow" id="where">Sternenfänger</p>
+      <h1 id="title">Sternenfänger</h1>
+      <p class="message" id="message">Verbinde mit dem Hub …</p>
+    </header>
+    <p class="mode-note" id="mode-note" hidden></p>
+    <dl class="facts">
+      <div><dt>Rekord</dt><dd id="record">–</dd></div>
+      <div><dt>Bestes Level</dt><dd id="best-level">–</dd></div>
+      <div><dt>Schwierigkeit</dt><dd id="difficulty">–</dd></div>
+    </dl>
+    <p class="hub-muted small" id="save-state" role="status"></p>
+    <button class="hub-btn hub-primary hub-big play" id="play" type="button" disabled>Spielen</button>
+    <p class="hub-muted small hint">Ziehen mit Finger oder Maus · Pfeiltasten · P pausiert</p>
+
+    <section class="block" aria-labelledby="h-board">
+      <h2 id="h-board">Bestenliste</h2>
+      <ol class="hub-leaderboard" id="board"></ol>
+      <p class="hub-muted small" id="board-empty" hidden>Noch niemand – sei die oder der Erste!</p>
+    </section>
+    <section class="block" aria-labelledby="h-ach">
+      <h2 id="h-ach">Erfolge</h2>
+      <ul class="achievements" id="achievements"></ul>
+      <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn das Spiel im Hub läuft.</p>
+    </section>
+  </section>
 </div>
+<div class="hub-toast" id="toast" role="status" hidden></div>
 <script src="hub-sdk.js"></script>
 <script src="game.js"></script>
 </body>

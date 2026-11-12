@@ -1,0 +1,88 @@
+/* Lernkarten – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
+
+/* Farbe der App ("Türkis"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+:root { --hub-accent: #2ec4b6; --right: var(--hub-ok); --wrong: var(--hub-danger); }
+@media (prefers-color-scheme: light) { :root { --hub-accent: #0b7268; } }
+
+[hidden] { display: none !important; }
+.app { display: grid; gap: 1.25rem; padding-bottom: 5rem; }
+.head h1 { margin: .1rem 0 .15rem; overflow-wrap: anywhere; }
+.head p { margin: 0; }
+.small { font-size: .875rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mode-note { margin: 0; padding: .6rem .85rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .9rem; }
+.mode-note.preview { border-color: color-mix(in srgb, var(--hub-wait) 55%, transparent); color: var(--hub-wait); }
+.teacher-note { margin: 0; padding: .75rem 1rem; border-left: 3px solid var(--hub-accent); background: var(--hub-raised-1); border-radius: 0 var(--hub-r-btn) var(--hub-r-btn) 0; color: var(--hub-ink-2); font-size: .9rem; }
+.grid { display: grid; gap: 1rem; }
+@media (min-width: 42rem) { .grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.actions .hub-btn { flex: 0 1 auto; }
+@media (max-width: 30rem) { .actions .hub-btn { flex: 1 1 100%; } }
+.hub-card h2 { margin-bottom: .2rem; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+
+.hero { display: grid; gap: .5rem; border-top: 3px solid var(--hub-accent); }
+.hero > p { margin: 0; }
+.hero-title { font-size: 1.35rem; font-weight: 720; }
+.hero .actions { margin-top: .5rem; }
+.big-num { font-size: clamp(2.6rem, 2rem + 4vw, 3.6rem); font-weight: 780; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.big-num small { font-size: 1.1rem; font-weight: 600; letter-spacing: 0; color: var(--hub-ink-2); }
+.verdict { font-size: 1.1rem; font-weight: 640; }
+
+/* Lernkartei: fünf Fächer */
+.boxes { list-style: none; margin: 1rem 0 .75rem; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; }
+.box { display: grid; justify-items: center; gap: .2rem; }
+.box-bar { position: relative; display: block; width: 100%; height: 5.5rem; border: 1px solid var(--hub-line-2); border-radius: 6px 6px 3px 3px; background: var(--hub-raised-2); overflow: hidden; }
+.box-fill { position: absolute; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--hub-accent) 45%, transparent); }
+.box.last .box-fill { background: var(--hub-accent); }
+.box strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.box small { color: var(--hub-ink-2); font-size: .75rem; white-space: nowrap; }
+
+.achievements { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; }
+.achievements li { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; min-height: 3.25rem; border-top: 1px solid var(--hub-line-1); }
+.achievements li:first-child { border-top: 0; }
+.ach-emoji { font-size: 1.5rem; text-align: center; filter: grayscale(1); opacity: .4; }
+.achievements li.on .ach-emoji { filter: none; opacity: 1; }
+.ach-text { display: grid; line-height: 1.3; }
+.ach-text small { color: var(--hub-ink-2); font-size: .8125rem; }
+
+.deck summary { padding: .6rem 0; font-weight: 700; cursor: pointer; }
+.deck-list { list-style: none; margin: .5rem 0 0; padding: 0; max-height: 22rem; overflow-y: auto; }
+.deck-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: .75rem; padding: .5rem 0; border-top: 1px solid var(--hub-line-1); overflow-wrap: anywhere; }
+.deck-list small { color: var(--hub-ink-2); white-space: nowrap; }
+
+/* Lernen: die Karte */
+.learn { display: grid; gap: 1rem; max-width: 34rem; width: 100%; justify-self: center; }
+.learn-top { display: flex; align-items: center; gap: .75rem; }
+.count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.learn-top .hub-btn { margin-left: auto; }
+.flashcard { position: relative; display: block; width: 100%; min-height: clamp(13rem, 45vh, 18rem); padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; perspective: 1200px; -webkit-tap-highlight-color: transparent; }
+.flashcard:focus-visible { outline: 2px solid var(--hub-ink); outline-offset: 4px; border-radius: 14px; }
+.face { position: absolute; inset: 0; display: grid; grid-template-rows: auto 1fr auto; justify-items: center; align-items: center; padding: 1rem 1.25rem; border: 1px solid var(--hub-line-2); border-radius: 14px; background: var(--hub-raised-1); backface-visibility: hidden; transition: transform 420ms var(--hub-ease); }
+.face.back { transform: rotateY(180deg); border-color: var(--hub-accent); background: color-mix(in srgb, var(--hub-accent) 9%, var(--hub-raised-1)); }
+.flashcard.flipped .front { transform: rotateY(-180deg); }
+.flashcard.flipped .back { transform: rotateY(0); }
+.face-label { justify-self: start; font: 650 .72rem/1.3 var(--hub-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--hub-ink-3); }
+.face-text { font-size: clamp(1.7rem, 1.3rem + 2.5vw, 2.5rem); font-weight: 760; line-height: 1.15; text-align: center; overflow-wrap: anywhere; }
+.box-tag { justify-self: end; font-size: .8125rem; color: var(--hub-ink-2); }
+.hint { margin: 0; text-align: center; }
+.judge { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.judge .no { border-color: color-mix(in srgb, var(--wrong) 55%, transparent); color: var(--wrong); }
+
+/* Ergebnis */
+.review { list-style: none; margin: .5rem 0 0; padding: 0; }
+.review li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; column-gap: .5rem; align-items: baseline; padding: .55rem 0; border-top: 1px solid var(--hub-line-1); overflow-wrap: anywhere; }
+.review li:first-child { border-top: 0; }
+.review li small { color: var(--hub-ink-2); white-space: nowrap; }
+.review .mark { font-weight: 800; }
+.review li.right .mark { color: var(--right); }
+.review li.wrong .mark { color: var(--wrong); }
+
+/* Ohne Bewegung: die Karte wechselt ohne Drehung. */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+  .face { backface-visibility: visible; transform: none !important; }
+  .face.back { visibility: hidden; }
+  .flashcard.flipped .front { visibility: hidden; }
+  .flashcard.flipped .back { visibility: visible; }
+}

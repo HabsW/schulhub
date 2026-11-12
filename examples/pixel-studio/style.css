@@ -1,11 +1,68 @@
-* { box-sizing: border-box; }
-body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #fff8ec; color: #2b2118; }
-main { max-width: 30rem; margin: 0 auto; padding: 1rem; text-align: center; }
-h1 { margin: 0; } #who { margin: .2rem 0 1rem; color: #7a6650; }
-.row { display: flex; gap: .4rem; justify-content: center; align-items: center; flex-wrap: wrap; margin: .8rem 0; }
-#grid { display: grid; grid-template-columns: repeat(16, 1fr); width: min(100%, 26rem); aspect-ratio: 1; margin: 0 auto; border: 3px solid #2b2118; border-radius: 8px; overflow: hidden; touch-action: none; cursor: crosshair; }
-#grid div { border: 1px solid rgba(0, 0, 0, .06); }
-button { font: inherit; font-weight: 600; padding: .45rem .9rem; border-radius: 10px; border: 2px solid #d9c7ad; background: #fff; cursor: pointer; }
-button.on { border-color: #2b2118; }
-#palette button { width: 2.3rem; height: 2.3rem; padding: 0; border-radius: 50%; }
-#state { color: #7a6650; font-size: .9rem; min-width: 8rem; text-align: left; }
+/* Pixel-Studio – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
+
+/* Farbe der App ("Kirsche"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+:root { --hub-accent: #f25560; }
+@media (prefers-color-scheme: light) { :root { --hub-accent: #b8232f; } }
+
+[hidden] { display: none !important; }
+.app { display: grid; gap: 1.25rem; padding-bottom: 5rem; max-width: 60rem; }
+.head h1 { margin: .1rem 0 .15rem; }
+.head p { margin: 0; }
+.small { font-size: .875rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mode-note { margin: 0; padding: .6rem .85rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .9rem; }
+.mode-note.preview { border-color: color-mix(in srgb, var(--hub-wait) 55%, transparent); color: var(--hub-wait); }
+
+/* drei Leinwände */
+.slots { display: inline-flex; justify-self: start; padding: 3px; gap: 3px; border: 1px solid var(--hub-line-2); border-radius: 10px; background: var(--hub-raised-1); }
+.slot { min-height: 2.5rem; min-width: 5.5rem; padding: 0 1rem; border: 0; border-radius: 7px; background: transparent; color: var(--hub-ink-2); font: 640 .95rem var(--hub-sans); cursor: pointer; }
+.slot[aria-pressed="true"] { background: var(--hub-raised-3); color: var(--hub-ink); }
+.slot:focus-visible { outline: 2px solid var(--hub-ink); outline-offset: 2px; }
+
+/* Leinwand + Werkzeuge: nebeneinander, wenn Platz ist */
+.studio { display: grid; gap: 1.25rem; align-items: start; }
+@media (min-width: 46rem) { .studio { grid-template-columns: minmax(0, 28rem) minmax(14rem, 1fr); } }
+.canvas-wrap { display: grid; gap: .5rem; }
+.canvas-wrap p { margin: 0; }
+#canvas { display: block; width: 100%; aspect-ratio: 1; border: 2px solid var(--hub-line-3); border-radius: 8px; background: #fff; touch-action: none; cursor: crosshair; image-rendering: pixelated; }
+#canvas:focus-visible { outline: 3px solid var(--hub-accent); outline-offset: 3px; }
+@media (pointer: coarse) { #canvas-help { display: none; } }
+
+.tools { display: grid; gap: 1rem; }
+.tools > p { margin: 0; }
+.tool-head { font: 650 .72rem/1.3 var(--hub-mono) !important; letter-spacing: .08em; text-transform: uppercase; color: var(--hub-ink-3); margin: 0 0 .5rem !important; }
+.palette { display: grid; grid-template-columns: repeat(5, 2.75rem); gap: .5rem; }
+.swatch { width: 2.75rem; height: 2.75rem; padding: 0; border: 2px solid var(--hub-line-2); border-radius: 50%; background: var(--swatch); cursor: pointer; }
+.swatch[aria-checked="true"] { outline: 3px solid var(--hub-ink); outline-offset: 2px; border-color: var(--hub-ground); }
+.swatch:focus-visible { outline: 3px solid var(--hub-accent); outline-offset: 2px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: .4rem; }
+.tool { min-height: 2.75rem; padding: 0 .9rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); background: transparent; color: var(--hub-ink); font: 640 .95rem var(--hub-sans); cursor: pointer; }
+.tool[aria-checked="true"] { background: var(--hub-ink); border-color: var(--hub-ink); color: var(--hub-ink-on-ink); }
+.tool:focus-visible { outline: 2px solid var(--hub-accent); outline-offset: 2px; }
+.row-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+#export { width: 100%; }
+
+/* Galerie */
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+.section-head h2 { margin: 0; }
+.gallery { list-style: none; margin: .75rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: .75rem; }
+.shot { display: grid; gap: .4rem; padding: .6rem; border: 1px solid var(--hub-line-1); border-radius: var(--hub-r); background: var(--hub-raised-1); }
+.shot img { display: block; width: 100%; height: auto; aspect-ratio: 1; border-radius: 6px; image-rendering: pixelated; background: #fff; }
+.shot-meta { display: grid; line-height: 1.3; }
+.shot-meta small { font-size: .8125rem; }
+.shot-actions { display: flex; flex-wrap: wrap; gap: .25rem; }
+.shot-actions .hub-btn { min-height: 2.75rem; padding: 0 .6rem; font-size: .875rem; }
+.shot-actions .danger { color: var(--hub-danger); }
+.gallery-empty { margin: .75rem 0 0; padding: 1rem; border: 1px dashed var(--hub-line-2); border-radius: var(--hub-r); }
+
+/* Erfolge */
+.achievements { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; }
+@media (min-width: 46rem) { .achievements { grid-template-columns: 1fr 1fr; column-gap: 1.5rem; } .achievements li:nth-child(2) { border-top: 0; } }
+.achievements li { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; min-height: 3.25rem; border-top: 1px solid var(--hub-line-1); }
+.achievements li:first-child { border-top: 0; }
+.ach-emoji { font-size: 1.5rem; text-align: center; filter: grayscale(1); opacity: .4; }
+.achievements li.on .ach-emoji { filter: none; opacity: 1; }
+.ach-text { display: grid; line-height: 1.3; }
+.ach-text small { color: var(--hub-ink-2); font-size: .8125rem; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

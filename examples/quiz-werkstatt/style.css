@@ -1,0 +1,85 @@
+/* Quiz-Werkstatt – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
+
+/* Farbe der App ("Himmel"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+:root { --hub-accent: #5aa9ff; --right: var(--hub-ok); --wrong: var(--hub-danger); }
+@media (prefers-color-scheme: light) { :root { --hub-accent: #1d5fae; } }
+
+[hidden] { display: none !important; }
+.app { display: grid; gap: 1.25rem; padding-bottom: 5rem; }
+.head h1 { margin: .1rem 0 .15rem; overflow-wrap: anywhere; }
+.head p { margin: 0; }
+.small { font-size: .875rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mode-note { margin: 0; padding: .6rem .85rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .9rem; }
+.mode-note.preview { border-color: color-mix(in srgb, var(--hub-wait) 55%, transparent); color: var(--hub-wait); }
+.teacher-note { margin: 0; padding: .75rem 1rem; border-left: 3px solid var(--hub-accent); background: var(--hub-raised-1); border-radius: 0 var(--hub-r-btn) var(--hub-r-btn) 0; color: var(--hub-ink-2); font-size: .9rem; }
+.grid { display: grid; gap: 1rem; }
+@media (min-width: 42rem) { .grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.actions .hub-btn { flex: 1 1 11rem; }
+.hub-card h2 { margin-bottom: .2rem; }
+
+.hero { display: grid; gap: .5rem; border-top: 3px solid var(--hub-accent); }
+.hero > p { margin: 0; }
+.hero-title { font-size: 1.25rem; font-weight: 700; }
+.hero .hub-btn.hub-big { margin-top: .5rem; justify-self: start; }
+@media (max-width: 30rem) { .hero .hub-btn.hub-big { justify-self: stretch; } }
+.big-num { font-size: clamp(2.6rem, 2rem + 4vw, 3.6rem); font-weight: 780; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.big-num small { font-size: 1.1rem; font-weight: 600; letter-spacing: 0; color: var(--hub-ink-2); }
+.verdict { font-size: 1.1rem; font-weight: 640; }
+.empty { text-align: left; }
+
+/* Erfolge und Verlauf */
+.achievements, .history { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; }
+.achievements li { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; min-height: 3.25rem; border-top: 1px solid var(--hub-line-1); }
+.achievements li:first-child, .history li:first-child { border-top: 0; }
+.ach-emoji { font-size: 1.5rem; text-align: center; filter: grayscale(1); opacity: .4; }
+.achievements li.on .ach-emoji { filter: none; opacity: 1; }
+.ach-text { display: grid; line-height: 1.3; }
+.ach-text small { color: var(--hub-ink-2); font-size: .8125rem; }
+.history li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .75rem; align-items: center; min-height: 2.75rem; border-top: 1px solid var(--hub-line-1); }
+.history li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history li .hub-muted { font-size: .8125rem; }
+.history b { font-variant-numeric: tabular-nums; }
+
+/* Frage */
+.quiz-top { display: flex; align-items: center; gap: .75rem; }
+.count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.quiz-top .hub-btn { margin-left: auto; }
+.question-card { display: grid; gap: 1rem; padding-block: clamp(1.25rem, 4vw, 2rem); }
+.question { font-size: clamp(1.3rem, 1.1rem + 1.4vw, 1.75rem); line-height: 1.25; margin: 0 0 .25rem; overflow-wrap: anywhere; }
+.question:focus { outline: none; }
+.choices { display: grid; gap: .6rem; }
+@media (min-width: 40rem) { .choices { grid-template-columns: 1fr 1fr; } }
+.choice { display: flex; align-items: center; gap: .75rem; width: 100%; min-height: 3.5rem; padding: .6rem .9rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r); background: var(--hub-raised-2); color: var(--hub-ink); font: 600 1.05rem/1.3 var(--hub-sans); text-align: left; cursor: pointer; transition: border-color var(--hub-t), background-color var(--hub-t); overflow-wrap: anywhere; }
+.choice:hover { border-color: var(--hub-line-3); }
+.choice:focus-visible { outline: 2px solid var(--hub-ink); outline-offset: 2px; }
+.choice .letter { flex: none; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 6px; border: 1px solid var(--hub-line-2); font: 700 .85rem var(--hub-mono); color: var(--hub-ink-2); }
+.choice:disabled { cursor: default; opacity: .55; }
+.choice.is-right { opacity: 1; border-color: var(--right); background: color-mix(in srgb, var(--right) 14%, var(--hub-raised-2)); }
+.choice.is-right .letter { background: var(--right); border-color: var(--right); color: var(--hub-ink-on-ink); }
+.choice.is-wrong { opacity: 1; border-color: var(--wrong); background: color-mix(in srgb, var(--wrong) 12%, var(--hub-raised-2)); }
+.choice.is-wrong .letter { background: var(--wrong); border-color: var(--wrong); color: var(--hub-ink-on-ink); }
+.answer { display: flex; gap: .5rem; }
+.answer .hub-input { flex: 1 1 auto; min-width: 0; font-size: 1.15rem; }
+.answer .hub-btn { flex: none; min-height: 3rem; }
+.feedback { margin: 0; min-height: 1.5rem; font-weight: 700; }
+.feedback:empty { min-height: 0; margin-top: -1rem; }
+.feedback.right { color: var(--right); }
+.feedback.wrong { color: var(--wrong); }
+.next { justify-self: start; }
+@media (max-width: 30rem) { .next { justify-self: stretch; } }
+.keys { margin: 0; }
+@media (pointer: coarse) { .keys { display: none; } }
+
+/* Ergebnis */
+.review { list-style: none; margin: .5rem 0 0; padding: 0; }
+.review li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); column-gap: .5rem; padding: .6rem 0; border-top: 1px solid var(--hub-line-1); overflow-wrap: anywhere; }
+.review li:first-child { border-top: 0; }
+.review .q { font-weight: 600; }
+.review li small { grid-column: 2; color: var(--hub-ink-2); }
+.review .mark { font-weight: 800; }
+.review li.right .mark { color: var(--right); }
+.review li.wrong .mark { color: var(--wrong); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

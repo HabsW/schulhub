@@ -1,0 +1,79 @@
+{
+  "name": "Lernkarten",
+  "description": "Karteikarten mit Lernkartei: Was du kannst, kommt seltener dran – was noch nicht sitzt, öfter.",
+  "category": "Fächerübergreifend",
+  "grades": [3, 13],
+  "settings": [
+    {
+      "key": "titel",
+      "label": "Name des Kartenstapels",
+      "type": "text",
+      "maxLength": 60,
+      "default": "Hauptstädte Europas"
+    },
+    {
+      "key": "karten",
+      "label": "Karten",
+      "type": "pairs",
+      "columns": ["Vorderseite", "Rückseite"],
+      "help": "Eine Karte pro Zeile: Vorderseite = Rückseite.",
+      "maxItems": 200,
+      "default": [
+        ["Frankreich", "Paris"],
+        ["Italien", "Rom"],
+        ["Spanien", "Madrid"],
+        ["Polen", "Warschau"],
+        ["Österreich", "Wien"],
+        ["Schweiz", "Bern"],
+        ["Niederlande", "Amsterdam"],
+        ["Belgien", "Brüssel"],
+        ["Dänemark", "Kopenhagen"],
+        ["Schweden", "Stockholm"],
+        ["Norwegen", "Oslo"],
+        ["Finnland", "Helsinki"],
+        ["Portugal", "Lissabon"],
+        ["Griechenland", "Athen"],
+        ["Tschechien", "Prag"],
+        ["Ungarn", "Budapest"],
+        ["Irland", "Dublin"],
+        ["Kroatien", "Zagreb"],
+        ["Rumänien", "Bukarest"],
+        ["Litauen", "Vilnius"]
+      ]
+    },
+    {
+      "key": "richtung",
+      "label": "Welche Seite wird gezeigt?",
+      "type": "choice",
+      "options": [
+        { "value": "vorne", "label": "Vorderseite zeigen, Rückseite wissen" },
+        { "value": "hinten", "label": "Rückseite zeigen, Vorderseite wissen" },
+        { "value": "beide", "label": "Mal so, mal so" }
+      ],
+      "default": "vorne"
+    },
+    {
+      "key": "runde",
+      "label": "Karten pro Lernrunde",
+      "type": "number",
+      "min": 5,
+      "max": 50,
+      "default": 12
+    }
+  ],
+  "achievements": [
+    { "id": "erste-runde", "title": "Erste Lernrunde", "description": "Deine erste Lernrunde geschafft.", "emoji": "🌱" },
+    { "id": "im-ziel", "title": "Im Ziel", "description": "Die erste Karte ist im letzten Fach.", "emoji": "⭐" },
+    { "id": "drei-tage", "title": "Dranbleiben", "description": "An drei verschiedenen Tagen gelernt.", "emoji": "📚" },
+    { "id": "gemeistert", "title": "Stapel gemeistert", "description": "Alle Karten im letzten Fach.", "emoji": "🏆" },
+    { "id": "nachteule", "title": "Nachteule", "description": "Nach 20 Uhr noch gelernt.", "emoji": "🦉", "secret": true }
+  ],
+  "results": {
+    "labels": {
+      "vorderseite": "Vorderseite",
+      "rueckseite": "Rückseite",
+      "gewusst": "Gewusst",
+      "fach": "Fach danach"
+    }
+  }
+}

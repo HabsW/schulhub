@@ -1,18 +1,75 @@
-* { box-sizing: border-box; }
-body { margin: 0; font: 17px/1.5 system-ui, sans-serif; background: #eef6f0; color: #18261d; }
-main { max-width: 34rem; margin: 0 auto; padding: 1.2rem; }
-h1 { margin: 0; font-size: 1.6rem; } h2 { font-size: 1.1rem; margin: 1.2rem 0 .4rem; }
-header p { margin: .2rem 0 1rem; color: #4d6355; }
-.card { background: #fff; border-radius: 16px; padding: 1.3rem; box-shadow: 0 4px 16px rgba(0, 60, 20, .08); }
-button { font: inherit; font-weight: 600; padding: .6rem 1.1rem; border-radius: 10px; border: 1px solid #b9cbbf; background: #fff; cursor: pointer; margin: .2rem .2rem .2rem 0; }
-button.primary { background: #2b8a4b; color: #fff; border-color: #2b8a4b; }
-input, textarea { font: inherit; padding: .6rem .7rem; border-radius: 10px; border: 1px solid #b9cbbf; width: 100%; }
-form { display: flex; gap: .5rem; } form input { flex: 1; }
-.word { font-size: 2rem; font-weight: 700; text-align: center; margin: .6rem 0 1rem; }
-.small { color: #4d6355; font-size: .9rem; margin: .2rem 0; }
-.feedback { min-height: 1.6rem; font-weight: 600; }
-.right { color: #1f7a3d; } .wrong { color: #b3261e; }
-.bar { height: .7rem; background: #dcebe0; border-radius: 99px; overflow: hidden; margin: .4rem 0 1rem; }
-#progress-bar { height: 100%; width: 0; background: #2b8a4b; transition: width .4s; }
-ol, ul { padding-left: 1.3rem; } li.me { font-weight: 700; }
-code { background: #eef6f0; padding: .1rem .3rem; border-radius: 5px; }
+/* Vokabeltrainer – eigenes CSS. Die Bausteine (hub-btn, hub-card …) kommen aus hub-ui.css. */
+
+/* Farbe der App ("Wiese"). Im hellen Modus dunkler, damit die helle Schrift auf dem Knopf lesbar bleibt. */
+:root { --hub-accent: #4cc76e; --right: var(--hub-ok); --wrong: var(--hub-danger); }
+@media (prefers-color-scheme: light) { :root { --hub-accent: #17763a; } }
+
+[hidden] { display: none !important; }
+.app { display: grid; gap: 1.25rem; padding-bottom: 5rem; }
+.head h1 { margin: .1rem 0 .15rem; }
+.head p { margin: 0; }
+.small { font-size: .875rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.mode-note { margin: 0; padding: .6rem .85rem; border: 1px solid var(--hub-line-2); border-radius: var(--hub-r-btn); color: var(--hub-ink-2); font-size: .9rem; }
+.mode-note.preview { border-color: color-mix(in srgb, var(--hub-wait) 55%, transparent); color: var(--hub-wait); }
+.teacher-note { margin: 0; padding: .75rem 1rem; border-left: 3px solid var(--hub-accent); background: var(--hub-raised-1); border-radius: 0 var(--hub-r-btn) var(--hub-r-btn) 0; color: var(--hub-ink-2); font-size: .9rem; }
+.grid { display: grid; gap: 1rem; }
+@media (min-width: 42rem) { .grid { grid-template-columns: 1fr 1fr; align-items: start; } }
+.actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.actions .hub-btn { flex: 1 1 11rem; }
+.hub-card h2 { margin-bottom: .2rem; }
+.hub-card > .hub-muted.small { margin-bottom: .5rem; }
+
+/* Übersicht */
+.hero { display: grid; gap: .5rem; border-top: 3px solid var(--hub-accent); }
+.hero > p { margin: 0; }
+.big-num { font-size: clamp(2.6rem, 2rem + 4vw, 3.6rem); font-weight: 780; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.big-num small { font-size: 1.1rem; font-weight: 600; letter-spacing: 0; color: var(--hub-ink-2); }
+.hero-sub { margin-top: -.2rem !important; }
+.hero .hub-progress { margin: .35rem 0 .1rem; }
+.hero .hub-btn.hub-big { margin-top: .5rem; justify-self: start; }
+@media (max-width: 30rem) { .hero .hub-btn.hub-big { justify-self: stretch; } }
+
+.hub-leaderboard { margin-top: .25rem; }
+.hub-leaderboard b { white-space: nowrap; }
+
+.achievements { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; }
+.achievements li { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; align-items: center; gap: .65rem; min-height: 3.25rem; border-top: 1px solid var(--hub-line-1); }
+.achievements li:first-child { border-top: 0; }
+.ach-emoji { font-size: 1.5rem; text-align: center; filter: grayscale(1); opacity: .4; }
+.achievements li.on .ach-emoji { filter: none; opacity: 1; }
+.ach-text { display: grid; line-height: 1.3; }
+.ach-text small { color: var(--hub-ink-2); font-size: .8125rem; }
+
+.words summary { padding: .6rem 0; font-weight: 700; cursor: pointer; }
+.word-list { list-style: none; margin: .5rem 0 0; padding: 0; }
+.word-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 5.5rem; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--hub-line-1); overflow-wrap: anywhere; }
+.word-list .mark { color: var(--right); font-size: .8125rem; font-weight: 640; text-align: right; }
+@media (max-width: 30rem) { .word-list li { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .word-list .mark { grid-column: 1 / -1; text-align: left; margin-top: -.35rem; } .word-list .mark:empty { display: none; } }
+
+/* Abfrage */
+.quiz-top { display: flex; align-items: center; gap: .75rem; }
+.count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.streak { color: var(--hub-wait); font-weight: 700; font-size: .9rem; }
+.quiz-top .hub-btn { margin-left: auto; }
+.prompt-card { display: grid; gap: .5rem; padding-block: clamp(1.5rem, 5vw, 2.5rem); }
+.prompt-card > p { margin: 0; }
+.prompt { font-size: clamp(1.9rem, 1.4rem + 3vw, 2.8rem); font-weight: 760; line-height: 1.15; letter-spacing: -.02em; overflow-wrap: anywhere; margin-bottom: .5rem !important; }
+.answer { display: flex; gap: .5rem; }
+.answer .hub-input { flex: 1 1 auto; min-width: 0; font-size: 1.15rem; }
+.answer .hub-btn { flex: none; min-height: 3rem; }
+.feedback { min-height: 1.6rem; font-weight: 700; }
+.feedback.right { color: var(--right); }
+.feedback.wrong { color: var(--wrong); }
+
+/* Ergebnis */
+.verdict { font-size: 1.1rem; font-weight: 640; }
+.review { list-style: none; margin: .5rem 0 0; padding: 0; }
+.review li { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); column-gap: .5rem; padding: .55rem 0; border-top: 1px solid var(--hub-line-1); overflow-wrap: anywhere; }
+.review li:first-child { border-top: 0; }
+.review li small { grid-column: 2; color: var(--hub-ink-2); }
+.review .mark { font-weight: 800; }
+.review li.right .mark { color: var(--right); }
+.review li.wrong .mark { color: var(--wrong); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

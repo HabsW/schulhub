@@ -1,0 +1,12 @@
+{
+  "name": "Pixel-Studio",
+  "description": "Male Pixelbilder. Deine Bilder werden in deinem Konto gespeichert – und als PNG in deiner Galerie.",
+  "category": "Kunst",
+  "grades": [3, 13],
+  "achievements": [
+    { "id": "erstes-bild", "title": "Erstes Kunstwerk", "description": "Ein Bild in die Galerie gespeichert.", "emoji": "🎨" },
+    { "id": "ausgemalt", "title": "Ausgemalt", "description": "Eine Fläche mit dem Farbeimer gefüllt.", "emoji": "🧩" },
+    { "id": "farbenfroh", "title": "Farbenfroh", "description": "Alle zehn Farben in einem Bild benutzt.", "emoji": "🌈" },
+    { "id": "volle-galerie", "title": "Volle Galerie", "description": "Alle drei Bilder in der Galerie.", "emoji": "🏆" }
+  ]
+}

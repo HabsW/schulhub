@@ -1,0 +1,45 @@
+{
+  "name": "Kopfrechnen",
+  "description": "Kopfrechen-Sprint auf Zeit: fünf Stufen, Bestzeiten in der Klasse.",
+  "category": "Mathematik",
+  "grades": [2, 8],
+  "settings": [
+    {
+      "key": "bis",
+      "label": "Zahlenraum bis",
+      "type": "number",
+      "help": "Die größte Zahl in der letzten Stufe. Die Stufen davor fangen kleiner an.",
+      "min": 10,
+      "max": 1000,
+      "default": 100
+    },
+    { "key": "plus", "label": "Plus-Aufgaben", "type": "boolean", "default": true },
+    { "key": "minus", "label": "Minus-Aufgaben", "type": "boolean", "default": true },
+    { "key": "mal", "label": "Mal-Aufgaben", "type": "boolean", "default": true },
+    { "key": "geteilt", "label": "Geteilt-Aufgaben", "type": "boolean", "default": false },
+    {
+      "key": "aufgaben",
+      "label": "Aufgaben pro Sprint",
+      "type": "number",
+      "min": 5,
+      "max": 50,
+      "default": 20
+    }
+  ],
+  "achievements": [
+    { "id": "erster-sprint", "title": "Erster Sprint", "description": "Einen Sprint bis zum Ende gerechnet.", "emoji": "⏱️" },
+    { "id": "fehlerfrei", "title": "Fehlerfrei", "description": "Ein ganzer Sprint ohne Fehler.", "emoji": "💯" },
+    { "id": "halbzeit", "title": "Halbzeit", "description": "Stufe 3 geschafft.", "emoji": "🚀" },
+    { "id": "alle-stufen", "title": "Alle Stufen", "description": "Alle fünf Stufen geschafft.", "emoji": "🏆" },
+    { "id": "blitzrechner", "title": "Blitzrechner", "description": "Mindestens 20 Aufgaben in weniger als einer Minute.", "emoji": "⚡" }
+  ],
+  "results": {
+    "labels": {
+      "aufgabe": "Aufgabe",
+      "antwort": "Antwort",
+      "loesung": "Lösung",
+      "richtig": "Richtig",
+      "sekunden": "Sekunden"
+    }
+  }
+}
