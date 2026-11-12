@@ -3,6 +3,13 @@
 //   npm run dev   -> local test mode (no Microsoft needed, demo data, test logins)
 //   npm start     -> real mode (Microsoft sign-in only, configuration required)
 
+// The built-in database (node:sqlite) needs Node.js 22.13 / 23.4 or newer: say so plainly, not as a stack trace.
+const [major, minor] = process.versions.node.split('.').map(Number);
+if (!(major > 23 || (major === 23 && minor >= 4) || (major === 22 && minor >= 13))) {
+  console.error(`SchulHub braucht Node.js 22.13 oder neuer – installiert ist ${process.version}.\nBitte die LTS-Version von https://nodejs.org installieren und dann noch einmal starten.`);
+  process.exit(1);
+}
+
 const path = require('node:path');
 const { loadConfig } = require('./config');
 const { createHub } = require('./app');
