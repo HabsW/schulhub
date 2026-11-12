@@ -74,7 +74,8 @@ npm test
 - **Klassen anlegen**: Name, optional Fach und Klassenstufe. Die Klasse bekommt sofort einen
   Beitrittscode (1 Tag gültig).
 - **Beitreten lassen**: eine Beamer-Ansicht ohne Navigation – großer QR-Code, Link als Text,
-  „gültig bis …“ und eine Live-Zahl, wie viele schon beigetreten sind. Schüler/innen bestätigen den
+  „gültig bis …“ und eine Live-Zahl, wie viele schon beigetreten sind. Wird der Code anderswo gelöscht
+  oder läuft er ab, zeigt die offene Ansicht das innerhalb weniger Sekunden. Schüler/innen bestätigen den
   Beitritt selbst. Lehrkräfte fügen niemanden von Hand hinzu.
 - **Klassenseite** mit den Bereichen *Überblick* (wartende Einreichungen zuerst, Zahlen der Woche,
   Ergebnisse pro Woche und ein Raster „Wer ist wie weit?“ – auf dem Handy eine Karte pro Person),
@@ -83,10 +84,14 @@ npm test
   (Name, Fach, Stufe, Beitrittscode, Archivieren, Löschen).
 - **Aufgaben**: eine App der Klasse, Titel, Notiz, Start und optional ein Termin. Erledigt ist eine
   Aufgabe, sobald nach dem Start ein Ergebnis gespeichert oder voller Fortschritt erreicht ist – oder
-  wenn die Person sie selbst als erledigt markiert.
+  wenn die Person sie selbst als erledigt markiert. Ein Start „jetzt“ oder in der Vergangenheit ist der
+  Moment, in dem die Aufgabe gestellt wird – Ergebnisse von davor und aus anderen Klassen zählen nie.
 - **Ergebnisse** einer App in einer Klasse: Tabelle (Filter „Nicht begonnen“), Ergebnisse pro Woche,
-  Einzelansicht pro Person mit Blättern und lesbaren Feldnamen, CSV-Export. Es zählen nur Ergebnisse,
-  die in dieser Klasse entstanden sind.
+  Einzelansicht pro Person mit Blättern und lesbaren Feldnamen, CSV-Export. Es zählen die Ergebnisse, die
+  in dieser Klasse entstanden sind (und solche von vor der Version 2 ohne Klassenangabe) – nie solche, die
+  ganz ohne Klasse entstanden sind, z. B. zu Hause in einer schulweiten App. „Ergebnisse zurücksetzen“
+  löscht nur die Ergebnisse aus dieser Klasse; Spielstände, Fortschritt und Erfolge gehören der Schülerin
+  oder dem Schüler (löschbar unter „Meine Daten“).
 - **Rückmeldungen**: privat an eine Person, bei den Ergebnissen oder bei einer Aufgabe.
 - **Einstellungen einer App pro Klasse**: Wenn eine App in `schulhub.json` Einstellungen erklärt
   (z. B. eine Wortliste), zeigt der Hub dafür ein Formular. Die App liest die Werte mit `hub.settings`.
