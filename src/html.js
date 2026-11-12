@@ -192,9 +192,10 @@ function sparkline(values, { label = 'Verlauf', cls = 'spark' } = {}) {
 
 /**
  * Column chart (SVG) with a text alternative. bars: [{ label, value, now? }].
- * The table of values follows for screen readers.
+ * Labels are an HTML row under the bars (long series show every k-th label);
+ * pass `labels: false` to draw your own axis instead.
  */
-function barChart(bars, { label = 'Diagramm', unit = '', height = 120 } = {}) {
+function barChart(bars, { label = 'Diagramm', unit = '', height = 120, labels = true } = {}) {
   const max = Math.max(1, ...bars.map((b) => b.value));
   const n = bars.length || 1;
   const gap = 4;
@@ -206,7 +207,7 @@ function barChart(bars, { label = 'Diagramm', unit = '', height = 120 } = {}) {
       const h = Math.round((b.value / max) * (height - 4));
       return html`<rect class="bar${b.now ? ' now' : ''}" x="${(i * (bw + gap)).toFixed(1)}" y="${height - h}" width="${bw.toFixed(1)}" height="${Math.max(h, b.value > 0 ? 2 : 0)}" rx="2"/>`;
     })}
-  </svg>${bars.length <= 31 ? html`<div class="chart-labels${bars.length > 8 ? ' many' : ''}" aria-hidden="true">${bars.map((b) => html`<span>${b.label}</span>`)}</div>` : ''}
+  </svg>${labels ? html`<div class="chart-labels${bars.length > 8 && bars.length <= 12 ? ' many' : ''}" aria-hidden="true">${bars.map((b, i) => html`<span>${bars.length <= 12 || i % Math.ceil(bars.length / 8) === 0 || i === bars.length - 1 ? b.label : ''}</span>`)}</div>` : ''}
   <figcaption class="visually-hidden">${label}: ${bars.map((b) => `${b.label} ${b.value}${unit}`).join(', ')}</figcaption></figure>`;
 }
 
