@@ -50,14 +50,19 @@ const QUICKSTART = `<!doctype html>
  */
 const breakable = (text) => String(text).split(/(?<=[.(,{])/).map((part, i) => html`${i ? raw('<wbr>') : ''}${part}`);
 const anchor = (name) => name.replace(/[^A-Za-z0-9]+/g, '-');
-/** Inline code. Short names never break (not even after a hyphen, as in hub-sdk.js); longer code wraps at its spaces. */
-const code = (text) => html`<code${/\s/.test(text) ? '' : raw(' class="docs-nb"')}>${text}</code>`;
+/**
+ * Inline code. A name (no spaces) never breaks, not even after a hyphen as in hub-sdk.js;
+ * code with spaces may wrap (class "wrap", plus our own rule so this holds whatever the
+ * base style of inline code is). Longer examples are <pre> blocks, never inline.
+ */
+const code = (text) => (/\s/.test(text) ? html`<code class="wrap docs-wrap">${text}</code>` : html`<code class="docs-nb">${text}</code>`);
+const snippet = (text) => (text ? html`<pre class="code docs-snippet">${text}</pre>` : '');
 /** Reference text: `backticks` mark code. Every part is escaped; only the <code> element is ours. */
 const rich = (text) => (typeof text === 'string' ? text.split('`').map((part, i) => (i % 2 ? code(part) : part)) : text);
 
 /** A table of contents for the side column (sticky on wide screens). */
 const toc = (items, label = 'Auf dieser Seite') =>
-  html`<nav class="docs-toc" aria-label="${label}"><p class="docs-toc-title">${label}</p><ol>${items.map(([id, text, code]) => html`<li><a href="#${id}">${code ? html`<code>${text}</code>` : text}</a></li>`)}</ol></nav>`;
+  html`<nav class="docs-toc" aria-label="${label}"><p class="docs-toc-title">${label}</p><ol>${items.map(([id, text, isCode]) => html`<li><a href="#${id}">${isCode ? code(text) : text}</a></li>`)}</ol></nav>`;
 
 module.exports = (app, ctx) => {
   const { db, config } = ctx;
@@ -156,10 +161,10 @@ module.exports = (app, ctx) => {
       const shown = rows.filter(([, v]) => v && (!Array.isArray(v) || v.length));
       return shown.length ? html`<dl class="docs-facts">${shown.map(([k, v]) => html`<div><dt>${k}</dt><dd>${rich(v)}</dd></div>`)}</dl>` : '';
     };
-    const params = (ps) => (ps && ps.length ? html`<ul class="docs-params" role="list">${ps.map(([name, type, text]) => html`<li>${code(name)} <span class="docs-type">${type}</span><span class="docs-param-text">${rich(text)}</span></li>`)}</ul>` : '');
+    const params = (ps) => (ps && ps.length ? html`<ul class="docs-params" role="list">${ps.map(([name, type, text, example]) => html`<li>${code(name)} <span class="docs-type">${type}</span><span class="docs-param-text">${rich(text)}</span>${snippet(example)}</li>`)}</ul>` : '');
     const codes = (list) => (list && list.length ? html`${list.map((c, i) => html`${i ? ', ' : ''}<a href="#fehler-${c}">${code(c)}</a>`)}` : '');
     const lines = (list) => (Array.isArray(list) ? html`${list.map((l, i) => html`${i ? raw('<br>') : ''}${rich(l)}`)}` : list);
-    const chips = (names) => names.split(' · ').map((c, i) => html`${i ? ' ' : ''}<code class="docs-ns">${c}</code>`);
+    const chips = (names) => names.split(' · ').map((c, i) => html`${i ? ' ' : ''}<code class="docs-ns docs-nb">${c}</code>`);
 
     const member = (m) => html`<article class="docs-member" id="${anchor(m.name)}">
         <h3 class="docs-sig"><code>${breakable(m.sig)}</code>${m.kind === 'property' ? html`<span class="docs-kind">Wert</span>` : ''}</h3>
@@ -216,7 +221,7 @@ module.exports = (app, ctx) => {
             <h3 class="docs-sub">Einträge</h3>
             <dl class="docs-facts">${ref.manifest.fields.map(([k, t, text]) => html`<div><dt>${code(k)} <span class="docs-type">${t}</span></dt><dd>${rich(text)}</dd></div>`)}</dl>
             <h3 class="docs-sub">Arten von Einstellungen</h3>
-            <dl class="docs-facts">${ref.manifest.settingTypes.map(([k, text]) => html`<div><dt>${code(k)}</dt><dd>${rich(text)}</dd></div>`)}</dl>
+            <dl class="docs-facts">${ref.manifest.settingTypes.map(([k, text, example]) => html`<div><dt>${code(k)}</dt><dd>${rich(text)}${snippet(example)}</dd></div>`)}</dl>
             <h3 class="docs-sub">Emojis für Erfolge</h3>
             <p class="docs-emojis" aria-label="Erlaubte Emojis">${ref.manifest.emojis.join(' ')}</p>
           </section>
@@ -226,7 +231,7 @@ module.exports = (app, ctx) => {
             <p class="docs-intro">${rich(ref.ui.intro)}</p>
             <pre class="code docs-code">${ref.ui.example}</pre>
             <h3 class="docs-sub">Klassen</h3>
-            <dl class="docs-facts">${ref.ui.classes.map(([k, text]) => html`<div><dt>${code(`.${k}`)}</dt><dd>${rich(text)}</dd></div>`)}</dl>
+            <dl class="docs-facts">${ref.ui.classes.map(([k, text, example]) => html`<div><dt>${code(`.${k}`)}</dt><dd>${rich(text)}${snippet(example)}</dd></div>`)}</dl>
             <h3 class="docs-sub">Farben</h3>
             <ul class="docs-rules">${ref.ui.variables.map((v) => html`<li>${rich(v)}</li>`)}</ul>
           </section>
@@ -251,10 +256,10 @@ module.exports = (app, ctx) => {
         tabs: bauenTabs('sdk'),
       })}
       <div class="docs-narrow">
-        ${mine ? html`<section class="section" aria-labelledby="s-mine"><h2 id="s-mine" class="docs-h">Deine Spielwiese</h2>
+        ${mine ? html`<section aria-labelledby="s-mine"><h2 id="s-mine" class="docs-h">Deine Spielwiese</h2>
           ${list(appRow(mine, { href: `/studio/${mine.id}`, sub: `In „Meine Apps“ · zuletzt geändert ${formatAgo(mine.updated_at)}` }))}</section>` : ''}
         <div class="prose">
-          <h2>So funktioniert sie</h2>
+          <h2 class="docs-first">So funktioniert sie</h2>
           <p>Beim ersten Mal legt der Knopf oben eine eigene App „${playground.appName}“ für dich an – aus der Vorlage, mit allen Dateien. Danach öffnet er immer diese App im Editor. Du kannst darin alles ändern, Knöpfe dazubauen und ausprobieren, was passiert.</p>
           <h2>Was du ausprobieren kannst</h2>
           <ul>

@@ -89,8 +89,8 @@ module.exports = (app, ctx) => {
     const hasIndex = files.some((f) => f.path === 'index.html');
 
     const body = html`<header class="playerbar studio-bar ${appClass(a)}">
-        <a class="btn quiet icon sm" href="/apps/${a.id}" aria-label="Zurück zur App" title="Zurück zur App">${icon('arrowLeft')}</a>
-        <button type="button" class="btn quiet icon sm studio-tablet-only" data-studio-show="dateien" aria-pressed="false" aria-controls="studio-files" aria-label="Dateien" title="Dateien">${icon('panelLeft')}</button>
+        <a class="btn quiet icon sm studio-tool" href="/apps/${a.id}" aria-label="Zurück zur App" title="Zurück zur App">${icon('arrowLeft')}</a>
+        <button type="button" class="btn quiet icon sm studio-tool studio-tablet-only" data-studio-files aria-pressed="false" aria-controls="studio-files" aria-label="Dateien" title="Dateien">${icon('panelLeft')}</button>
         <span class="app-name studio-app">${appIcon(a, 'xs')}<span>${a.name}</span></span>
         <div class="studio-current">
           <details class="menu studio-file-menu" id="studio-file-menu" hidden>
@@ -100,12 +100,12 @@ module.exports = (app, ctx) => {
               <button type="button" class="studio-menu-danger" data-studio-delete>${icon('trash')}Datei löschen</button>
             </div>
           </details>
-          <span class="badge ok studio-state" id="studio-state" role="status"><span class="studio-state-text">Gespeichert</span></span>
+          <span class="badge ok studio-state" id="studio-state" role="status"><span class="studio-state-short" aria-hidden="true">Gespeichert</span><span class="studio-state-text">Gespeichert</span></span>
         </div>
         <div class="studio-tools">
-          <button class="btn quiet sm studio-hide-phone" type="button" data-studio-reload title="Vorschau neu laden">${icon('refresh')}<span class="studio-wide">Vorschau neu laden</span></button>
-          <button class="btn primary sm studio-save" type="button" id="studio-save" aria-keyshortcuts="Control+S Meta+S" title="Speichern (Strg+S)">${icon('save')}<span class="studio-save-label">Speichern</span></button>
-          <button class="btn sm studio-hide-phone" type="button" data-studio-version>${icon('layers')}<span class="studio-wide">Als Version speichern</span><span class="studio-narrow">Version</span></button>
+          <button class="btn quiet sm studio-tool studio-hide-phone" type="button" data-studio-reload aria-label="Vorschau neu laden" title="Vorschau neu laden">${icon('refresh')}<span class="studio-wide" aria-hidden="true">Vorschau neu laden</span></button>
+          <button class="btn primary sm studio-tool" type="button" id="studio-save" aria-label="Speichern" aria-keyshortcuts="Control+S Meta+S" title="Speichern (Strg+S)">${icon('save')}<span class="studio-save-label" aria-hidden="true">Speichern</span></button>
+          <button class="btn sm studio-tool studio-hide-phone" type="button" data-studio-version>${icon('layers')}<span class="studio-wide">Als Version speichern</span><span class="studio-narrow">Version</span></button>
           <details class="menu studio-more">
             <summary class="studio-more-btn" aria-label="Weitere Aktionen" title="Weitere Aktionen">${icon('more')}</summary>
             <div class="menu-panel">
@@ -125,10 +125,10 @@ module.exports = (app, ctx) => {
       </header>
 
       <div class="studio" id="studio" data-app="${a.id}" data-view="code" data-files="closed" data-preview-url="/studio/${a.id}/vorschau">
-        <div class="studio-switch" role="group" aria-label="Ansicht">
-          <button type="button" class="studio-seg studio-seg-files" data-studio-show="dateien" aria-pressed="false">${icon('folder')}<span>Dateien</span></button>
-          <button type="button" class="studio-seg" data-studio-show="code" aria-pressed="true">${icon('fileCode')}<span>Code</span></button>
-          <button type="button" class="studio-seg" data-studio-show="vorschau" aria-pressed="false">${icon('play')}<span>Vorschau</span><span class="count wait" id="studio-problems" hidden></span></button>
+        <div class="segmented studio-switch" role="radiogroup" aria-label="Ansicht">
+          <label class="studio-seg-files">${icon('folder')}<span class="studio-seg-label">Dateien</span><input type="radio" name="studio-view" value="dateien"></label>
+          <label>${icon('fileCode')}<span class="studio-seg-label">Code</span><input type="radio" name="studio-view" value="code" checked></label>
+          <label>${icon('play')}<span class="studio-seg-label">Vorschau</span><span class="count wait studio-problems" id="studio-problems" hidden></span><input type="radio" name="studio-view" value="vorschau"></label>
         </div>
 
         <aside class="studio-files studio-pane-off" id="studio-files" aria-labelledby="studio-files-title">
@@ -138,8 +138,8 @@ module.exports = (app, ctx) => {
             <label class="btn sm">${icon('upload')}<span>Hochladen</span><input type="file" class="file-input" id="studio-upload" multiple></label>
           </div>
           <nav class="studio-tree-wrap" aria-label="Dateien im Entwurf"><ul class="studio-tree" id="studio-tree" role="list">${treeHtml(files)}</ul>
-            <p class="studio-tree-empty" id="studio-tree-empty"${files.length ? raw(' hidden') : ''}>Noch keine Dateien. Lege eine <code>index.html</code> an.</p></nav>
-          <p class="studio-hint">Bilder und Töne lädst du hoch und bindest sie im Code mit ihrem Namen ein, zum Beispiel <code>bilder/held.png</code>. Verschieben: umbenennen.</p>
+            <p class="studio-tree-empty" id="studio-tree-empty"${files.length ? raw(' hidden') : ''}>Noch keine Dateien. Lege eine <code class="studio-nb">index.html</code> an.</p></nav>
+          <p class="studio-hint">Bilder und Töne lädst du hoch und bindest sie im Code mit ihrem Namen ein, zum Beispiel <code class="studio-nb">bilder/held.png</code>. Verschieben: umbenennen.</p>
         </aside>
 
         <section class="studio-code" aria-label="Code">
@@ -189,7 +189,7 @@ module.exports = (app, ctx) => {
           <h2 id="studio-name-title">Neue Datei</h2>
           <div class="field"><label for="studio-name-input">Dateiname</label>
             <input id="studio-name-input" name="name" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="240" aria-describedby="studio-name-hint">
-            <span class="hint" id="studio-name-hint">Zum Beispiel <code>spiel.js</code> oder <code>bilder/held.png</code> – Ordner trennst du mit /.</span>
+            <span class="hint" id="studio-name-hint">Zum Beispiel <code class="studio-nb">spiel.js</code> oder <code class="studio-nb">bilder/held.png</code> – Ordner trennst du mit /.</span>
             <span class="error-text" id="studio-name-error" role="alert" hidden></span></div>
           <div class="actions"><button type="button" class="btn quiet" data-studio-cancel>Abbrechen</button><button class="btn primary" id="studio-name-ok">Anlegen</button></div>
         </form>
@@ -218,7 +218,7 @@ module.exports = (app, ctx) => {
       body,
       shell: 'player',
       styles: ['css/studio.css'],
-      // player.js before the large editor bundle, so it sees the preview frame's load event
+      // the small player first: the preview starts while the large editor bundle is still being parsed
       scripts: ['player.js', 'vendor/codemirror.js', 'studio.js'],
     });
   }
@@ -393,11 +393,11 @@ module.exports = (app, ctx) => {
         tabs: bauenTabs('vorlagen'),
       })}
       <section class="section" aria-labelledby="s-tpl"><h2 id="s-tpl" class="visually-hidden">Alle Vorlagen</h2>
-        ${list(TEMPLATES.map((t) => templateRow(t, html`<div class="studio-tpl-actions">${postButton(req, `/entwickeln/vorlagen/${t.id}/anlegen`, 'Neue App aus Vorlage', { size: 'sm', icon: 'plus' })}${linkButton(`/entwickeln/vorlagen/${t.id}.zip`, 'Als ZIP herunterladen', { size: 'sm', kind: 'quiet', icon: 'download' })}</div>`)))}
+        ${list(TEMPLATES.map((t) => templateRow(t, html`${postButton(req, `/entwickeln/vorlagen/${t.id}/anlegen`, 'Neue App aus Vorlage', { size: 'sm', icon: 'plus' })}${linkButton(`/entwickeln/vorlagen/${t.id}.zip`, 'Als ZIP herunterladen', { size: 'sm', kind: 'quiet', icon: 'download' })}`)))}
       </section>
-      <div class="studio-panels">
+      <div class="grid-2 even">
         <section class="panel" aria-labelledby="s-pc"><h2 id="s-pc">Auf dem eigenen PC bauen</h2>
-          <p class="muted">Im ZIP liegen die Dateien der Vorlage, das SDK (<code>hub-sdk.js</code>) und das UI-Kit (<code>hub-ui.css</code>) mit Schrift. Entpacken, <code>index.html</code> doppelklicken – fertig. Die leere Vorlage gibt es auch als Starter-Paket.</p>
+          <p class="muted">Im ZIP liegen die Dateien der Vorlage, das SDK (<code class="studio-nb">hub-sdk.js</code>) und das UI-Kit (<code class="studio-nb">hub-ui.css</code>) mit Schrift. Entpacken, <code class="studio-nb">index.html</code> doppelklicken – fertig. Die leere Vorlage gibt es auch als Starter-Paket.</p>
           <div class="actions mt-4">${linkButton('/entwickeln/starter.zip', 'Starter-Paket (ZIP)', { size: 'sm', icon: 'download' })}${linkButton('/entwickeln', 'Zur Anleitung', { size: 'sm', kind: 'quiet' })}</div></section>
         <section class="panel" aria-labelledby="s-wiese"><h2 id="s-wiese">SDK ausprobieren</h2>
           <p class="muted">Auf der Spielwiese hat jede Funktion des SDK einen Knopf. Du siehst sofort, was zurückkommt – und im Editor, wie es gemacht ist.</p>

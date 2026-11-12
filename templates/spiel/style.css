@@ -1,8 +1,5 @@
 /* Eigenes CSS für das Spiel. Die Bausteine kommen aus hub-ui.css. */
 
-/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
-[hidden] { display: none !important; }
-
 .kopf h1 { margin: 0 0 .25rem; }
 
 /* Das Spielfeld behält immer das Seitenverhältnis 3:4 und passt auf den Bildschirm. */

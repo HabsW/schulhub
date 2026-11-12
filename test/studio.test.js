@@ -419,6 +419,11 @@ test('SDK-Referenz: beschreibt jede Funktion und jeden Wert, den hub-sdk.js anbi
   const page = await M.page('/entwickeln/sdk');
   assert.equal(page.status, 200);
   for (const name of documented) assert.ok(page.text.includes(`id="${name.replace(/[^A-Za-z0-9]+/g, '-')}"`), `anchor for ${name}`);
+  // Inline code never widens the page: names stay whole, code with spaces may wrap, long examples are <pre> blocks.
+  for (const [, cls = '', text] of page.text.matchAll(/<code(?: class="([^"]*)")?>([^<]*)<\/code>/g)) {
+    if (/\s/.test(text)) assert.ok(cls.split(' ').includes('wrap'), `inline code with spaces must wrap: ${text}`);
+    assert.ok(text.length <= 64, `too long for inline code, use a block: ${text}`);
+  }
   const classes = [...new Set(fs.readFileSync(path.join(ROOT, 'sdk', 'hub-ui.css'), 'utf8').match(/\.hub-[a-z-]+/g).map((c) => c.slice(1)))];
   for (const c of classes) assert.ok(ref.ui.classes.some(([k]) => k === c), `hub-ui.css class ${c}`);
   for (const type of ['text', 'number', 'boolean', 'choice', 'list', 'pairs']) assert.ok(ref.manifest.settingTypes.some(([k]) => k === type), `setting type ${type}`);

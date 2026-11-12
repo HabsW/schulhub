@@ -15,6 +15,7 @@
   var tree = $('studio-tree');
   var stateEl = $('studio-state');
   var stateText = stateEl.querySelector('.studio-state-text');
+  var stateShort = stateEl.querySelector('.studio-state-short');
   var fileMenu = $('studio-file-menu');
   var fileName = $('studio-file-name');
   var editorBox = $('studio-editor');
@@ -137,7 +138,10 @@
     var text = busy ? 'Speichert …' : dirty ? 'Nicht gespeichert' : 'Gespeichert';
     stateEl.classList.toggle('ok', !busy && !dirty);
     stateEl.classList.toggle('wait', !busy && dirty);
-    if (text !== shownState) stateText.textContent = shownState = text;
+    if (text !== shownState) {
+      stateText.textContent = shownState = text;
+      stateShort.textContent = busy ? 'Speichert …' : dirty ? 'Geändert' : 'Gespeichert'; // phones: a short word
+    }
     tree.querySelectorAll('.studio-file').forEach(function (b) {
       var buf = buffers[b.getAttribute('data-path')];
       b.querySelector('.studio-dot').hidden = !(buf && buf.dirty);
@@ -496,6 +500,8 @@
 
   // ------------------------------------------------------------- layout
   /** Below 1200px one pane shows (phones), or code/preview plus a files drawer (tablets). */
+  var viewRadios = root.querySelectorAll('input[name="studio-view"]');
+  var filesToggle = document.querySelector('[data-studio-files]');
   function layout() {
     var narrow = !wide.matches;
     var cover = phone.matches && filesOpen;
@@ -503,11 +509,10 @@
     codePane.classList.toggle('studio-pane-off', narrow && (view !== 'code' || cover));
     previewPane.classList.toggle('studio-pane-off', narrow && (view !== 'vorschau' || cover));
     scrim.hidden = !(narrow && !phone.matches && filesOpen);
-    document.querySelectorAll('[data-studio-show]').forEach(function (b) {
-      var which = b.getAttribute('data-studio-show');
-      var on = which === 'dateien' ? filesOpen : which === view && !cover;
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
+    // Phones: "Dateien" is one of the three views. Tablets: the files are a drawer (button in the bar).
+    var shown = cover ? 'dateien' : view;
+    viewRadios.forEach(function (r) { r.checked = r.value === shown; });
+    filesToggle.setAttribute('aria-pressed', filesOpen && !phone.matches ? 'true' : 'false');
   }
   function showPane(which) {
     if (which === 'dateien') filesOpen = phone.matches ? true : !filesOpen;
@@ -522,9 +527,11 @@
       if (target) target.focus();
     }
   }
+  root.addEventListener('change', function (event) {
+    if (event.target.name === 'studio-view') showPane(event.target.value);
+  });
   document.addEventListener('click', function (event) {
-    var seg = event.target.closest('[data-studio-show]');
-    if (seg) showPane(seg.getAttribute('data-studio-show'));
+    if (event.target.closest('[data-studio-files]')) showPane('dateien');
   });
   root.addEventListener('click', function (event) {
     var b = event.target.closest('.studio-file');

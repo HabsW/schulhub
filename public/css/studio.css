@@ -19,6 +19,7 @@
 .studio-file-summary:hover { background: var(--raised-2); }
 .studio-file-summary .ico { color: var(--ink-3); }
 .studio-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The save state is always a word, never only a colour: phones show a short one, the full text is read out. */
 .studio-state { flex: none; }
 .studio-state-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .studio-tools { display: flex; align-items: center; gap: var(--s-1); flex: none; }
@@ -32,6 +33,7 @@
 
 @media (min-width: 560px) {
   .studio-state-text { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+  .studio-state-short { display: none; }
 }
 @media (min-width: 720px) {
   .studio-bar { gap: var(--s-2); }
@@ -45,7 +47,12 @@
   .studio-wide { display: inline; }
   .studio-narrow { display: none; }
 }
-@media (pointer: coarse) { .studio-file-summary { min-height: var(--tap); } }
+.studio-tool { flex: none; } /* the file name gives way, never a button */
+@media (pointer: coarse) {
+  .studio-file-summary { min-height: var(--tap); }
+  .studio-tool { min-width: var(--tap); } /* icon-only on small screens: still 44px wide */
+}
+.studio-nb { white-space: nowrap; } /* short names: never broken after "-" or "/" */
 
 /* ------------------------------------------------------- the workspace
    Phones: one pane at a time (switch: Dateien / Code / Vorschau).
@@ -57,21 +64,13 @@
   background: var(--ground);
 }
 .studio-files, .studio-code, .studio-preview { grid-row: 2; grid-column: 1; min-width: 0; min-height: 0; }
-.studio-switch {
-  display: flex; gap: 2px; margin: var(--s-2) var(--s-3); padding: 3px;
-  border: 1px solid var(--line-1); border-radius: var(--r-btn); background: var(--raised-2);
-}
-.studio-seg {
-  position: relative; flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: .35rem;
-  min-width: 0; min-height: 2.5rem; padding: 0 .4rem; border: 0; border-radius: calc(var(--r-btn) - 2px);
-  background: none; color: var(--ink-2); font: 620 .9rem/1 var(--sans);
-  transition: background-color var(--t-1), color var(--t-1);
-}
-.studio-seg:hover { color: var(--ink); }
-.studio-seg[aria-pressed="true"] { background: var(--ink); color: var(--ink-on-ink); }
-.studio-seg .ico { display: none; width: 1.05rem; height: 1.05rem; }
-@media (min-width: 420px) { .studio-seg .ico { display: inline; } }
-@media (pointer: coarse) { .studio-seg { min-height: var(--tap); } }
+/* The view switch is the system's segmented control (look and selected state come from hub.css);
+   here it only fills the width with equal parts. */
+.studio-switch { display: flex; flex-wrap: nowrap; margin: var(--s-2) var(--s-3); }
+.studio-switch label { flex: 1 1 0; justify-content: center; gap: .35rem; min-width: 0; padding: 0 .4rem; }
+.studio-switch .ico { display: none; width: 1.05rem; height: 1.05rem; }
+@media (min-width: 420px) { .studio-switch .ico { display: inline; } }
+@media (pointer: coarse) { .studio-switch label { min-height: var(--tap); } }
 /* tablets: the files are a drawer opened from the bar; the switch is code / preview only */
 @media (min-width: 720px) and (max-width: 1199.98px) {
   .studio-tablet-only { display: inline-flex; }
@@ -87,6 +86,20 @@
   }
 }
 @keyframes studio-drawer { from { transform: translateX(-100%); } }
+
+/* Phones held sideways: little height. The switch becomes a narrow rail on the left
+   (icons, 44px targets) and the bar keeps its smallest height, so code gets the height. */
+@media (orientation: landscape) and (max-height: 540px) and (max-width: 1199.98px) {
+  .studio-bar { height: var(--tap); }
+  .studio { grid-template-columns: auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .studio-switch { grid-row: 1; grid-column: 1; flex-direction: column; justify-content: flex-start; gap: var(--s-1); margin: 0; padding: var(--s-1); border-width: 0 1px 0 0; border-radius: 0; background: var(--ground); }
+  .studio-switch label { flex: none; width: var(--tap); min-height: var(--tap); padding: 0; }
+  .studio-switch .ico { display: inline; width: 1.25rem; height: 1.25rem; }
+  .studio-seg-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .studio-problems { position: absolute; top: .2rem; right: .15rem; }
+  .studio-files, .studio-code, .studio-preview, .studio-scrim { grid-row: 1; grid-column: 2; }
+  .studio-hint { display: none; } /* the file list needs the little height there is */
+}
 
 @media (min-width: 1200px) {
   .studio { grid-template-columns: 16.5rem minmax(0, 1fr) minmax(22rem, 40%); grid-template-rows: minmax(0, 1fr); }
@@ -165,11 +178,6 @@
 
 /* -------------------------------------- start page and template list */
 .studio-tpl-meta { display: block; margin-top: .3rem; color: var(--ink-3); font-size: var(--fs-meta); }
-.studio-tpl-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); min-width: 0; }
-.studio-panels { display: grid; gap: var(--s-5); margin-top: var(--s-6); }
-@media (min-width: 1000px) { .studio-panels { grid-template-columns: 1fr 1fr; } }
-.studio-panels code { white-space: nowrap; }
-.studio-panels > section { margin: 0; } /* side by side: no stacking margin from .panel + .panel */
 .studio-version-note { display: block; margin-top: .25rem; color: var(--ink-2); white-space: pre-line; }
 
 /* =====================================================================

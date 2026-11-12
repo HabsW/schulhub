@@ -1,8 +1,5 @@
 /* Eigenes CSS für die Spielwiese. Die Bausteine kommen aus hub-ui.css. */
 
-/* hidden versteckt immer – auch Elemente mit hub-stack, hub-row oder hub-btn. */
-[hidden] { display: none !important; }
-
 .wiese { max-width: 72rem; }
 .kopf { gap: .5rem; margin-bottom: 1.5rem; }
 .kopf h1, .kopf p { margin: 0; }

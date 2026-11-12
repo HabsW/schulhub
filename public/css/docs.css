@@ -11,9 +11,13 @@
   .docs-layout { grid-template-columns: 13.5rem minmax(0, 1fr); gap: var(--s-7); }
 }
 
-/* Inline code: short names never break, not even after a hyphen (hub-sdk.js); longer code wraps at spaces. */
+/* Inline code: names never break, not even after a hyphen (hub-sdk.js); code with spaces wraps.
+   Set here explicitly, so the pages hold whatever the base style of inline code is.
+   Longer examples are <pre> blocks (.docs-snippet) that scroll inside themselves. */
 .docs-nb { white-space: nowrap; }
+.docs-wrap { white-space: normal; overflow-wrap: anywhere; }
 .docs-steps code { white-space: nowrap; }
+.docs-snippet { flex-basis: 100%; min-width: 0; margin-top: .4rem; padding: .55rem .75rem; font-size: .8125rem; line-height: 1.55; }
 
 /* ------------------------------------------------- table of contents */
 .docs-toc { min-width: 0; }
@@ -71,7 +75,7 @@
 .docs-kind { font: 600 var(--fs-meta)/1 var(--sans); color: var(--ink-3); }
 .docs-sub { margin-top: var(--s-4); }
 
-.docs-facts { display: grid; margin: 0; border-top: 1px solid var(--line-1); }
+.docs-facts { display: grid; grid-template-columns: minmax(0, 1fr); margin: 0; border-top: 1px solid var(--line-1); }
 .docs-facts > div { display: grid; gap: .2rem; min-width: 0; padding: .65rem 0; border-bottom: 1px solid var(--line-1); scroll-margin-top: calc(var(--topbar) + var(--s-4)); }
 .docs-facts dt { color: var(--ink-3); font-size: var(--fs-meta); font-weight: 650; }
 .docs-facts dd { min-width: 0; margin: 0; color: var(--ink); font-size: .9375rem; }
@@ -79,8 +83,8 @@
   .docs-facts > div { grid-template-columns: 9.5rem minmax(0, 1fr); gap: var(--s-4); align-items: baseline; }
 }
 .docs-errors dt code { font-size: .85rem; }
-.docs-params { display: grid; gap: .55rem; margin: 0; padding: 0; list-style: none; }
-.docs-params > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .5rem; }
+.docs-params { display: grid; grid-template-columns: minmax(0, 1fr); gap: .55rem; margin: 0; padding: 0; list-style: none; }
+.docs-params > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: .1rem .5rem; min-width: 0; }
 .docs-type { color: var(--ink-3); font-size: var(--fs-meta); }
 .docs-param-text { flex-basis: 100%; color: var(--ink-2); font-size: var(--fs-small); }
 .docs-rules { max-width: var(--w-text); margin: 0; padding-left: 1.3rem; color: var(--ink-2); }
@@ -90,4 +94,5 @@
 /* ------------------------------------------------- playground page */
 .docs-narrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); max-width: var(--w-text); }
 .docs-narrow code { white-space: nowrap; }
+.docs-first { margin-top: 0; }
 .docs-h { margin-bottom: var(--s-3); font-size: var(--fs-h3); }
