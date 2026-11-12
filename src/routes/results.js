@@ -3,8 +3,10 @@
 // filter and a weekly chart, one student's details (readable with the labels
 // from the app's schulhub.json), the CSV export and the reset. This works for
 // EVERY app, because all app data goes through the Hub - app authors build
-// nothing for it. Only results recorded in this class are shown
-// (class_id = this class, or NULL for results from before classes were recorded).
+// nothing for it. Only results recorded in this class are shown: class_id =
+// this class, or '' for results from before classes were recorded (class
+// unknown). Never NULL: those were made without any class (e.g. at home in a
+// school-wide app) and belong to nobody's class view.
 // Everything shown here was written by students or apps: it is always output
 // as escaped plain text.
 
@@ -12,7 +14,7 @@ const {
   html, page, flash, postButton, linkButton, pageHead, sectionHead, stats, stat, meter, badge, notice, empty,
   dataTable, icon,
 } = require('../html');
-const { deny, formatDate, formatAgo, dayKey } = require('../util');
+const { deny, formatDate, formatAgo, dayKey, plural } = require('../util');
 const { manifestOf } = require('../manifest');
 const kit = require('../teachingKit');
 
@@ -112,7 +114,7 @@ module.exports = (app, ctx) => {
          SELECT r.id, r.user_id, r.title, r.score, r.max_score, r.created_at,
                 ROW_NUMBER() OVER (PARTITION BY r.user_id ORDER BY r.id DESC) AS rn
            FROM results r JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
-          WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id IS NULL)
+          WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id = '')
        ), agg AS (
          SELECT user_id, COUNT(*) AS n, MAX(CASE WHEN max_score > 0 THEN score * 1.0 / max_score END) AS best FROM cr GROUP BY user_id
        )
@@ -146,7 +148,7 @@ module.exports = (app, ctx) => {
     const perWeek = db.get(
       `SELECT COUNT(*) AS total, ${kit.weekSums('r.created_at', wk.length)} FROM results r
          JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
-        WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id IS NULL)`,
+        WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id = '')`,
       ...kit.weekParams(wk), cls.id, a.id, cls.id
     );
     const bars = kit.weekBars(wk, perWeek);
@@ -157,7 +159,7 @@ module.exports = (app, ctx) => {
     const table = dataTable({
       cls: 'teach-results',
       columns: [
-        { label: 'Name', primary: true, render: (s) => html`<a href="${base}/${s.id}">${s.name}</a>` },
+        { label: 'Name', primary: true, render: (s) => html`<a class="teach-reclink" href="${base}/${s.id}">${s.name}</a>` },
         { label: 'Letztes Ergebnis', render: (s) => (s.last_title ? html`${s.last_title}${s.last_score !== null ? html` <span class="faint teach-nowrap">${scoreText(s.last_score, s.last_max)}</span>` : ''}` : '') },
         { label: 'Bestes', num: true, render: (s) => pctText(s.best) },
         { label: 'Ergebnisse', num: true, render: (s) => (s.results ? String(s.results) : '') },
@@ -211,7 +213,7 @@ module.exports = (app, ctx) => {
     for (const r of db.all(
       `SELECT r.user_id, r.title, r.score, r.max_score, r.created_at FROM results r
          JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
-        WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id IS NULL) ORDER BY r.id`,
+        WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id = '') ORDER BY r.id`,
       cls.id, a.id, cls.id
     )) {
       if (!byUser.has(r.user_id)) byUser.set(r.user_id, []);
@@ -240,7 +242,9 @@ module.exports = (app, ctx) => {
     const loaded = load(req);
     const uid = String(req.params.uid);
     if (!access.canSeeStudentData(req.user, loaded.cls.id, loaded.a.id, uid)) throw deny();
-    return { ...loaded, student: db.get('SELECT id, name FROM users WHERE id = ?', uid) };
+    const student = db.get('SELECT id, name FROM users WHERE id = ?', uid);
+    if (!student) throw deny();
+    return { ...loaded, student };
   }
 
   app.get('/klassen/:id/apps/:aid/ergebnisse/:uid', (req, res) => {
@@ -248,7 +252,7 @@ module.exports = (app, ctx) => {
     const listUrl = `/klassen/${cls.id}/apps/${a.id}/ergebnisse`;
     const here = `${listUrl}/${student.id}`;
     const labels = (manifest.results && manifest.results.labels) || {};
-    const results = db.all('SELECT * FROM results WHERE app_id = ? AND user_id = ? AND (class_id = ? OR class_id IS NULL) ORDER BY created_at DESC, id DESC LIMIT 200', a.id, student.id, cls.id);
+    const results = db.all("SELECT * FROM results WHERE app_id = ? AND user_id = ? AND (class_id = ? OR class_id = '') ORDER BY created_at DESC, id DESC LIMIT 200", a.id, student.id, cls.id);
     const saves = db.all('SELECT key, value, size, updated_at FROM saves WHERE app_id = ? AND user_id = ? ORDER BY key LIMIT 200', a.id, student.id);
     const scores = db.all('SELECT board, score, updated_at FROM scores WHERE app_id = ? AND user_id = ? ORDER BY board', a.id, student.id);
     const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, student.id);
@@ -301,7 +305,7 @@ module.exports = (app, ctx) => {
           ${results.length
             ? html`<div class="teach-resultlist">${results.map((r) => {
                 const p = kit.percentOf(r.score, r.max_score);
-                return html`<details class="disclosure teach-result"><summary><span class="teach-result-title"><strong>${r.title}</strong><span class="meta">${formatDate(r.created_at)}</span></span>
+                return html`<details class="disclosure teach-result"><summary><span class="teach-result-title"><strong>${r.title}</strong><span class="meta">${formatDate(r.created_at)}${r.class_id === '' ? ' · ohne Klassenangabe (vor Version 2)' : ''}</span></span>
                   ${r.score !== null ? badge(html`${scoreText(r.score, r.max_score)}${p !== null ? ` · ${p}${NB}%` : ''}`) : ''}</summary>
                   <div class="disclosure-body">${r.details ? detailView(parse(r.details), labels) : html`<p class="meta">Keine Einzelheiten gespeichert.</p>`}</div></details>`;
               })}</div>`
@@ -322,9 +326,9 @@ module.exports = (app, ctx) => {
         <section class="section" aria-labelledby="s-fb" id="rueckmeldung">${sectionHead('Rückmeldungen', { id: 's-fb', count: feedback.length ? String(feedback.length) : null })}
           ${canFeedback ? kit.feedbackForm(req, ctx, { cls, student, appId: a.id, back: here }) : ''}
           ${feedback.length ? html`<div class="mt-6">${kit.feedbackTimeline(req, ctx, feedback, { back: here, showClass: false })}</div>` : canFeedback ? '' : html`<p class="muted">Noch keine Rückmeldungen.</p>`}</section>
-        ${change ? html`<section class="danger-zone" aria-labelledby="s-reset"><h2 id="s-reset">Daten zurücksetzen</h2>
-          <p class="mt-2 mb-4">Löscht alle Ergebnisse, Spielstände, Bestwerte, den Fortschritt und die Erfolge von ${student.name} in dieser App – auch die aus anderen Klassen.</p>
-          ${postButton(req, `${here}/loeschen`, 'Daten in dieser App löschen', { kind: 'danger', icon: 'trash', confirm: `Alle Daten von ${student.name} in „${a.name}“ löschen?\nErgebnisse, Spielstände, Bestwerte, Fortschritt und Erfolge werden gelöscht. Das kann nicht rückgängig gemacht werden.`, confirmLabel: 'Löschen' })}</section>` : ''}
+        ${change ? html`<section class="danger-zone" aria-labelledby="s-reset"><h2 id="s-reset">Ergebnisse zurücksetzen</h2>
+          <p class="mt-2 mb-4">Löscht die Ergebnisse von ${student.name} in „${a.name}“, die in dieser Klasse entstanden sind. Ergebnisse aus anderen Klassen und ohne Klassenangabe bleiben, ebenso Spielstände, Bestwerte, Fortschritt und Erfolge – die gehören ${student.name} (löschbar unter „Meine Daten“).</p>
+          ${postButton(req, `${here}/loeschen`, 'Ergebnisse dieser Klasse löschen', { kind: 'danger', icon: 'trash', confirm: `Ergebnisse von ${student.name} in „${a.name}“ löschen?\nGelöscht werden nur die Ergebnisse aus ${cls.name}. Spielstände, Bestwerte, Fortschritt, Erfolge und Ergebnisse aus anderen Klassen bleiben. Das kann nicht rückgängig gemacht werden.`, confirmLabel: 'Löschen' })}</section>` : ''}
       </div>
     </div>`;
     res.send(page(req, { title: `${student.name} · ${a.name}`, body, active: 'klassen', classId: cls.id, styles: ['css/teaching.css'] }));
@@ -334,9 +338,14 @@ module.exports = (app, ctx) => {
     const { cls, a, student } = loadStudent(req);
     // Archived classes are read-only.
     if (!access.canChangeClass(req.user, cls.id)) throw deny();
-    services.deleteAppData(a.id, student.id);
-    services.audit(req.user, 'appdaten_zurueckgesetzt', a.name, cls.name);
-    flash(req, `Die Daten von ${student.name} in „${a.name}“ wurden gelöscht.`);
+    // Only what was recorded in THIS class. Saves, scores, progress and achievements
+    // belong to the student (Meine Daten); results of other classes and legacy
+    // results without a class ('') belong to no single class and stay.
+    const done = db.run('DELETE FROM results WHERE app_id = ? AND user_id = ? AND class_id = ?', a.id, student.id, cls.id);
+    services.audit(req.user, 'appdaten_zurueckgesetzt', a.name, `${cls.name}: Ergebnisse dieser Klasse`);
+    flash(req, done.changes
+      ? `${plural(done.changes, 'Ergebnis', 'Ergebnisse')} von ${student.name} in „${a.name}“ aus ${cls.name} gelöscht. Spielstände, Fortschritt und Erfolge bleiben.`
+      : `${student.name} hatte in „${a.name}“ keine Ergebnisse aus ${cls.name}.`);
     res.redirect(303, `/klassen/${cls.id}/apps/${a.id}/ergebnisse`);
   });
 };

@@ -25,6 +25,20 @@
     var valid = document.getElementById('teach-valid');
     var stopAt = Date.now() + 3 * 60 * 60 * 1000; // a lesson is long, but not that long
     var timer = null;
+    // The code on the screen was deleted, expired or the class archived: stop
+    // showing a dead QR code and show the "no valid code" view instead.
+    var showDead = function (text, allowNew) {
+      var section = document.getElementById('teach-projector');
+      var dead = document.getElementById('teach-qr-dead');
+      var deadText = document.getElementById('teach-qr-dead-text');
+      ['teach-qr-code', 'teach-qr-live'].forEach(function (id) { var el = document.getElementById(id); if (el) el.hidden = true; });
+      if (section) section.classList.remove('teach-projector-qr');
+      if (!dead) return;
+      if (deadText && typeof text === 'string') deadText.textContent = text;
+      var form = dead.querySelector('form');
+      if (form) form.hidden = !allowNew;
+      dead.hidden = false;
+    };
     var poll = function () {
       if (document.hidden) return;
       if (Date.now() > stopAt) { clearInterval(timer); return; }
@@ -32,7 +46,9 @@
         .then(function (res) { if (!res.ok) throw new Error('status'); return res.json(); })
         .then(function (data) {
           if (typeof data.text === 'string' && joined.textContent !== data.text) joined.textContent = data.text;
-          if (valid && typeof data.validText === 'string') valid.textContent = data.validText;
+          if (data.state === 'replaced') { window.location.reload(); return; } // a newer code exists: show it
+          if (data.state === 'valid') { if (valid && typeof data.stateText === 'string') valid.textContent = data.stateText; return; }
+          showDead(data.stateText, data.state !== 'archived');
         })
         .catch(function () { /* the next round tries again */ });
     };

@@ -98,6 +98,14 @@ module.exports = (app, ctx) => {
     const classes = classList(user, false);
     const archived = staff ? classList(user, true) : [];
     const teaches = (c) => access.isAdmin(user) || c.my_role === 'teacher';
+    // The amber count in the navigation leads here, so the way to the review queue starts here too.
+    const waitingTotal = staff
+      ? db.get(
+          `SELECT COUNT(*) AS n FROM class_apps ca JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ? AND m.role = 'teacher'
+             JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL WHERE ca.request_state = 'waiting'`,
+          user.id
+        ).n
+      : 0;
 
     const classRow = (c) =>
       row({
@@ -117,6 +125,7 @@ module.exports = (app, ctx) => {
       lead: staff ? 'Deine Klassen. Schüler/innen treten selbst per QR-Code oder Link bei.' : 'Die Klassen, in denen du bist.',
       actions: staff ? linkButton('/klassen/neu', 'Neue Klasse', { kind: 'primary', icon: 'plus' }) : '',
     })}
+    ${waitingTotal ? notice({ tone: 'wait', title: `${plural(waitingTotal, 'App wartet', 'Apps warten')} auf deine Prüfung`, text: 'Apps von Schüler/innen brauchen deine Freigabe, bevor die Klasse sie benutzen kann.', actions: linkButton('/pruefen', 'Jetzt prüfen', { kind: 'primary', size: 'sm', icon: 'arrowRight' }), cls: 'mb-6' }) : ''}
     ${classes.length
       ? list(classes.map(classRow))
       : staff
@@ -241,7 +250,7 @@ module.exports = (app, ctx) => {
            FROM results r
            JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
            JOIN class_apps ca ON ca.app_id = r.app_id AND ca.class_id = m.class_id AND ca.status = 'approved'
-          WHERE r.class_id = m.class_id OR r.class_id IS NULL
+          WHERE r.class_id = m.class_id OR r.class_id = ''
           GROUP BY r.app_id, r.user_id`,
         cls.id
       ).map((r) => [key(r), r])
@@ -315,7 +324,7 @@ module.exports = (app, ctx) => {
       `SELECT ${kit.weekSums('r.created_at', wk.length)} FROM results r
          JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
          JOIN class_apps ca ON ca.app_id = r.app_id AND ca.class_id = m.class_id AND ca.status IN ('approved','removed')
-        WHERE (r.class_id = m.class_id OR r.class_id IS NULL) AND r.created_at >= ?`,
+        WHERE (r.class_id = m.class_id OR r.class_id = '') AND r.created_at >= ?`,
       ...kit.weekParams(wk), cls.id, wk[0].start
     );
     const bars = kit.weekBars(wk, perWeek);
@@ -447,7 +456,7 @@ module.exports = (app, ctx) => {
         `SELECT ca.app_id, COUNT(DISTINCT m.user_id) AS n FROM class_apps ca
            JOIN class_members m ON m.class_id = ca.class_id AND m.role = 'student'
           WHERE ca.class_id = ? AND (EXISTS (SELECT 1 FROM plays p WHERE p.app_id = ca.app_id AND p.user_id = m.user_id)
-                 OR EXISTS (SELECT 1 FROM results r WHERE r.app_id = ca.app_id AND r.user_id = m.user_id AND (r.class_id = ca.class_id OR r.class_id IS NULL)))
+                 OR EXISTS (SELECT 1 FROM results r WHERE r.app_id = ca.app_id AND r.user_id = m.user_id AND (r.class_id = ca.class_id OR r.class_id = '')))
           GROUP BY ca.app_id`,
         cls.id
       ).map((r) => [r.app_id, r.n])
@@ -761,6 +770,13 @@ module.exports = (app, ctx) => {
   /** How many students joined - a number, never names. */
   const joinedText = (n) => (n ? `${kit.studentsText(n)} ${n === 1 ? 'ist' : 'sind'} schon dabei` : 'Noch niemand beigetreten');
 
+  /** The "no valid code" view of the projector: a sentence and, for teachers of an active class, a new code. */
+  const noCodeView = (req, cls, change, text, { id = '', hidden = false } = {}) =>
+    html`<div class="teach-qrempty"${id ? html` id="${id}"` : ''}${hidden ? raw(' hidden') : ''}><p class="lead teach-qrlead"${id ? html` id="${id}-text"` : ''}>${text}</p>
+      ${change ? html`<form method="post" action="/klassen/${cls.id}/code" class="teach-inline-form teach-qrform">${csrfField(req)}<input type="hidden" name="zurueck" value="qr">
+        <div class="field teach-grow"><label for="f-minuten">Gültig für</label><select id="f-minuten" name="minuten">${Object.entries(kit.DURATIONS).map(([m, l]) => html`<option value="${m}"${m === '60' ? raw(' selected') : ''}>${l}</option>`)}</select></div>
+        <button class="btn primary">${icon('qr')}<span>Code erzeugen</span></button></form>` : ''}</div>`;
+
   app.get('/klassen/:id/qr', (req, res) => {
     const cls = manageClass(req);
     const code = cls.archived_at ? null : activeCode(cls.id);
@@ -775,32 +791,45 @@ module.exports = (app, ctx) => {
       </header>
       <main class="teach-qrstage" id="main" tabindex="-1">
         ${msg ? notice({ tone: msg.type === 'error' ? 'danger' : 'ok', text: msg.text, role: msg.type === 'error' ? 'alert' : 'status', cls: 'teach-qrflash' }) : ''}
-        <section class="projector teach-projector${code ? ' teach-projector-qr' : ''}">
+        <section class="projector teach-projector${code ? ' teach-projector-qr' : ''}" id="teach-projector">
           <h1 class="teach-qrtitle">${cls.name}</h1>
           ${code
-            ? html`<div class="qr teach-qrcode">${qrSvg(url)}</div>
-              <div class="teach-qrtext">
+            ? html`<div class="qr teach-qrcode" id="teach-qr-code">${qrSvg(url)}</div>
+              <div class="teach-qrtext" id="teach-qr-live">
                 <p class="lead teach-qrlead">Scanne den Code mit der Handykamera und melde dich mit deinem Schulkonto an.</p>
                 <p class="teach-qrlink">${url}</p>
                 <p class="teach-qrvalid" id="teach-valid">Gültig bis ${formatDate(code.expires_at)}</p>
-                <p class="teach-qrcount" id="teach-joined" data-status="/klassen/${cls.id}/qr/status" aria-live="polite">${joinedText(studentCount(cls.id))}</p>
-              </div>`
-            : html`<div class="teach-qrempty"><p class="lead teach-qrlead">${cls.archived_at ? 'Diese Klasse ist archiviert. Niemand kann beitreten.' : 'Es gibt gerade keinen gültigen Beitrittscode.'}</p>
-              ${change ? html`<form method="post" action="/klassen/${cls.id}/code" class="teach-inline-form teach-qrform">${csrfField(req)}<input type="hidden" name="zurueck" value="qr">
-                <div class="field teach-grow"><label for="f-minuten">Gültig für</label><select id="f-minuten" name="minuten">${Object.entries(kit.DURATIONS).map(([m, l]) => html`<option value="${m}"${m === '60' ? raw(' selected') : ''}>${l}</option>`)}</select></div>
-                <button class="btn primary">${icon('qr')}<span>Code erzeugen</span></button></form>` : ''}</div>`}
+                <p class="teach-qrcount" id="teach-joined" data-status="/klassen/${cls.id}/qr/status?seit=${code.created_at}" aria-live="polite">${joinedText(studentCount(cls.id))}</p>
+              </div>
+              ${noCodeView(req, cls, change, 'Es gibt gerade keinen gültigen Beitrittscode.', { id: 'teach-qr-dead', hidden: true })}`
+            : noCodeView(req, cls, change, cls.archived_at ? 'Diese Klasse ist archiviert. Niemand kann beitreten.' : 'Es gibt gerade keinen gültigen Beitrittscode.')}
         </section>
       </main>`;
     res.send(page(req, { title: `Beitreten: ${cls.name}`, body, shell: 'player', styles: STYLES, scripts: ['teaching.js'] }));
   });
 
-  /** Live number for the projector: teachers only, no names. */
+  const QR_STATE = {
+    expired: 'Der Code ist abgelaufen. Niemand kann mehr damit beitreten.',
+    deleted: 'Der Code wurde gelöscht. Niemand kann mehr damit beitreten.',
+    replaced: 'Es gibt einen neuen Code.',
+    archived: 'Diese Klasse ist archiviert. Niemand kann beitreten.',
+  };
+  /**
+   * Live status for the projector: teachers only, a number - never names - and
+   * what became of the code the page shows (`seit` = its creation time):
+   * valid, expired, deleted, replaced by a newer one, or the class was archived.
+   */
   app.get('/klassen/:id/qr/status', (req, res) => {
     const cls = manageClass(req);
     const code = cls.archived_at ? null : activeCode(cls.id);
+    const shown = /^\d{1,16}$/.test(String(req.query.seit || '')) ? Number(req.query.seit) : null;
+    let state = 'valid';
+    if (cls.archived_at) state = 'archived';
+    else if (!code) state = shown !== null && db.get("SELECT 1 AS ok FROM join_codes WHERE class_id = ? AND role = 'student' AND created_at = ?", cls.id, shown) ? 'expired' : 'deleted';
+    else if (shown !== null && code.created_at !== shown) state = 'replaced';
     const n = studentCount(cls.id);
     res.setHeader('Cache-Control', 'no-store');
-    res.json({ joined: n, text: joinedText(n), valid: Boolean(code), validText: code ? `Gültig bis ${formatDate(code.expires_at)}` : 'Der Code ist abgelaufen. Erzeuge einen neuen.' });
+    res.json({ joined: n, text: joinedText(n), state, stateText: state === 'valid' ? `Gültig bis ${formatDate(code.expires_at)}` : QR_STATE[state] });
   });
 
   // ---------------------------------------------------------- join codes
@@ -895,7 +924,9 @@ module.exports = (app, ctx) => {
     }
     const sent = String(req.params.code || '');
     const found = /^[A-Za-z0-9_-]{32}$/.test(sent) ? db.get('SELECT * FROM join_codes WHERE code = ? AND expires_at > ?', sent, Date.now()) : null;
-    if (!found || !safeEqual(found.code, sent)) {
+    // A code of an archived class is refused exactly like a wrong one: whoever holds
+    // an old code learns nothing about the class (no name, no teachers).
+    if (!found || !safeEqual(found.code, sent) || access.isArchived(found.class_id)) {
       limiter.hit('joinFail', key);
       limiter.hit('joinFailIp', req.ip);
       throw bad('Dieser Beitrittscode ist ungültig oder abgelaufen. Bitte frag deine Lehrkraft nach einem neuen Code.');
@@ -909,6 +940,13 @@ module.exports = (app, ctx) => {
     if (access.classRole(req.user, cls.id)) return res.redirect(`/klassen/${cls.id}`);
     const role = access.joinRoleFor(req.user, code);
     const invite = code.role === 'teacher';
+    if (!role) {
+      // Someone this code is not for (a teacher invitation, a student account): no class, no names.
+      const refusal = html`${pageHead({ eyebrow: invite ? 'Einladung für Lehrkräfte' : 'Klasse beitreten', title: 'Beitreten nicht möglich' })}
+        <div class="panel stack teach-joinpage">${notice({ tone: 'wait', text: invite ? 'Dieser Link ist eine Einladung für Lehrkräfte. Mit einem Schulkonto für Schüler/innen kannst du damit nicht beitreten.' : 'Mit diesem Link kannst du gerade nicht beitreten. Bitte frag deine Lehrkraft nach einem neuen Code.' })}
+          <div class="actions">${linkButton('/start', 'Zur Startseite', { icon: 'start' })}</div></div>`;
+      return res.send(page(req, { title: 'Klasse beitreten', body: refusal, width: 'narrow', styles: STYLES }));
+    }
     const teachers = teachersOf(cls.id);
     const body = html`${pageHead({
       eyebrow: invite ? 'Einladung für Lehrkräfte' : 'Klasse beitreten',
@@ -920,15 +958,12 @@ module.exports = (app, ctx) => {
           <div><dt>${invite ? 'Bisher unterrichtet von' : 'Lehrkraft'}</dt><dd>${teachers.map((t) => t.name).join(', ') || '–'}</dd></div>
           ${kit.classEyebrow(cls) ? html`<div><dt>Fach</dt><dd>${kit.classEyebrow(cls)}</dd></div>` : ''}
         </dl>
-        ${role
-          ? html`<p class="muted">${role === 'teacher'
-              ? 'Als Lehrkraft siehst du dann die Schüler/innen dieser Klasse und ihre Ergebnisse und kannst die Klasse mitverwalten.'
-              : 'Deine Lehrkraft sieht dann deinen Namen und deine Ergebnisse in den Apps dieser Klasse – sonst nichts. Du kannst die Klasse jederzeit wieder verlassen.'}</p>
-            <form method="post" action="/beitreten/${req.params.code}" class="actions stack-phone">${csrfField(req)}
-              <button class="btn primary lg">${icon(role === 'teacher' ? 'userPlus' : 'check')}<span>${role === 'teacher' ? 'Als Lehrkraft beitreten' : 'Ja, beitreten'}</span></button>
-              ${linkButton('/start', 'Abbrechen', { kind: 'quiet', size: 'lg' })}</form>`
-          : html`${notice({ tone: 'wait', text: invite ? 'Dieser Link ist eine Einladung für Lehrkräfte. Mit einem Schulkonto für Schüler/innen kannst du damit nicht beitreten.' : 'Dieser Klasse kann gerade niemand beitreten.' })}
-            <div class="actions">${linkButton('/start', 'Zur Startseite', { icon: 'start' })}</div>`}
+        <p class="muted">${role === 'teacher'
+          ? 'Als Lehrkraft siehst du dann die Schüler/innen dieser Klasse und ihre Ergebnisse und kannst die Klasse mitverwalten.'
+          : 'Deine Lehrkraft sieht dann deinen Namen und deine Ergebnisse in den Apps dieser Klasse – sonst nichts. Du kannst die Klasse jederzeit wieder verlassen.'}</p>
+        <form method="post" action="/beitreten/${req.params.code}" class="actions stack-phone">${csrfField(req)}
+          <button class="btn primary lg">${icon(role === 'teacher' ? 'userPlus' : 'check')}<span>${role === 'teacher' ? 'Als Lehrkraft beitreten' : 'Ja, beitreten'}</span></button>
+          ${linkButton('/start', 'Abbrechen', { kind: 'quiet', size: 'lg' })}</form>
       </div>`;
     res.send(page(req, { title: 'Klasse beitreten', body, width: 'narrow', styles: STYLES }));
   });
@@ -987,10 +1022,9 @@ module.exports = (app, ctx) => {
   app.post('/klassen/:id/apps/:aid/entfernen', (req, res) => {
     const cls = viewClass(req);
     const r = classApp(cls, req.params.aid);
+    // The class teacher can remove any app; an owner can withdraw their own (access.canRemoveFromClass).
+    if (!r || !access.canRemoveFromClass(req.user, cls, r)) throw deny();
     const teacher = access.canChangeClass(req.user, cls.id);
-    // The class teacher can remove any app; an owner can withdraw their own.
-    // An archived class is read-only for everybody, owners included.
-    if (!r || access.isArchived(cls.id) || !(teacher || r.owner_id === req.user.id)) throw deny();
     const a = appOf(r);
     if (!teacher && r.requested_version_id) {
       ctx.classApps.withdraw(req.user, cls, a);

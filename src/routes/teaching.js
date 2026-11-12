@@ -42,29 +42,47 @@ module.exports = (app, ctx) => {
     return x;
   }
 
-  /** Title, note, start and due date from the form (school time). */
-  function readAssignment(body, appName) {
+  /**
+   * Title, note, start and due date from the form (school time).
+   * Returns { values, errors } with every message keyed by its field.
+   * `floor` is the moment the assignment came into existence (now, when it is
+   * created): a start before it – "now", the current minute or the past –
+   * becomes exactly that moment, so results from before the assignment existed
+   * never count for it.
+   */
+  function readAssignment(body, appName, floor) {
     const now = Date.now();
-    if (typeof body.notiz === 'string' && body.notiz.trim().length > 1000) throw bad('Die Beschreibung ist zu lang (höchstens 1000 Zeichen).');
+    const errors = {};
+    if (typeof body.notiz === 'string' && body.notiz.trim().length > 1000) errors.notiz = 'Höchstens 1000 Zeichen.';
     const title = cleanText(body.titel, 120) || appName;
     const note = cleanText(body.notiz, 1000, { multiline: true });
     const startText = typeof body.start === 'string' ? body.start.trim() : '';
-    const starts = startText ? kit.schoolDateTime(startText) : now;
-    if (starts === null) throw bad('Der Start ist kein gültiges Datum.');
-    if (Math.abs(starts - now) > 365 * kit.DAY) throw bad('Der Start muss innerhalb eines Jahres liegen.');
+    let starts = startText ? kit.schoolDateTime(startText) : floor;
+    if (starts === null) {
+      errors.start = 'Das ist kein gültiges Datum mit Uhrzeit.';
+      starts = floor;
+    } else if (starts - now > 365 * kit.DAY) errors.start = 'Der Start darf höchstens ein Jahr in der Zukunft liegen.';
+    starts = Math.max(starts, floor);
     const dueDay = typeof body.faellig === 'string' ? body.faellig.trim() : '';
     const dueTime = typeof body.faellig_zeit === 'string' && body.faellig_zeit.trim() ? body.faellig_zeit.trim() : '23:59';
     let due = null;
     if (dueDay) {
-      due = kit.schoolTime(dueDay, dueTime);
-      if (due === null) throw bad('Das Fälligkeitsdatum ist ungültig.');
-      if (due <= starts) throw bad('Die Aufgabe muss nach dem Start fällig sein.');
-      if (due - starts > 366 * kit.DAY) throw bad('Eine Aufgabe kann höchstens ein Jahr laufen.');
+      if (kit.schoolTime('2000-01-01', dueTime) === null) errors.faellig_zeit = 'Das ist keine gültige Uhrzeit.';
+      else if ((due = kit.schoolTime(dueDay, dueTime)) === null) errors.faellig = 'Das ist kein gültiges Datum.';
+      else if (due <= starts) errors.faellig = 'Die Aufgabe muss nach dem Start fällig sein.';
+      else if (due - starts > 366 * kit.DAY) errors.faellig = 'Eine Aufgabe kann höchstens ein Jahr laufen.';
     }
-    return { title, note, starts, due };
+    return { values: { title, note, starts, due }, errors };
+  }
+  const ASSIGNMENT_FIELDS = ['app', 'titel', 'notiz', 'start', 'faellig', 'faellig_zeit'];
+  /** Back to the assignment form: each message at its field, what the teacher typed kept. */
+  function assignmentErrors(req, res, path, errors) {
+    const fields = {};
+    for (const k of ASSIGNMENT_FIELDS) if (typeof req.body[k] === 'string') fields[k] = req.body[k].slice(0, 5000);
+    kit.backToForm(req, res, { path, key: 'assignmentErrors', errors, fields });
   }
 
-  function assignmentForm(req, { cls, apps = [], x = null, chosen = '' }) {
+  function assignmentForm(req, { cls, apps = [], x = null, chosen = '', errors = {} }) {
     const now = Date.now();
     const action = x ? `/aufgaben/${x.id}/bearbeiten` : `/klassen/${cls.id}/aufgaben`;
     const selected = formValue(req, 'app', chosen || (apps[0] ? apps[0].id : ''));
@@ -79,11 +97,11 @@ module.exports = (app, ctx) => {
     return html`<form method="post" action="${action}" class="form">${csrfField(req)}
       ${appField}
       ${field(req, { label: 'Titel', name: 'titel', value: x ? x.title : firstName, hint: 'Ohne eigenen Titel heißt die Aufgabe wie die App.', attrs: 'maxlength="120" autocomplete="off"' })}
-      ${field(req, { label: 'Was zu tun ist (freiwillig)', name: 'notiz', type: 'textarea', value: x ? x.note : '', hint: 'Zum Beispiel: „Spiel drei Runden und versuch, über 80 % zu kommen.“ Höchstens 1000 Zeichen.', attrs: 'maxlength="1000" rows="3"' })}
-      <div class="teach-start">${field(req, { label: 'Start', name: 'start', type: 'datetime-local', value: kit.inputDateTime(x ? x.starts_at : now), hint: 'Vorher sehen die Schüler/innen die Aufgabe nicht.', attrs: 'required' })}</div>
+      ${field(req, { label: 'Was zu tun ist (freiwillig)', name: 'notiz', type: 'textarea', value: x ? x.note : '', hint: 'Zum Beispiel: „Spiel drei Runden und versuch, über 80 % zu kommen.“ Höchstens 1000 Zeichen.', error: errors.notiz, attrs: 'maxlength="1000" rows="3"' })}
+      <div class="teach-start">${field(req, { label: 'Start', name: 'start', type: 'datetime-local', value: kit.inputDateTime(x ? x.starts_at : now), hint: 'Vorher sehen die Schüler/innen die Aufgabe nicht. Es zählen nur Ergebnisse ab dem Start.', error: errors.start, attrs: 'required' })}</div>
       <div class="form-row teach-dates">
-        ${field(req, { label: 'Fällig am (freiwillig)', name: 'faellig', type: 'date', value: x && x.due_at ? kit.inputDate(x.due_at) : '' })}
-        ${field(req, { label: 'Uhrzeit', name: 'faellig_zeit', type: 'time', value: x && x.due_at ? kit.inputTime(x.due_at) : '', hint: 'Ohne Uhrzeit: bis 23:59 Uhr.' })}
+        ${field(req, { label: 'Fällig am (freiwillig)', name: 'faellig', type: 'date', value: x && x.due_at ? kit.inputDate(x.due_at) : '', error: errors.faellig })}
+        ${field(req, { label: 'Uhrzeit', name: 'faellig_zeit', type: 'time', value: x && x.due_at ? kit.inputTime(x.due_at) : '', hint: 'Ohne Uhrzeit: bis 23:59 Uhr.', error: errors.faellig_zeit })}
       </div>
       <div class="actions stack-phone"><button class="btn primary">${icon(x ? 'save' : 'send')}<span>${x ? 'Speichern' : 'Aufgabe stellen'}</span></button>
         ${linkButton(x ? `/aufgaben/${x.id}` : `/klassen/${cls.id}/aufgaben`, 'Abbrechen', { kind: 'quiet' })}</div>
@@ -102,7 +120,7 @@ module.exports = (app, ctx) => {
       lead: `Eine App, ein Termin – fertig. ${n ? `${kit.studentsText(n)} bekommen eine Mitteilung.` : 'Noch ist niemand in der Klasse.'} Wer fertig ist, erkennt der Hub an den Ergebnissen.`,
     })}
       ${apps.length
-        ? assignmentForm(req, { cls, apps, chosen })
+        ? assignmentForm(req, { cls, apps, chosen, errors: kit.takeFieldErrors(req, 'assignmentErrors') })
         : empty({ icon: 'apps', title: 'Noch keine App in der Klasse', text: 'Eine Aufgabe gehört immer zu einer App der Klasse. Füge zuerst eine App hinzu.', actions: linkButton(`/klassen/${cls.id}/apps#hinzufuegen`, 'App hinzufügen', { icon: 'plus' }) })}`;
     res.send(page(req, { title: 'Neue Aufgabe', body, active: 'klassen', classId: cls.id, width: 'narrow', styles: STYLES, scripts: ['teaching.js'] }));
   });
@@ -111,11 +129,13 @@ module.exports = (app, ctx) => {
     const cls = kit.loadClass(ctx, req, 'change');
     const target = db.get('SELECT * FROM apps WHERE id = ?', String(req.body.app || ''));
     if (!target || !access.canAssign(req.user, cls.id, target.id)) throw deny();
-    const f = readAssignment(req.body, target.name);
+    const now = Date.now();
+    const { values: f, errors } = readAssignment(req.body, target.name, now);
+    if (Object.keys(errors).length) return assignmentErrors(req, res, `/klassen/${cls.id}/aufgaben/neu`, errors);
     const id = newId();
     db.run(
       'INSERT INTO assignments (id, class_id, app_id, title, note, starts_at, due_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      id, cls.id, target.id, f.title, f.note, f.starts, f.due, req.user.id, Date.now()
+      id, cls.id, target.id, f.title, f.note, f.starts, f.due, req.user.id, now
     );
     services.audit(req.user, 'aufgabe_erstellt', f.title, cls.name);
     const students = studentIds(cls.id);
@@ -140,7 +160,7 @@ module.exports = (app, ctx) => {
       db.all(
         `SELECT r.user_id, COUNT(*) AS n, MAX(CASE WHEN r.max_score > 0 THEN r.score * 1.0 / r.max_score END) AS best
            FROM results r JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
-          WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id IS NULL) AND r.created_at >= ? GROUP BY r.user_id`,
+          WHERE r.app_id = ? AND (r.class_id = ? OR r.class_id = '') AND r.created_at >= ? GROUP BY r.user_id`,
         x.class_id, x.app_id, x.class_id, x.starts_at
       ).map((r) => [r.user_id, r])
     );
@@ -286,13 +306,14 @@ module.exports = (app, ctx) => {
     const body = html`${pageHead({
       crumbs: [['/klassen', 'Klassen'], [`/klassen/${x.class_id}/aufgaben`, x.class_name], [`/aufgaben/${x.id}`, x.title]],
       title: 'Aufgabe bearbeiten',
-    })}${assignmentForm(req, { cls: { id: x.class_id }, x })}`;
+    })}${assignmentForm(req, { cls: { id: x.class_id }, x, errors: kit.takeFieldErrors(req, 'assignmentErrors') })}`;
     res.send(page(req, { title: 'Aufgabe bearbeiten', body, active: 'klassen', classId: x.class_id, width: 'narrow', styles: STYLES }));
   });
 
   app.post('/aufgaben/:id/bearbeiten', (req, res) => {
     const x = manageAssignment(req);
-    const f = readAssignment(req.body, x.app_name);
+    const { values: f, errors } = readAssignment(req.body, x.app_name, x.created_at);
+    if (Object.keys(errors).length) return assignmentErrors(req, res, `/aufgaben/${x.id}/bearbeiten`, errors);
     db.run('UPDATE assignments SET title = ?, note = ?, starts_at = ?, due_at = ? WHERE id = ?', f.title, f.note, f.starts, f.due, x.id);
     services.audit(req.user, 'aufgabe_geaendert', f.title, x.class_name);
     flash(req, 'Die Aufgabe ist gespeichert.');
@@ -471,6 +492,7 @@ module.exports = (app, ctx) => {
     const a = db.get('SELECT * FROM apps WHERE id = ?', String(req.params.aid));
     if (!cls || !a || !access.canEditAppSettings(req.user, cls.id, a.id)) throw deny();
     const ca = db.get('SELECT version_id FROM class_apps WHERE class_id = ? AND app_id = ?', cls.id, a.id);
+    if (!ca) throw deny();
     const version = db.get('SELECT number, manifest FROM app_versions WHERE id = ?', ca.version_id || '');
     const stored = db.get(
       'SELECT s.value, s.updated_at, u.name AS updated_by_name FROM class_app_settings s LEFT JOIN users u ON u.id = s.updated_by WHERE s.class_id = ? AND s.app_id = ?',
@@ -538,8 +560,7 @@ module.exports = (app, ctx) => {
     const { cls, a, version, manifest, stored, saved } = loadAppSettings(req);
     const here = `/klassen/${cls.id}/apps/${a.id}/einstellungen`;
     const values = effectiveSettings(manifest, saved);
-    const kept = req.session.settingsErrors && req.session.settingsErrors.path === req.path ? req.session.settingsErrors.errors : {};
-    delete req.session.settingsErrors;
+    const kept = kit.takeFieldErrors(req, 'settingsErrors');
     const sent = formValue(req, 'gesendet', '') === '1';
     const body = html`${pageHead({
       crumbs: [['/klassen', 'Klassen'], [`/klassen/${cls.id}/apps`, cls.name]],
@@ -578,10 +599,7 @@ module.exports = (app, ctx) => {
     const { values, errors } = validateSettings(manifest, input);
     if (Object.keys(errors).length) {
       // Back to the form with every field's message and what the teacher typed.
-      req.session.formState = { path: here, fields: typed };
-      req.session.settingsErrors = { path: here, errors };
-      flash(req, errors._all || 'Bitte prüfe die markierten Felder.', 'error');
-      return res.redirect(303, here);
+      return kit.backToForm(req, res, { path: here, key: 'settingsErrors', errors, fields: typed });
     }
     db.run(
       `INSERT INTO class_app_settings (class_id, app_id, value, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
