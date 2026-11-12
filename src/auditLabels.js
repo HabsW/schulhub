@@ -14,6 +14,9 @@ const AUDIT_LABELS = {
 
   // classes
   klasse_erstellt: 'Klasse angelegt',
+  einladung_geloescht: 'Lehrkraft-Einladung gelöscht',
+  upload_abgebrochen: 'Upload abgebrochen',
+  app_einstellungen_zurueckgesetzt: 'App-Einstellungen der Klasse zurückgesetzt',
   klasse_umbenannt: 'Klasse umbenannt',
   klasse_archiviert: 'Klasse archiviert',
   klasse_wiederhergestellt: 'Klasse wiederhergestellt',

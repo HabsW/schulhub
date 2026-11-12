@@ -270,7 +270,8 @@ function dueChip(ts, tone = '') {
 function jsonView(value, labels = {}) {
   const flat = (o) => o && typeof o === 'object' && !Array.isArray(o) && Object.values(o).every((v) => v === null || typeof v !== 'object');
   const cell = (v) => (v === true ? '✓' : v === false ? '✗' : v === null || v === undefined ? '' : String(v));
-  const name = (k) => labels[k] || k;
+  // own properties only: a saved key like 'constructor' must never pick up something from the prototype
+  const name = (k) => (labels && Object.hasOwn(labels, k) && typeof labels[k] === 'string' ? labels[k] : k);
   if (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(flat)) {
     const cols = [...new Set(value.flatMap((o) => Object.keys(o)))].slice(0, 12);
     return dataTable({ columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });

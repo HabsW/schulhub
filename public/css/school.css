@@ -26,7 +26,6 @@
    and the legacy layout helper .stack { display: grid } in hub.css turns
    every data table into a grid from 720px up (header and body columns no
    longer line up). Remove when hub.css is fixed. */
-@media (min-width: 720px) { .table-wrap > table { display: table; } }
 
 /* Wide tables (many columns, buttons) stay records up to tablet width,
    exactly like dataTable() does below 720px. */

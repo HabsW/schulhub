@@ -370,11 +370,24 @@ function createUploads(ctx) {
     const central = [];
     let offset = 0;
     const deflate = (buf) => new Promise((resolve, reject) => zlib.deflateRaw(buf, (err, out) => (err ? reject(err) : resolve(out))));
-    const write = (chunk) => (res.write(chunk) ? Promise.resolve() : new Promise((resolve) => res.once('drain', resolve)));
+    // Wait for 'drain' - or for the connection to close (a cancelled download must not hang here forever).
+    const write = (chunk) =>
+      res.destroyed || res.write(chunk)
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            const done = () => {
+              res.off('drain', done);
+              res.off('close', done);
+              resolve();
+            };
+            res.once('drain', done);
+            res.once('close', done);
+          });
     for (const f of files) {
       if (res.destroyed) return;
       const data = f.data ? f.data : f.file ? await fs.promises.readFile(f.file) : await fs.promises.readFile(blobPath(f.sha256));
       const packed = await deflate(data);
+      if (res.destroyed) return;
       const name = Buffer.from(f.path, 'utf8');
       const crc = zlib.crc32(data);
       const head = Buffer.alloc(30);
@@ -390,6 +403,7 @@ function createUploads(ctx) {
       await write(head);
       await write(name);
       await write(packed);
+      if (res.destroyed) return;
       const entry = Buffer.alloc(46);
       entry.writeUInt32LE(0x02014b50, 0);
       entry.writeUInt16LE(20, 4);

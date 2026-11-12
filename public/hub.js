@@ -105,10 +105,24 @@
 
   // ----------------------------------------------------- auto-submit filters
   // <form data-autosubmit>: filters and segmented controls apply on change.
+  // The page reloads, so remember which control had the keyboard focus and give it back.
+  var FOCUS_KEY = 'hub-autosubmit-focus';
   document.addEventListener('change', function (event) {
-    var form = event.target.form;
-    if (form && form.hasAttribute('data-autosubmit')) {
-      if (form.requestSubmit) form.requestSubmit(); else form.submit();
-    }
+    var el = event.target;
+    var form = el.form;
+    if (!form || !form.hasAttribute('data-autosubmit')) return;
+    try { sessionStorage.setItem(FOCUS_KEY, JSON.stringify({ path: location.pathname, name: el.name || '', value: el.type === 'radio' || el.type === 'checkbox' ? el.value : '' })); } catch (e) { /* storage blocked */ }
+    if (form.requestSubmit) form.requestSubmit(); else form.submit();
   });
+  try {
+    var kept = JSON.parse(sessionStorage.getItem(FOCUS_KEY) || 'null');
+    sessionStorage.removeItem(FOCUS_KEY);
+    if (kept && kept.path === location.pathname && kept.name) {
+      var candidates = document.querySelectorAll('form[data-autosubmit] [name]');
+      for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        if (c.name === kept.name && (!kept.value || c.value === kept.value)) { c.focus({ preventScroll: true }); break; }
+      }
+    }
+  } catch (e) { /* storage blocked or bad value */ }
 })();
