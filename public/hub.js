@@ -102,15 +102,22 @@
   // cross-page transition: its overlay swallowed early taps into the app. The
   // outgoing page skips it, so the incoming page never sees a half transition.
   var FRAME_PAGE = /\/(apps\/[^/]+\/spielen|pruefen\/[^/]+\/[^/]+|studio\/[^/]+)(\?|$)/;
+  function quiet(vt) {
+    // A skipped or aborted transition rejects these promises: never let that become an uncaught error.
+    var noop = function () {};
+    if (vt.ready) vt.ready.catch(noop);
+    if (vt.finished) vt.finished.catch(noop);
+    if (vt.updateCallbackDone) vt.updateCallbackDone.catch(noop);
+  }
   window.addEventListener('pageswap', function (event) {
     var vt = event.viewTransition;
     if (!vt) return;
-    vt.finished.catch(function () {});
+    quiet(vt);
     var to = event.activation && event.activation.entry && event.activation.entry.url;
     if (to && FRAME_PAGE.test(new URL(to).pathname + new URL(to).search.slice(0, 1))) vt.skipTransition();
   });
   window.addEventListener('pagereveal', function (event) {
-    if (event.viewTransition) { event.viewTransition.finished.catch(function () {}); event.viewTransition.ready.catch(function () {}); }
+    if (event.viewTransition) quiet(event.viewTransition);
   });
 
   // ----------------------------------------------------------- tabs
