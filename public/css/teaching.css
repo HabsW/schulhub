@@ -1,0 +1,207 @@
+/* =====================================================================
+   Klassen & Unterricht (package A): class pages, results, assignments,
+   feedback, the projector view. Unlayered, so it wins over hub.css.
+   Every selector is one .teach- class (plus elements/states); colours are
+   tokens only. Heat and app colours come from hub.css classes.
+   ===================================================================== */
+
+/* ------------------------------------------------------------- tables
+   dataTable() gives every table the class "stack" (records on phones), and
+   hub.css also has a legacy helper .stack { display: grid }. On wide screens
+   that turns thead and tbody into separate tables whose columns no longer
+   line up. Our tables carry .teach-table and stay real tables there. */
+@media (min-width: 720px) {
+  .teach-table { display: table; }
+}
+
+/* ------------------------------------------------------------ class mark */
+.teach-mark {
+  display: inline-grid; place-items: center; flex: none;
+  width: 2.75rem; height: 2.75rem; border-radius: var(--r-2);
+  background: var(--raised-3); border: 1px solid var(--line-2);
+  font: 760 .95rem/1 var(--sans); letter-spacing: -.02em; color: var(--ink);
+}
+
+/* --------------------------------------------- disclosures used as sections */
+.teach-archive, .teach-past, .teach-removed { margin-top: var(--s-6); }
+.teach-sumtitle { display: inline-flex; align-items: center; gap: .55rem; font-size: var(--fs-h3); font-weight: 680; }
+.teach-count { color: var(--ink-3); font-weight: 600; font-size: .9rem; font-variant-numeric: tabular-nums; }
+.teach-first { margin-bottom: var(--s-6); }
+.teach-subhead { margin: var(--s-5) 0 var(--s-3); font-size: var(--fs-small); font-weight: 650; color: var(--ink-2); }
+.teach-subhead:first-of-type { margin-top: 0; }
+
+/* ------------------------------------------------------------ actions */
+.teach-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.teach-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.teach-push { display: inline-flex; margin-left: var(--s-2); padding-left: var(--s-3); border-left: 1px solid var(--line-1); }
+@media (max-width: 559.98px) {
+  .teach-actions { width: 100%; }
+  .teach-group { display: flex; width: 100%; }
+  .teach-push { margin-left: auto; padding-left: 0; border-left: 0; }
+}
+.teach-inline-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3); }
+.teach-grow { flex: 1 1 11rem; min-width: 0; }
+.teach-copy { display: flex; gap: var(--s-2); }
+.teach-copy > input { flex: 1 1 auto; min-width: 0; }
+.teach-copy > .btn { flex: none; }
+
+/* -------------------------------------------------------------- charts
+   The SVG's own week labels scale with the chart; ours are HTML below it. */
+.teach-chart { display: grid; gap: var(--s-1); }
+.teach-chart text { display: none; }
+.teach-axis { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); column-gap: .67%; margin-top: calc(-1 * var(--s-3)); color: var(--ink-3); font-size: .72rem; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.teach-axis-now { color: var(--ink); font-weight: 700; }
+.teach-chart-empty { padding: var(--s-4) 0; }
+.teach-chartpanel { display: grid; gap: var(--s-3); height: 100%; align-content: space-between; }
+.teach-stats2 { grid-template-columns: repeat(2, minmax(0, 1fr)); height: 100%; }
+@media (min-width: 720px) and (max-width: 1099.98px) {
+  .teach-results th, .teach-results td { padding-inline: .55rem; }
+}
+.teach-charttitle { color: var(--ink-2); font-size: var(--fs-meta); font-weight: 600; }
+
+/* -------------------------------------------------------- overview grid
+   Wide screens: a calm monochrome heat grid with a sticky head row.
+   Phones (< 720px): dataTable turns every student into a record with a
+   small meter per app - nothing scrolls sideways. */
+.teach-matrix { table-layout: fixed; }
+/* Full ink on the light heat levels keeps the numbers readable (heat-4/5 set their own dark text). */
+.teach-cell { display: block; color: var(--ink); text-decoration: none; border-radius: var(--r-1); }
+.teach-heat {
+  display: grid; place-items: center; height: 2.25rem; max-width: 5rem; margin-inline: auto; border-radius: var(--r-1);
+  font: 650 .8rem/1 var(--sans); font-variant-numeric: tabular-nums;
+}
+.teach-started { box-shadow: inset 0 0 0 1px var(--line-3); color: var(--ink-2); }
+.teach-cell:hover { box-shadow: 0 0 0 2px var(--line-3); }
+.teach-mini { display: none; }
+.teach-mini-text { color: var(--ink-2); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.teach-mini-none { grid-column: 1 / -1; color: var(--ink-3); font-size: var(--fs-meta); }
+@media (min-width: 720px) {
+  .teach-matrix th {
+    position: sticky; top: var(--topbar); z-index: 2;
+    padding: .65rem .25rem; background: var(--raised-1); box-shadow: inset 0 -1px 0 var(--line-2);
+    vertical-align: bottom; text-align: center; white-space: normal; hyphens: auto; overflow-wrap: anywhere;
+    font-size: .75rem; line-height: 1.2; color: var(--ink-2);
+  }
+  .teach-matrix th:first-child { width: 10.5rem; padding-left: var(--s-4); text-align: left; border-top-left-radius: var(--r-2); }
+  .teach-matrix th:last-child { border-top-right-radius: var(--r-2); }
+  .teach-matrix td { padding: .2rem .25rem; text-align: center; }
+  .teach-matrix td:first-child { padding-left: var(--s-4); text-align: left; font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .teach-matrix td:last-child { padding-right: var(--s-3); }
+  .teach-matrix tbody tr:hover { background: transparent; }
+}
+@media (min-width: 1200px) {
+  .teach-matrix th:first-child { width: 13rem; }
+}
+@media (max-width: 719.98px) {
+  .teach-heat { display: none; }
+  .teach-cell { padding: .15rem 0; }
+  .teach-mini { display: grid; grid-template-columns: minmax(0, 1fr) 2.75rem; align-items: center; gap: var(--s-3); }
+}
+.teach-legend { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5); margin-top: var(--s-3); color: var(--ink-3); font-size: var(--fs-meta); }
+.teach-legend-item { display: inline-flex; align-items: center; gap: .3rem; }
+.teach-swatch { display: inline-block; width: .9rem; height: .9rem; border-radius: 3px; }
+@media (max-width: 719.98px) { .teach-legend { display: none; } }
+
+/* ------------------------------------------------- rows with numbers */
+.teach-counts { display: block; color: var(--ink-3); }
+.teach-done { display: grid; grid-template-columns: 4.5rem auto; align-items: center; gap: var(--s-2); color: var(--ink-2); font-size: var(--fs-meta); }
+@media (max-width: 559.98px) {
+  .teach-done { grid-template-columns: auto; }
+  .teach-done > svg { display: none; }
+}
+.teach-prog { display: grid; grid-template-columns: minmax(3rem, 4.5rem) auto; align-items: center; gap: var(--s-2); min-width: 7rem; }
+.teach-progrow { display: grid; grid-template-columns: 4.5rem auto; align-items: center; gap: var(--s-2); }
+@media (max-width: 559.98px) {
+  .teach-progrow { grid-template-columns: auto; }
+  .teach-progrow > svg { display: none; }
+}
+.teach-person { display: inline-flex; align-items: center; gap: .6rem; min-width: 0; }
+
+/* ------------------------------------------------- filter (segmented links) */
+.teach-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: var(--r-btn); background: var(--raised-2); border: 1px solid var(--line-1); }
+.teach-seg > a {
+  display: inline-flex; align-items: center; gap: .45rem; min-height: 2.5rem; padding: 0 .85rem;
+  border-radius: calc(var(--r-btn) - 2px); color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: .9rem;
+  transition: background-color var(--t-1), color var(--t-1);
+}
+.teach-seg > a:hover { background: var(--raised-3); color: var(--ink); }
+.teach-seg > a[aria-current="page"] { background: var(--ink); color: var(--ink-on-ink); }
+.teach-seg-n { font-size: .8rem; font-variant-numeric: tabular-nums; opacity: .72; }
+@media (pointer: coarse) { .teach-seg > a { min-height: var(--tap); } }
+
+/* ----------------------------------------------------- join and invite */
+.teach-join { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4) var(--s-5); align-items: start; }
+.teach-join-qr { display: block; transition: box-shadow var(--t-1); }
+.teach-join-qr:hover { box-shadow: 0 0 0 2px var(--line-3); }
+.teach-join-info { display: grid; gap: var(--s-2); align-content: start; }
+.teach-join-wide { grid-column: 1 / -1; }
+.teach-join-new { grid-column: 1 / -1; display: grid; gap: var(--s-2); padding-top: var(--s-4); border-top: 1px solid var(--line-1); }
+@media (max-width: 559.98px) {
+  .teach-join-qr { width: 6.5rem; height: 6.5rem; padding: .4rem; }
+}
+.teach-qrfold { border-bottom: 1px solid var(--line-1); }
+.teach-joinpage { gap: var(--s-5); }
+
+/* ----------------------------------------------------- projector (QR)
+   Its own shell without navigation: a thin bar, then one huge thing.
+   Phones and portrait screens stack; a landscape beamer gets the code on
+   the left and everything to read on the right, without scrolling. */
+.teach-qrbar { grid-area: bar; display: flex; align-items: center; gap: var(--s-2); height: 3rem; padding: 0 var(--s-2); background: var(--ground); border-bottom: 1px solid var(--line-1); }
+.teach-qrbar-title { display: flex; align-items: baseline; gap: .6rem; flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 650; }
+.teach-qrbar-title > small { color: var(--ink-3); font-weight: 500; }
+.teach-qrstage { grid-area: stage; min-height: 0; overflow-y: auto; outline: none; }
+.teach-projector { min-height: 100%; padding-block: clamp(var(--s-4), 4vh, var(--s-7)); grid-template-areas: "title" "qr" "text"; }
+.teach-qrtitle { grid-area: title; }
+.teach-qrcode { grid-area: qr; }
+.teach-qrtext, .teach-qrempty { grid-area: text; display: grid; justify-items: center; gap: var(--s-3); }
+.teach-qrlead { margin-inline: 0; }
+.teach-qrlink { max-width: 44rem; font: 600 clamp(.85rem, .7rem + .8vw, 1.35rem)/1.4 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+.teach-qrcount { font-weight: 720; font-size: clamp(1.1rem, .9rem + 1vw, 1.75rem); font-variant-numeric: tabular-nums; }
+.teach-qrflash { margin: var(--s-3) var(--gutter) 0; }
+.teach-qrform { justify-content: center; }
+@media (min-width: 900px) and (min-aspect-ratio: 5/4) {
+  .teach-projector-qr {
+    grid-template-columns: auto minmax(0, 34rem);
+    grid-template-rows: 1fr auto auto 1fr;
+    grid-template-areas: "qr ." "qr title" "qr text" "qr .";
+    justify-content: center; justify-items: start; align-content: center;
+    column-gap: clamp(2.5rem, 5vw, 6rem); row-gap: var(--s-5); text-align: left;
+  }
+  .teach-qrcode { width: min(44vw, 72dvh, 46rem); }
+  .teach-qrtext { justify-items: start; }
+  .teach-qrcount { font-size: clamp(1.4rem, 1rem + 1.2vw, 2.25rem); }
+}
+
+/* ------------------------------------------------------------ results */
+.teach-pager { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--s-3); margin: calc(-1 * var(--s-3)) 0 var(--s-6); }
+.teach-pager > a { justify-self: start; max-width: 100%; }
+.teach-pager > :last-child { justify-self: end; }
+.teach-pager-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teach-resultlist { border-top: 1px solid var(--line-1); }
+.teach-result-title { display: grid; gap: .1rem; flex: 1 1 auto; min-width: 0; }
+.teach-yes { color: var(--ok); font-weight: 760; }
+.teach-no { color: var(--danger); font-weight: 760; }
+
+/* ----------------------------------------------------------- feedback */
+.teach-fb-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-1) var(--s-4); margin-top: var(--s-2); }
+.teach-fbform { max-width: none; gap: var(--s-4); }
+
+/* -------------------------------------------------------- assignments */
+.teach-fixedapp { display: inline-flex; align-items: center; gap: .6rem; min-height: 3rem; font-weight: 650; }
+.teach-start { max-width: 22rem; }
+.teach-dates { align-items: start; }
+.teach-metaapp { color: var(--ink); font-weight: 600; }
+.teach-note { max-width: var(--w-text); }
+.teach-narrow { max-width: 46rem; }
+.teach-due { display: flex; align-items: center; gap: var(--s-3); }
+.teach-due > div { display: grid; gap: .1rem; }
+
+/* ---------------------------------------------- settings and quiet zones */
+/* a choice as stacked options on phones, as one pill row on wider screens */
+@media (max-width: 559.98px) {
+  .teach-choice { display: grid; grid-template-columns: minmax(0, 1fr); }
+}
+.teach-switch { padding: var(--s-3) var(--s-4); border: 1px solid var(--line-2); border-radius: var(--r-btn); background: var(--raised-1); }
+.teach-switch-text { display: grid; gap: .15rem; font-weight: 640; }
+.teach-switch-text > small { color: var(--ink-3); font-size: var(--fs-meta); font-weight: 400; }
+.teach-reset, .teach-leave { padding: clamp(var(--s-4), 3vw, var(--s-5)); border-radius: var(--r-2); }
