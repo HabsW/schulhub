@@ -1,0 +1,147 @@
+/* =====================================================================
+   Apps (package B): "Meine Apps", a new app, the app page, uploads, the
+   source viewer, and the parts the review workbench shares (check
+   reports, history, what an app declares).
+   Unlayered: wins over hub.css. One class per selector, prefixed apps-.
+   Tokens only - no colours of its own (see DESIGN.md).
+   ===================================================================== */
+
+/* ------------------------------------------------------------ badges */
+.apps-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .3rem; vertical-align: middle; font-weight: 400; }
+.apps-rowbadges { display: flex; margin-top: .35rem; }
+
+/* ------------------------------------------------------------ forms */
+.apps-new { display: grid; gap: var(--s-7); align-items: start; }
+@media (min-width: 1000px) { .apps-new { grid-template-columns: minmax(0, 40rem) minmax(0, 22rem); justify-content: space-between; } }
+.apps-aside { display: grid; gap: var(--s-3); justify-items: start; padding: clamp(var(--s-4), 3vw, var(--s-5)); border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+.apps-aside > h2 { font-size: var(--fs-h3); }
+.apps-form { max-width: 40rem; }
+.apps-grades { min-width: 0; }
+.apps-grade-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); }
+.apps-grade-row > label { font-weight: 500; color: var(--ink-2); }
+.apps-grade-row > select { width: auto; min-width: 5.5rem; }
+.apps-switch { padding: var(--s-3) var(--s-4); border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+.apps-switch > span { display: grid; gap: .15rem; }
+.apps-switch small { color: var(--ink-3); font-size: var(--fs-meta); font-weight: 400; }
+
+/* ------------------------------------------------------------ app page */
+.apps-strip { margin-bottom: var(--s-7); }
+.apps-fresh { margin-bottom: var(--s-6); }
+.apps-more { flex: none; }
+
+/* versions */
+.apps-vnum { display: grid; place-items: center; flex: none; width: 2.75rem; height: 2.75rem; border-radius: var(--r-btn); border: 1px solid var(--line-2); font: 700 .95rem/1 var(--mono); color: var(--ink-2); }
+.apps-vnum-live { border-color: var(--ok-line); background: var(--ok-tint); color: var(--ok); }
+.apps-version { align-items: flex-start; }
+.apps-vmain { flex: 1 1 22rem; }
+.apps-vmeta { display: block; }
+.apps-nobr { white-space: nowrap; }
+.apps-note { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: .2rem; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.apps-check { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; margin-top: .4rem; }
+.apps-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--s-1); }
+@media (max-width: 559.98px) { .apps-actions { justify-content: flex-start; } }
+/* keeps the row's last three tools in line when a row has no delete button */
+.apps-iconspace { display: inline-block; flex: none; width: 2.25rem; }
+@media (pointer: coarse) { .apps-iconspace { width: var(--tap); } }
+@media (max-width: 559.98px) { .apps-iconspace { display: none; } }
+/* a destructive action that stays quiet until hovered */
+.apps-quietdanger { border-color: transparent; }
+.apps-quietdanger:hover { border-color: var(--danger); }
+
+/* upload */
+.apps-upload { display: grid; gap: var(--s-4); }
+.apps-notefield { max-width: 40rem; }
+.apps-drop-title { color: var(--ink); font-size: 1.02rem; }
+.apps-drop-coarse { display: none; }
+@media (pointer: coarse) { .apps-drop-fine { display: none; } .apps-drop-coarse { display: inline; } }
+.apps-progress { display: grid; gap: var(--s-3); padding: var(--s-4); border: 1px solid var(--line-2); border-radius: var(--r-2); background: var(--raised-1); }
+.apps-progress-text { font-weight: 600; overflow-wrap: anywhere; }
+.apps-progress-ok { border-color: var(--ok-line); background: var(--ok-tint); }
+.apps-progress-error { border-color: var(--danger-line); background: var(--danger-tint); }
+.apps-progress-stopped { border-style: dashed; }
+.apps-quota { max-width: 28rem; }
+
+/* classes */
+.apps-cls { align-items: flex-start; }
+.apps-cls-actions { justify-content: flex-start; margin-top: var(--s-3); }
+.apps-reason { display: grid; gap: .1rem; margin-top: .4rem; padding: .1rem 0 .1rem var(--s-3); border-left: 2px solid var(--danger-line); color: var(--ink); }
+.apps-submit { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s-3); margin-top: var(--s-4); }
+.apps-submit > .field { flex: 1 1 16rem; min-width: 0; }
+.apps-after { margin-top: var(--s-4); }
+.apps-sub { display: grid; gap: var(--s-2); margin-top: var(--s-5); padding-top: var(--s-5); border-top: 1px solid var(--line-1); }
+
+/* usage */
+.apps-usage { margin-top: var(--s-4); }
+.apps-axis { display: flex; justify-content: space-between; margin-top: var(--s-1); color: var(--ink-3); font-size: var(--fs-meta); }
+.apps-statword { display: block; padding-top: .35rem; font-size: 1.05rem; font-weight: 700; letter-spacing: 0; line-height: 1.25; }
+
+/* history */
+.apps-comment { display: grid; gap: var(--s-3); margin-top: var(--s-4); }
+.apps-comment-tools { margin-top: var(--s-1); }
+
+/* ------------------------------------------------- check reports (shared) */
+.apps-report { display: grid; gap: var(--s-3); margin: var(--s-2) 0; padding: 0; list-style: none; }
+.apps-report-item { display: grid; grid-template-columns: 1.25rem minmax(0, 1fr); gap: var(--s-3); align-items: start; }
+.apps-report-text { display: grid; gap: .1rem; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.apps-level { display: block; margin-top: .12rem; }
+.apps-level-error { color: var(--danger); }
+.apps-level-warning { color: var(--wait); }
+.apps-level-note { color: var(--ink-3); }
+.apps-report-ok { display: flex; gap: var(--s-2); align-items: flex-start; color: var(--ink-2); }
+
+/* what an app declares and stores (shared with the workbench) */
+.apps-declared { display: grid; gap: var(--s-5); }
+.apps-declared h3 { margin-bottom: var(--s-1); }
+.apps-use { display: grid; place-items: center; flex: none; width: 2.25rem; height: 2.25rem; border-radius: 50%; border: 1px solid var(--line-2); color: var(--ink-2); }
+.apps-emoji { display: grid; place-items: center; flex: none; width: 2.25rem; height: 2.25rem; font-size: 1.3rem; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", var(--sans); }
+.apps-hint { margin-top: var(--s-2); color: var(--ink-3); font-size: var(--fs-meta); }
+.apps-filelist { max-height: 26rem; overflow: auto; }
+
+/* ------------------------------------------------------------ source viewer */
+.apps-vnote { display: grid; gap: .3rem; max-width: var(--w-text); margin-bottom: var(--s-5); padding: var(--s-1) 0 var(--s-1) var(--s-4); border-left: 2px solid var(--line-3); }
+.apps-reportbox { margin-bottom: var(--s-6); }
+.apps-src { display: grid; gap: var(--s-4); align-items: start; }
+@media (min-width: 900px) { .apps-src { grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr); gap: var(--s-5); } }
+.apps-srcfiles { min-width: 0; border: 1px solid var(--line-1); border-radius: var(--r-2); background: var(--raised-1); }
+.apps-srcsum { display: flex; align-items: center; gap: var(--s-2); min-height: var(--tap); padding: 0 var(--s-4); cursor: pointer; list-style: none; font-weight: 650; }
+.apps-srcsum::-webkit-details-marker { display: none; }
+.apps-srcsum::after { content: ""; flex: none; width: .5rem; height: .5rem; margin-left: var(--s-1); border-right: 1.5px solid var(--ink-3); border-bottom: 1.5px solid var(--ink-3); transform: rotate(45deg) translateY(-2px); transition: transform var(--t-2) var(--ease); }
+.apps-srcfiles[open] > summary::after { transform: rotate(225deg) translateY(-2px); }
+.apps-srccur { flex: 1 1 auto; min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--ink-3); font: 500 var(--fs-meta)/1.2 var(--mono); }
+.apps-srcfiles > nav { padding: var(--s-2); border-top: 1px solid var(--line-1); max-height: 60dvh; overflow: auto; overscroll-behavior: contain; }
+@media (min-width: 900px) {
+  .apps-srcfiles { position: sticky; top: calc(var(--topbar) + var(--s-4)); }
+  .apps-srcfiles > nav { max-height: calc(100dvh - var(--topbar) - var(--s-8)); }
+}
+/* Wide screens: the file list is always visible (where the browser can style
+   the content of a closed <details>); phones keep it collapsed above the code. */
+@supports selector(::details-content) {
+  @media (min-width: 900px) {
+    .apps-srcfiles::details-content { content-visibility: visible; display: block; }
+    .apps-srcsum { display: none; }
+    .apps-srcfiles > nav { border-top: 0; }
+  }
+}
+.apps-tree { margin: 0; padding: 0; list-style: none; }
+.apps-subtree { padding-left: var(--s-3); margin-left: var(--s-3); border-left: 1px solid var(--line-1); }
+.apps-folder { display: flex; align-items: center; gap: .45rem; min-height: 2.25rem; padding: 0 var(--s-2); border-radius: var(--r-1); cursor: pointer; list-style: none; color: var(--ink-2); font-size: var(--fs-small); font-weight: 600; }
+.apps-folder::-webkit-details-marker { display: none; }
+.apps-folder:hover { background: var(--raised-2); color: var(--ink); }
+.apps-file { display: flex; align-items: center; gap: .45rem; min-width: 0; min-height: 2.25rem; padding: 0 var(--s-2); border-radius: var(--r-1); color: var(--ink-2); font-size: var(--fs-small); text-decoration: none; }
+.apps-fname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps-file > small { flex: none; color: var(--ink-3); font-size: var(--fs-meta); }
+.apps-file:hover { background: var(--raised-2); color: var(--ink); }
+.apps-file[aria-current="page"] { background: var(--raised-3); color: var(--ink); font-weight: 650; }
+.apps-file-bin { color: var(--ink-3); }
+.apps-file-bin:hover { background: none; color: var(--ink-3); }
+@media (pointer: coarse) { .apps-file, .apps-folder { min-height: var(--tap); } }
+
+.apps-srcview { display: grid; gap: var(--s-3); min-width: 0; }
+.apps-filehead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s-1) var(--s-3); }
+.apps-filehead > code { font-weight: 650; overflow-wrap: anywhere; }
+/* the code: escaped text in <pre>, line numbers are CSS counters (not copied, no JS) */
+.apps-code { max-height: 78dvh; padding: var(--s-3) 0; counter-reset: line; }
+.apps-code > code { display: block; min-width: max-content; font: inherit; }
+.apps-line { display: block; padding-right: var(--s-5); white-space: pre; counter-increment: line; scroll-margin-top: 6rem; }
+.apps-line::before { content: counter(line); position: sticky; left: 0; display: inline-block; box-sizing: content-box; width: 4ch; margin-right: 1.25ch; padding: 0 1ch 0 var(--s-2); text-align: right; color: var(--ink-3); background: var(--raised-1); border-right: 1px solid var(--line-1); user-select: none; }
+.apps-line:target { background: var(--wait-tint); }

@@ -260,6 +260,20 @@ function createAccess(db) {
     canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
+  // ----- package B -----
+  /**
+   * The request of one app in one class that this user may open in the review
+   * workbench: the user may change the class (its teacher or the admin, never
+   * while archived) and the app's request there is waiting - or was returned,
+   * which the workbench shows read-only. Returns the class_apps row or null.
+   */
+  function reviewRequest(user, classId, appId) {
+    if (typeof classId !== 'string' || typeof appId !== 'string' || !canChangeClass(user, classId)) return null;
+    return db.get(
+      "SELECT * FROM class_apps WHERE class_id = ? AND app_id = ? AND request_state IN ('waiting','returned') AND requested_version_id IS NOT NULL",
+      classId, appId
+    ) || null;
+  }
 
   return {
     isAdmin, isStaff, classRole, isArchived,
@@ -273,6 +287,7 @@ function createAccess(db) {
     canJoinRoom,
     visibleApps, visibleClasses,
     canLeaveClass, canSeeClassResults, canMarkFeedbackRead, // package A
+    reviewRequest, // package B
   };
 }
 
