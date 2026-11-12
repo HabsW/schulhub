@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiz-Werkstatt</title>
+<link rel="stylesheet" href="hub-ui.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="hub-ui">
+<main class="hub-page app">
+  <header class="head">
+    <p class="hub-eyebrow" id="where">Quiz-Werkstatt</p>
+    <h1 id="title">Quiz-Werkstatt</h1>
+    <p class="hub-muted" id="who">Verbinde mit dem Hub …</p>
+  </header>
+  <p class="mode-note" id="mode-note" hidden></p>
+
+  <!-- Übersicht -->
+  <section data-view="menu" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow">Quiz</p>
+      <p class="hero-title" id="quiz-info"></p>
+      <p class="hub-muted" id="best"></p>
+      <button class="hub-btn hub-primary hub-big" id="start" type="button">Quiz starten</button>
+    </div>
+    <p class="teacher-note" id="teacher-note" hidden></p>
+    <div class="grid">
+      <section class="hub-card" aria-labelledby="h-last">
+        <h2 id="h-last">Deine letzten Runden</h2>
+        <ul class="history" id="history"></ul>
+        <p class="hub-muted small" id="history-empty" hidden>Noch keine Runde gespielt.</p>
+      </section>
+      <section class="hub-card" aria-labelledby="h-ach">
+        <h2 id="h-ach">Erfolge</h2>
+        <ul class="achievements" id="achievements"></ul>
+        <p class="hub-muted small" id="ach-empty" hidden>Erfolge siehst du, wenn die App im Hub läuft.</p>
+      </section>
+    </div>
+  </section>
+
+  <!-- Keine Fragen -->
+  <section data-view="empty" class="hub-card empty" hidden>
+    <h2>Noch keine Fragen</h2>
+    <p class="hub-muted" id="empty-text">Deine Lehrkraft trägt die Fragen im Hub ein. Schau später noch einmal vorbei.</p>
+  </section>
+
+  <!-- Frage -->
+  <section data-view="question" class="hub-stack" hidden>
+    <div class="quiz-top">
+      <span class="count" id="count"></span>
+      <button class="hub-btn hub-quiet" id="cancel" type="button">Abbrechen</button>
+    </div>
+    <progress class="hub-progress" id="quiz-progress" max="1" value="0" aria-label="Fortschritt im Quiz"></progress>
+    <div class="hub-card question-card">
+      <h2 class="question" id="question" tabindex="-1"></h2>
+      <div class="choices" id="choices" role="group" aria-labelledby="question"></div>
+      <form class="answer" id="answer-form" autocomplete="off" hidden>
+        <label class="sr-only" for="answer">Deine Antwort</label>
+        <input class="hub-input" id="answer" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" placeholder="Deine Antwort …">
+        <button class="hub-btn hub-primary" type="submit">Prüfen</button>
+      </form>
+      <p class="feedback" id="feedback" role="status"></p>
+      <button class="hub-btn hub-primary hub-big next" id="next" type="button" hidden>Weiter</button>
+    </div>
+    <p class="hub-muted small keys" id="keys"></p>
+  </section>
+
+  <!-- Ergebnis -->
+  <section data-view="done" class="hub-stack" hidden>
+    <div class="hub-card hero">
+      <p class="hub-eyebrow">Quiz beendet</p>
+      <p class="big-num" id="score"></p>
+      <p class="verdict" id="verdict"></p>
+      <p class="hub-muted small" id="save-state" role="status"></p>
+      <div class="actions">
+        <button class="hub-btn hub-primary hub-big" id="again" type="button">Noch einmal</button>
+        <button class="hub-btn hub-big" id="back" type="button">Zur Übersicht</button>
+      </div>
+    </div>
+    <section class="hub-card" aria-labelledby="h-review">
+      <h2 id="h-review">Deine Antworten</h2>
+      <ol class="review" id="review"></ol>
+    </section>
+  </section>
+</main>
+<div class="hub-toast" id="toast" role="status" hidden></div>
+<script src="hub-sdk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

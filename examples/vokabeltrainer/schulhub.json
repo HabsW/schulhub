@@ -1,0 +1,67 @@
+{
+  "name": "Vokabeltrainer",
+  "description": "Vokabeln üben – die Lehrkraft legt die Wörter für die Klasse im Hub fest.",
+  "category": "Englisch",
+  "grades": [5, 10],
+  "settings": [
+    {
+      "key": "woerter",
+      "label": "Wortliste",
+      "type": "pairs",
+      "columns": ["Deutsch", "Englisch"],
+      "help": "Ein Paar pro Zeile: deutsch = englisch. Mehrere richtige Antworten mit / trennen, z. B. die Stadt = town / city.",
+      "maxItems": 200,
+      "default": [
+        ["der Hund", "dog"],
+        ["die Katze", "cat"],
+        ["das Haus", "house"],
+        ["die Schule", "school"],
+        ["der Freund", "friend"],
+        ["das Buch", "book"],
+        ["das Wasser", "water"],
+        ["der Apfel", "apple"],
+        ["die Stadt", "town / city"],
+        ["das Fenster", "window"],
+        ["die Uhr", "clock / watch"],
+        ["der Stuhl", "chair"],
+        ["der Tisch", "table"],
+        ["der Vogel", "bird"],
+        ["das Fahrrad", "bike / bicycle"],
+        ["gehen", "to go"]
+      ]
+    },
+    {
+      "key": "richtung",
+      "label": "Abfragerichtung",
+      "type": "choice",
+      "options": [
+        { "value": "de-en", "label": "Deutsch → Englisch" },
+        { "value": "en-de", "label": "Englisch → Deutsch" },
+        { "value": "gemischt", "label": "Gemischt" }
+      ],
+      "default": "de-en"
+    },
+    {
+      "key": "runde",
+      "label": "Wörter pro Runde",
+      "type": "number",
+      "min": 3,
+      "max": 30,
+      "default": 10
+    }
+  ],
+  "achievements": [
+    { "id": "erste-runde", "title": "Erste Runde", "description": "Deine erste Übungsrunde geschafft.", "emoji": "⭐" },
+    { "id": "fehlerfrei", "title": "Fehlerfrei", "description": "Eine ganze Runde ohne Fehler.", "emoji": "💯" },
+    { "id": "zehn-in-folge", "title": "10 in Folge", "description": "Zehn Wörter hintereinander richtig.", "emoji": "🔥" },
+    { "id": "alles-gelernt", "title": "Alles gelernt", "description": "Jedes Wort der Liste sitzt.", "emoji": "🏆" }
+  ],
+  "results": {
+    "labels": {
+      "wort": "Wort",
+      "antwort": "Antwort",
+      "loesung": "Lösung",
+      "richtig": "Richtig"
+    }
+  }
+}

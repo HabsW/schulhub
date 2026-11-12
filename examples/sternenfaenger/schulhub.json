@@ -1,0 +1,37 @@
+{
+  "name": "Sternenfänger",
+  "description": "Fang die Sterne, weich den Meteoriten aus. Zehn Level, Bestenliste, Erfolge.",
+  "category": "Freizeit",
+  "grades": [3, 13],
+  "settings": [
+    {
+      "key": "schwierigkeit",
+      "label": "Schwierigkeit",
+      "type": "choice",
+      "help": "Jede Schwierigkeit hat ihre eigene Bestenliste.",
+      "options": [
+        { "value": "leicht", "label": "Leicht – langsamer, 5 Leben" },
+        { "value": "normal", "label": "Normal – 3 Leben" },
+        { "value": "schwer", "label": "Schwer – schneller, 2 Leben" }
+      ],
+      "default": "normal"
+    }
+  ],
+  "achievements": [
+    { "id": "erster-stern", "title": "Erster Stern", "description": "Den ersten Stern gefangen.", "emoji": "⭐" },
+    { "id": "level-5", "title": "Level 5", "description": "Level 5 erreicht.", "emoji": "🚀" },
+    { "id": "hundert", "title": "100 Punkte", "description": "100 Punkte in einer Runde.", "emoji": "💯" },
+    { "id": "level-10", "title": "Ganz oben", "description": "Level 10 erreicht.", "emoji": "🏆" },
+    { "id": "unberuehrt", "title": "Unberührt", "description": "Level 3 erreicht, ohne ein Leben zu verlieren.", "emoji": "💎", "secret": true }
+  ],
+  "results": {
+    "labels": {
+      "punkte": "Punkte",
+      "level": "Level",
+      "sterne": "Sterne gefangen",
+      "meteore": "Meteoriten getroffen",
+      "sekunden": "Spielzeit (Sekunden)",
+      "schwierigkeit": "Schwierigkeit"
+    }
+  }
+}

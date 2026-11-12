@@ -1,0 +1,64 @@
+{
+  "name": "Quiz-Werkstatt",
+  "description": "Ein Quiz für jedes Fach: Die Lehrkraft schreibt die Fragen im Hub, die Klasse spielt.",
+  "category": "Fächerübergreifend",
+  "grades": [3, 13],
+  "settings": [
+    {
+      "key": "titel",
+      "label": "Titel des Quiz",
+      "type": "text",
+      "maxLength": 60,
+      "default": "Allgemeinwissen"
+    },
+    {
+      "key": "fragen",
+      "label": "Fragen",
+      "type": "list",
+      "help": "Eine Frage pro Zeile: Frage | richtige Antwort | falsche Antwort | falsche Antwort. Ohne falsche Antworten wird die Antwort eingetippt.",
+      "maxItems": 100,
+      "default": [
+        "Wie viele Kontinente gibt es? | 7 | 5 | 6 | 8",
+        "Welches Gas nehmen Pflanzen für die Fotosynthese auf? | Kohlenstoffdioxid | Sauerstoff | Stickstoff | Helium",
+        "Wie heißt die Hauptstadt von Kanada? | Ottawa | Toronto | Vancouver | Montreal",
+        "Was sind 15 % von 200? | 30 | 15 | 20 | 35",
+        "Wie viele Beine hat eine Spinne? | 8",
+        "Welche Zahl ist eine Primzahl? | 13 | 9 | 15 | 21",
+        "Wie heißt der größte Planet unseres Sonnensystems? | Jupiter",
+        "In welchem Jahr fiel die Berliner Mauer? | 1989",
+        "Wer malte die „Mona Lisa“? | Leonardo da Vinci | Michelangelo | Raffael | Rembrandt",
+        "Was ist das Gegenteil von „laut“? | leise"
+      ]
+    },
+    {
+      "key": "modus",
+      "label": "Antworten",
+      "type": "choice",
+      "options": [
+        { "value": "gemischt", "label": "Wie in der Liste: mit falschen Antworten zur Auswahl, sonst eintippen" },
+        { "value": "eingabe", "label": "Alle Antworten eintippen (schwerer)" }
+      ],
+      "default": "gemischt"
+    },
+    {
+      "key": "mischen",
+      "label": "Fragen in zufälliger Reihenfolge",
+      "type": "boolean",
+      "default": true
+    }
+  ],
+  "achievements": [
+    { "id": "erstes-quiz", "title": "Erstes Quiz", "description": "Dein erstes Quiz bis zum Ende gespielt.", "emoji": "⭐" },
+    { "id": "volle-punktzahl", "title": "Volle Punktzahl", "description": "Alle Fragen eines Quiz richtig.", "emoji": "💯" },
+    { "id": "dranbleiben", "title": "Dranbleiben", "description": "Fünf Quizrunden gespielt.", "emoji": "📚" },
+    { "id": "blitzmerker", "title": "Blitzmerker", "description": "Alle Fragen richtig – in weniger als 5 Sekunden pro Frage.", "emoji": "⚡", "secret": true }
+  ],
+  "results": {
+    "labels": {
+      "frage": "Frage",
+      "antwort": "Antwort",
+      "loesung": "Lösung",
+      "richtig": "Richtig"
+    }
+  }
+}
