@@ -93,6 +93,10 @@ function createHubApp(ctx) {
   require('./routes/privacy')(app, ctx);
   require('./routes/admin')(app, ctx);
   require('./routes/docs')(app, ctx);
+  require('./routes/teaching')(app, ctx);
+  require('./routes/review')(app, ctx);
+  require('./routes/studio')(app, ctx);
+  require('./routes/school')(app, ctx);
 
   app.use((req, res, next) => next(new HttpError(404, 'Diese Seite gibt es nicht – oder du hast keinen Zugriff darauf.')));
 

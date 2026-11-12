@@ -24,8 +24,9 @@
     });
   }
 
+  function showNote() { if (note) note.hidden = false; }
   var current = fetchToken(true);
-  current.catch(function () { note.hidden = false; });
+  current.catch(showNote);
 
   function reply(message) {
     frame.contentWindow.postMessage(message, appOrigin);
@@ -99,21 +100,32 @@
       current = fetchToken(false);
       current.then(
         function (d) { reply({ hub: 'token', id: msg.id, token: d.token, expiresIn: d.expiresIn }); },
-        function () { note.hidden = false; reply({ hub: 'error', id: msg.id }); }
+        function () { showNote(); reply({ hub: 'error', id: msg.id }); }
       );
     }
   });
+
+  // The editor reloads the app after saving: <button data-reload-app>.
+  document.addEventListener('click', function (event) {
+    if (event.target.closest && event.target.closest('[data-reload-app]')) reloadApp();
+  });
+  function reloadApp() {
+    stage.classList.remove('ready');
+    frame.src = frame.src;
+  }
+  window.HubPlayer = { reload: reloadApp };
 
   // ------------------------------------------------------- loading, fullscreen
   frame.addEventListener('load', function () { stage.classList.add('ready'); });
   setTimeout(function () { stage.classList.add('ready'); }, 4000);
 
+  // Pages that embed the stage (review, editor) may leave out the fullscreen button.
   var fs = document.getElementById('fullscreen');
-  fs.addEventListener('click', function () {
+  if (fs) fs.addEventListener('click', function () {
     if (document.fullscreenElement) document.exitFullscreen();
     else if (frame.requestFullscreen) frame.requestFullscreen().catch(function () {});
   });
   document.addEventListener('fullscreenchange', function () {
-    fs.setAttribute('aria-label', document.fullscreenElement ? 'Vollbild beenden' : 'Vollbild');
+    if (fs) fs.setAttribute('aria-label', document.fullscreenElement ? 'Vollbild beenden' : 'Vollbild');
   });
 })();
