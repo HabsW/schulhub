@@ -173,6 +173,23 @@ test('Anmeldung: wer an der Schuladresse flutet, sperrt niemanden aus', async ()
   }
 });
 
+test('Ohne Anmeldung: eine lange Adresse bläht die gespeicherte Sitzung nicht auf', async () => {
+  const h = await startHub();
+  try {
+    const X = h.browser();
+    assert.equal((await X.get(`/klassen?${'x'.repeat(8000)}`)).status, 302);
+    assert.ok(!(await X.page('/')).text.includes('danach geht es auf der Seite weiter'), 'a long address is not kept');
+    const biggest = h.db.get('SELECT MAX(LENGTH(data)) AS n FROM sessions').n;
+    assert.ok(biggest < 1000, `the largest stored session has ${biggest} bytes`);
+    // A normal Hub link is still remembered for after the sign-in.
+    const P = h.browser();
+    await P.get('/klassen');
+    assert.ok((await P.page('/')).text.includes('danach geht es auf der Seite weiter'));
+  } finally {
+    await h.stop();
+  }
+});
+
 test('Beitreten: falsche Codes anderer an derselben Adresse sperren niemanden aus', async () => {
   // joinFailIp is a trap: should anyone add a per-address limit back under that name, it trips here.
   const h = await startHub({ rate: { joinFail: [2, 60_000], joinFailIp: [5, 60_000] } });

@@ -77,7 +77,10 @@ function createHubApp(ctx) {
   app.use((req, res, next) => {
     if (!req.user && !PUBLIC.has(req.path)) {
       if (req.method === 'GET' && !wantsJson(req)) {
-        req.session.returnTo = req.originalUrl;
+        // Where to go after sign-in. Hub links are short; a longer one is not kept (it would only make
+        // anonymous sessions bigger), and the sign-in then lands on the start page.
+        if (req.originalUrl.length <= 512) req.session.returnTo = req.originalUrl;
+        else delete req.session.returnTo;
         return res.redirect('/');
       }
       return next(new HttpError(401, 'Bitte melde dich an.'));
