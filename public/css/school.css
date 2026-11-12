@@ -22,15 +22,10 @@
 .school-emoji { display: inline-grid; place-items: center; flex: none; width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 1px solid var(--line-2); background: var(--raised-2); font-size: 1.2rem; line-height: 1; }
 
 /* ------------------------------------------------------------- tables
-   Workaround for a foundation bug: dataTable() writes class="data stack",
-   and the legacy layout helper .stack { display: grid } in hub.css turns
-   every data table into a grid from 720px up (header and body columns no
-   longer line up). Remove when hub.css is fixed. */
-
-/* Wide tables (many columns, buttons) stay records up to tablet width,
+   Wide tables (many columns, buttons) stay records up to tablet width,
    exactly like dataTable() does below 720px. */
 @media (max-width: 1023.98px) {
-  .table-wrap > .school-records { display: block; }
+  .school-records { display: block; }
   .school-records > thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .school-records > tbody { display: block; }
   .school-records tr { display: grid; gap: .45rem; padding: var(--s-4); border-top: 1px solid var(--line-1); }
@@ -74,6 +69,8 @@
 /* --------------------------------------------------- search */
 .school-search { display: flex; gap: var(--s-2); margin-bottom: var(--s-6); }
 .school-search > input { flex: 1 1 auto; min-width: 0; min-height: var(--tap); }
+/* From 1200px the top bar shows its own search field: one field on the page is enough. */
+@media (min-width: 1200px) { .school-search { display: none; } }
 
 /* ------------------------------------------ filter bar (also admin) */
 .school-filters { display: grid; gap: var(--s-4); margin-bottom: var(--s-6); padding: var(--s-4); background: var(--raised-1); border: 1px solid var(--line-1); border-radius: var(--r-2); }
@@ -81,6 +78,27 @@
 .school-filter-q { min-width: 0; max-width: 40rem; }
 .school-inline { display: flex; gap: var(--s-2); }
 .school-inline > input { flex: 1 1 auto; min-width: 0; }
+.school-search-btn { flex: none; width: var(--tap); min-width: var(--tap); }
+
+/* Filters that fold away on phones (formKit.filterPanel): a "Filter" bar that
+   names the active filters, the fields below it. From 720px the fields are
+   always shown (where ::details-content exists; elsewhere the bar stays). */
+.school-filters-fold { gap: 0; padding: 0; }
+.school-filterbox > summary { list-style: none; }
+.school-filterbox > summary::-webkit-details-marker { display: none; }
+.school-filterbox-bar { display: flex; align-items: center; gap: var(--s-3); min-height: 3.25rem; padding: var(--s-2) var(--s-4); border-radius: var(--r-2); color: var(--ink); cursor: pointer; }
+.school-filterbox-label { flex: none; font-weight: 680; }
+.school-filterbox-now { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--ink-2); font-size: var(--fs-small); text-overflow: ellipsis; white-space: nowrap; }
+.school-filterbox-chev { color: var(--ink-3); transition: transform var(--t-2) var(--ease); }
+.school-filterbox[open] .school-filterbox-chev { transform: rotate(180deg); }
+.school-filterbox-body { display: grid; gap: var(--s-4); padding: var(--s-2) var(--s-4) var(--s-4); }
+@supports selector(::details-content) {
+  @media (min-width: 720px) {
+    .school-filterbox::details-content { display: block; content-visibility: visible; }
+    .school-filterbox-bar { display: none; }
+    .school-filterbox-body { padding: var(--s-4); }
+  }
+}
 
 /* ------------------------------------------------- pager (also admin) */
 .school-pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: var(--s-3); margin-top: var(--s-4); }
@@ -89,10 +107,11 @@
 
 /* --------------------------------------------------- catalogue */
 .school-fav { display: inline-flex; color: var(--ink-2); }
+/* The add button and the chevron stay on one line; the button's label wraps instead. */
+.school-app-end { flex-wrap: nowrap; }
 /* phones: actions that wrap below a row start under its text, not under its icon */
 @media (max-width: 559.98px) {
   .school-app-end { padding-left: calc(2.75rem + var(--s-4)); }
-  .school-ann-end { padding-left: calc(2.5rem + var(--s-4)); }
 }
 .school-add > summary { list-style: none; }
 .school-add > summary::-webkit-details-marker { display: none; }
@@ -100,9 +119,12 @@
 /* an opened "add to class" choice takes its own line below the app's text */
 .school-app-row:has(.school-add[open]) { flex-wrap: wrap; }
 .school-app-end:has(.school-add[open]) { flex-basis: 100%; justify-content: flex-start; padding-left: calc(2.75rem + var(--s-4)); }
-.school-wrap-btn { max-width: 100%; white-space: normal; text-align: left; line-height: 1.25; padding-block: .45rem; }
+.school-wrap-btn { max-width: 100%; min-width: 0; white-space: normal; text-align: left; line-height: 1.25; padding-block: .45rem; }
 
 /* --------------------------------------------------- announcements */
+/* the form needs less width than the list of announcements next to it */
+.school-ann-grid { display: grid; gap: var(--s-7) var(--s-6); }
+@media (min-width: 1000px) { .school-ann-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); } }
 .school-announcement { align-items: flex-start; }
 
 /* --------------------------------------------------- Meine Daten */

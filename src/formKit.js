@@ -79,6 +79,21 @@ function selectControl(req, { name, id = `f-${name}`, options, value = '', attrs
 }
 
 /**
+ * Filters that fold away on phones: one "Filter" bar names the active filters,
+ * the fields open below it. From 720px up the fields are always shown and the
+ * bar is hidden (CSS, where ::details-content is supported; elsewhere the bar
+ * stays and still works). After a filter was changed the form sends offen=1,
+ * so the panel stays open while the person goes on filtering.
+ * Use inside the filter <form>; summary is plain text.
+ */
+function filterPanel({ summary, open = false, body }) {
+  return html`<details class="school-filterbox"${open ? raw(' open') : ''}>
+      <summary class="school-filterbox-bar">${icon('funnel')}<span class="school-filterbox-label">Filter</span><span class="school-filterbox-now">${summary}</span>${icon('chevronDown', { cls: 'school-filterbox-chev' })}</summary>
+      <div class="school-filterbox-body">${body}</div>
+    </details><input type="hidden" name="offen" value="1">`;
+}
+
+/**
  * Radio buttons as one segmented control, grouped by a fieldset with a legend.
  * scroll: on phones the options stay in one line that scrolls sideways (many options).
  */
@@ -128,6 +143,6 @@ function displaySummary(user) {
 }
 
 module.exports = {
-  queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, likePattern, parseDay, dayStart,
+  queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart,
   DISPLAY_PREFS, displaySummary,
 };
