@@ -5,7 +5,7 @@
 // blocks, and small text helpers. Every permission decision comes from
 // access.js; everything written by people is rendered through html``.
 
-const { html, raw, csrfField, postButton, timeline, badge, field, formValue, icon, barChart } = require('./html');
+const { html, raw, csrfField, postButton, timeline, badge, field, formValue, icon, barChart, flash } = require('./html');
 const { deny, plural, dayKey, formatAgo, formatFullDate, isLocalPath } = require('./util');
 
 const TZ = 'Europe/Berlin';
@@ -137,6 +137,26 @@ function weekChart(bars, label) {
 /** A POST button for a page head: on phones it stretches like the link buttons beside it. */
 const headPostButton = (req, action, label, opts = {}) => html`<span class="teach-stretch">${postButton(req, action, label, { ...opts, block: true })}</span>`;
 
+// ------------------------------------------------------------ form errors
+
+/**
+ * Send a form back to its page with every message at its field and what the
+ * person typed (both for exactly one view of `path`; the error handler only
+ * knows one message per form).
+ */
+function backToForm(req, res, { path, key, errors, fields }) {
+  req.session.formState = { path, fields };
+  req.session[key] = { path, errors };
+  flash(req, errors._all || 'Bitte prüfe die markierten Felder.', 'error');
+  res.redirect(303, path);
+}
+/** The per-field messages a form left for this page (read once). */
+function takeFieldErrors(req, key) {
+  const kept = req.session ? req.session[key] : null;
+  if (req.session) delete req.session[key];
+  return kept && kept.path === req.path ? kept.errors : {};
+}
+
 // --------------------------------------------------------------- returning
 
 /** A local path to return to after a form, limited to the class area; otherwise the fallback. */
@@ -208,6 +228,6 @@ module.exports = {
   loadClass, studentsText, classEyebrow, classMark,
   inputDate, inputTime, inputDateTime, schoolTime, schoolDateTime, deletionDay,
   weeks, weekSums, weekParams, weekBars, weekChart,
-  headPostButton, backTo, percentOf,
+  headPostButton, backTo, percentOf, backToForm, takeFieldErrors,
   feedbackTimeline, feedbackForm,
 };

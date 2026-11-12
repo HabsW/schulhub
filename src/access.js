@@ -260,6 +260,16 @@ function createAccess(db) {
     canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
+  /**
+   * Take an app out of a class (or take back one's own submission): the class's
+   * teachers (and the admin) for any app, the app's owner for their own app if
+   * they can see the class. Archived classes are read-only for everybody.
+   * row: the class_apps row of this class, with the app's owner_id.
+   */
+  function canRemoveFromClass(user, cls, row) {
+    if (!user || !cls || !row || row.class_id !== cls.id || isArchived(cls.id)) return false;
+    return canChangeClass(user, cls.id) || (row.owner_id === user.id && canViewClass(user, cls.id));
+  }
   // ----- package B -----
   /**
    * The request of one app in one class that this user may open in the review
@@ -286,7 +296,7 @@ function createAccess(db) {
     canAnnounce, canSeeAnnouncement, canDeleteAnnouncement,
     canJoinRoom,
     visibleApps, visibleClasses,
-    canLeaveClass, canSeeClassResults, canMarkFeedbackRead, // package A
+    canLeaveClass, canSeeClassResults, canMarkFeedbackRead, canRemoveFromClass, // package A
     reviewRequest, // package B
   };
 }

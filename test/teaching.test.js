@@ -75,10 +75,22 @@ test('Aufgaben: nur Lehrkräfte der Klasse stellen sie – Schüler, fremde Lehr
   assert.equal((await L.post(`/klassen/${c7}/aufgaben`, { app: other.id, titel: 'x' })).status, 404);
   assert.equal(count('SELECT COUNT(*) AS n FROM assignments'), before, 'nothing was created');
 
-  // validation: the due date must come after the start, dates must be real
-  assert.equal((await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, start: '2026-11-12T10:00', faellig: '2026-11-11' })).status, 400);
-  assert.equal((await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, faellig: '2026-02-31' })).status, 400);
-  assert.equal((await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, notiz: 'x'.repeat(1200) })).status, 400);
+  // validation: the due date must come after the start, dates must be real - each message at its field
+  const form = `/klassen/${c7}/aufgaben/neu`;
+  await L.page(form);
+  for (const [fields, message] of [
+    [{ faellig: '2001-01-01' }, 'Die Aufgabe muss nach dem Start fällig sein.'],
+    [{ faellig: '2026-02-31' }, 'Das ist kein gültiges Datum.'],
+    [{ faellig: '2026-12-01', faellig_zeit: '25:99' }, 'Das ist keine gültige Uhrzeit.'],
+    [{ notiz: 'x'.repeat(1200) }, 'Höchstens 1000 Zeichen.'],
+  ]) {
+    const res = await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, titel: 'Bleibt stehen', ...fields });
+    assert.equal(res.status, 303);
+    assert.equal(res.headers.location, form);
+    const again = (await L.page(form)).text;
+    assert.ok(again.includes(`<span class="error-text">${message}</span>`), message);
+    assert.ok(again.includes('value="Bleibt stehen"'), 'typed values are kept');
+  }
 
   const res = await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, titel: '', notiz: 'Drei Runden' });
   assert.equal(res.status, 303);
@@ -218,6 +230,7 @@ test('Lehrkraft-Einladung: nur Lehrkräfte der Klasse erzeugen sie, nur Lehrkrä
   const preview = await O.get(`/beitreten/${invite}`);
   assert.equal(preview.status, 200);
   assert.ok(preview.text.includes('Einladung für Lehrkräfte') && !preview.text.includes('Als Lehrkraft beitreten'));
+  assert.ok(!preview.text.includes('Herr Lehmann') && !preview.text.includes('eingeladen, diese Klasse'), 'no class, no names, no invitation text for students');
   await O.page('/start');
   assert.equal((await O.post(`/beitreten/${invite}`)).status, 400);
   assert.equal(h.hub.ctx.access.classRole(olaf, c7), null);
@@ -384,7 +397,19 @@ test('Überblick und Ergebnisse: nur Ergebnisse aus dieser Klasse; fremde Lehrkr
   await P.api(quiz, p7.token, 'results.add', { title: 'ERGEBNIS-7B', score: 3, maxScore: 4, details: [{ wort: 'Hund', richtig: true }] });
   const p9 = await h.token(P, quiz, c9);
   await P.api(quiz, p9.token, 'results.add', { title: 'ERGEBNIS-9C', score: 1, maxScore: 4 });
-  h.db.run("INSERT INTO results (app_id, user_id, title, score, max_score, class_id, created_at) VALUES (?, ?, 'ERGEBNIS-ALT', 1, 2, NULL, ?)", quiz.id, pia.id, Date.now());
+  // legacy: recorded before version 2, class unknown ('') - shown to the class's teachers
+  h.db.run("INSERT INTO results (app_id, user_id, title, score, max_score, class_id, created_at) VALUES (?, ?, 'ERGEBNIS-ALT', 1, 2, '', ?)", quiz.id, pia.id, Date.now());
+  // made without any class: Paul plays the school-wide release at home, before joining 7b
+  await A.page(`/apps/${quiz.id}`);
+  assert.equal((await A.post(`/apps/${quiz.id}/schulweit`, { an: '1' })).status, 303);
+  const paul = h.addUser('Paul Zuhause', 'student');
+  const PZ = await h.browser().login(paul);
+  const home = await h.token(PZ, quiz);
+  assert.equal(home.class, null, 'no class context');
+  await PZ.api(quiz, home.token, 'results.add', { title: 'ZUHAUSE-OHNE-KLASSE', score: 4, maxScore: 4 });
+  assert.equal(h.db.get("SELECT class_id FROM results WHERE title = 'ZUHAUSE-OHNE-KLASSE'").class_id, null);
+  await A.post(`/apps/${quiz.id}/schulweit`, { an: '0' });
+  await PZ.post(`/beitreten/${joinCode(c7)}`);
 
   const base7 = `/klassen/${c7}/apps/${quiz.id}/ergebnisse`;
   const detail7 = (await L.get(`${base7}/${pia.id}`)).text;
@@ -392,6 +417,10 @@ test('Überblick und Ergebnisse: nur Ergebnisse aus dieser Klasse; fremde Lehrkr
   assert.ok(detail7.includes('Richtig beantwortet'), 'labels from schulhub.json');
   const csv = await L.get(`${base7}.csv`);
   assert.ok(csv.text.includes('ERGEBNIS-7B') && !csv.text.includes('ERGEBNIS-9C'));
+  // nothing made outside a class reaches the class's teacher: list, detail, CSV, overview grid
+  for (const url of [base7, `${base7}/${paul.id}`, `${base7}.csv`]) assert.ok(!(await L.get(url)).text.includes('ZUHAUSE-OHNE-KLASSE'), url);
+  const grid = (await L.get(`/klassen/${c7}`)).text;
+  assert.ok(grid.includes('aria-label="Paul Zuhause, Quiz: begonnen"') && !grid.includes('Paul Zuhause, Quiz: bestes Ergebnis 100'), 'the home result counts nowhere');
   assert.match(csv.headers['content-disposition'], /^attachment; filename="ergebnisse-7b-quiz-\d{4}-\d{2}-\d{2}\.csv"$/);
   assert.ok(csv.text.includes('Fortschritt'), 'progress column');
   const detail9 = (await Y.get(`/klassen/${c9}/apps/${quiz.id}/ergebnisse/${pia.id}`)).text;
@@ -424,7 +453,7 @@ test('Überblick und Ergebnisse: nur Ergebnisse aus dieser Klasse; fremde Lehrkr
   assert.equal((await M.post(`/klassen/${c7}/apps/${quiz.id}/zurueckholen`)).status, 404);
   assert.equal((await L.post(`/klassen/${c7}/apps/${quiz.id}/zurueckholen`)).status, 303);
   assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', c7, quiz.id).status, 'approved');
-  h.db.run('DELETE FROM class_members WHERE user_id = ?', pia.id);
+  h.db.run('DELETE FROM class_members WHERE user_id IN (?, ?)', pia.id, paul.id);
 });
 
 // ============================================================ projector, classes
@@ -435,9 +464,9 @@ test('QR-Status: nur für Lehrkräfte der Klasse, nur eine Zahl – keine Namen'
   assert.equal(res.status, 200);
   const data = res.json();
   assert.equal(data.joined, count("SELECT COUNT(*) AS n FROM class_members WHERE class_id = ? AND role = 'student'", c7));
-  assert.equal(data.valid, true);
+  assert.equal(data.state, 'valid');
   for (const name of ['Mia', 'Ben', 'Schmidt', 'Hoffmann']) assert.ok(!res.text.includes(name), `no names (${name})`);
-  assert.deepEqual(Object.keys(data).sort(), ['joined', 'text', 'valid', 'validText']);
+  assert.deepEqual(Object.keys(data).sort(), ['joined', 'state', 'stateText', 'text']);
   for (const who of [M, B, Y, O]) assert.equal((await json(who, url)).status, 404);
   assert.equal((await json(h.browser(), url)).status, 401);
   // the projector page itself
@@ -446,6 +475,19 @@ test('QR-Status: nur für Lehrkräfte der Klasse, nur eine Zahl – keine Namen'
   assert.ok(qr.text.includes(joinCode(c7)));
   assert.ok(!qr.text.includes('class="nav"'), 'no navigation on the projector');
   assert.equal((await M.get(`/klassen/${c7}/qr`)).status, 404);
+
+  // the open projector learns what became of its code: replaced, deleted, expired
+  const shown = /data-status="[^"]*seit=(\d+)"/.exec(qr.text)[1];
+  const stateOf = async () => (await json(L, `${url}?seit=${shown}`)).json();
+  assert.equal((await stateOf()).state, 'valid');
+  h.db.run("UPDATE join_codes SET expires_at = ? WHERE class_id = ? AND role = 'student'", Date.now() - 1000, c7);
+  assert.deepEqual([(await stateOf()).state, (await stateOf()).stateText], ['expired', 'Der Code ist abgelaufen. Niemand kann mehr damit beitreten.']);
+  await L.page(`/klassen/${c7}/einstellungen`);
+  await L.post(`/klassen/${c7}/code/loeschen`);
+  assert.deepEqual([(await stateOf()).state, (await stateOf()).stateText], ['deleted', 'Der Code wurde gelöscht. Niemand kann mehr damit beitreten.']);
+  await L.post(`/klassen/${c7}/code`, { minuten: '60' });
+  assert.equal((await stateOf()).state, 'replaced');
+  assert.ok((await L.get(`/klassen/${c7}/qr`)).text.includes('id="teach-qr-dead"'), 'the page carries the "no valid code" view');
 });
 
 test('Klassen: Fach und Stufe werden geprüft; Umbenennen und Code-Löschen stehen im Protokoll; Beitreten nur nach Bestätigung', async () => {
@@ -486,4 +528,118 @@ test('Klassen: Fach und Stufe werden geprüft; Umbenennen und Code-Löschen steh
   assert.equal((await L.post(`/klassen/${p8}/mitglieder/${lehmann.id}/entfernen`)).status, 404, 'teachers are never removed here');
   assert.equal((await L.post(`/klassen/${p8}/mitglieder/${olaf.id}/entfernen`)).status, 303);
   assert.equal(h.hub.ctx.access.classRole(olaf, p8), null);
+});
+
+// ======================================================= from the security review
+
+test('Ergebnisse zurücksetzen: nur die Ergebnisse aus dieser Klasse – andere Klassen und persönliche Daten bleiben', async () => {
+  const sara = h.addUser('Sara Zwei', 'student');
+  const S = await h.browser().login(sara);
+  await S.post(`/beitreten/${joinCode(c7)}`);
+  await S.post(`/beitreten/${joinCode(c9)}`);
+  const t7 = await h.token(S, quiz, c7);
+  await S.api(quiz, t7.token, 'results.add', { title: 'SARA-7B', score: 1, maxScore: 2 });
+  await S.api(quiz, t7.token, 'save.set', { key: 'stand', value: 'SPIELSTAND' });
+  await S.api(quiz, t7.token, 'progress.set', { value: 0.5 });
+  await S.api(quiz, t7.token, 'scores.submit', { board: 'punkte', score: 7 });
+  const t9 = await h.token(S, quiz, c9);
+  await S.api(quiz, t9.token, 'results.add', { title: 'SARA-9C', score: 2, maxScore: 2 });
+  h.db.run("INSERT INTO results (app_id, user_id, title, score, max_score, class_id, created_at) VALUES (?, ?, 'SARA-ALT', 1, 1, '', ?)", quiz.id, sara.id, Date.now());
+
+  const here = `/klassen/${c7}/apps/${quiz.id}/ergebnisse/${sara.id}`;
+  assert.equal((await Y.post(`${here}/loeschen`)).status, 404, 'not a teacher of 7b');
+  assert.equal((await M.post(`${here}/loeschen`)).status, 404);
+  const page = await L.page(here);
+  assert.ok(page.text.includes('Gelöscht werden nur die Ergebnisse aus 7b'), 'the confirmation says what happens');
+  assert.equal((await L.post(`${here}/loeschen`)).status, 303);
+  const left = h.db.all('SELECT title FROM results WHERE user_id = ? ORDER BY title', sara.id).map((r) => r.title);
+  assert.deepEqual(left, ['SARA-9C', 'SARA-ALT'], "only 7b's results are gone; 9c's and the legacy ones stay");
+  for (const table of ['saves', 'progress', 'scores']) assert.equal(count(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = ?`, sara.id), 1, `${table} stay (the student's own data)`);
+  assert.ok((await Y.get(`/klassen/${c9}/apps/${quiz.id}/ergebnisse/${sara.id}`)).text.includes('SARA-9C'), "9c's teacher still sees 9c's result");
+  h.db.run('DELETE FROM class_members WHERE user_id = ?', sara.id);
+});
+
+test('Rechte im Detail: Einstellungen nur für freigegebene Apps, Einzelansicht nur für Schüler/innen dieser Klasse, Entfernen nur durch Lehrkraft oder Besitzer/in', async () => {
+  // (a) per-class settings exist only for an app APPROVED in this class
+  await L.post('/klassen', { name: 'Einstellungsprobe' });
+  const cs = teacherClass(lehmann.id, 'Einstellungsprobe');
+  await L.post(`/klassen/${cs}/apps`, { app: quiz.id });
+  const settings = `/klassen/${cs}/apps/${quiz.id}/einstellungen`;
+  assert.equal((await L.get(settings)).status, 200);
+  await L.post(`/klassen/${cs}/apps/${quiz.id}/entfernen`);
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cs, quiz.id).status, 'removed');
+  assert.equal((await L.get(settings)).status, 404, 'removed app: no settings');
+  assert.equal((await L.post(settings, { gesendet: '1', 's-zeit': '10' })).status, 404);
+  await M.post(`/beitreten/${joinCode(cs)}`);
+  await B.post(`/beitreten/${joinCode(cs)}`);
+  const own = await h.makeApp(M, 'Wartet noch', { 'index.html': 'x', 'schulhub.json': MANIFEST });
+  await M.post(`/klassen/${cs}/apps`, { app: own.id });
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cs, own.id).status, 'pending');
+  assert.equal((await L.get(`/klassen/${cs}/apps/${own.id}/einstellungen`)).status, 404, 'pending app: no settings');
+  assert.equal((await L.post(`/klassen/${cs}/apps/${own.id}/einstellungen`, { gesendet: '1', 's-zeit': '10' })).status, 404);
+  assert.equal(count('SELECT COUNT(*) AS n FROM class_app_settings WHERE class_id = ?', cs), 0);
+  // the amber count in the navigation leads to /klassen - and from there to the review
+  const classes = (await L.get('/klassen')).text;
+  assert.ok(classes.includes('1 App wartet auf deine Prüfung') && classes.includes('href="/pruefen"'));
+
+  // (b) a class teacher reads only students OF THIS CLASS - never someone else through it
+  const base = `/klassen/${c7}/apps/${quiz.id}/ergebnisse`;
+  const lt = await h.token(LE, quiz, c9);
+  await LE.api(quiz, lt.token, 'results.add', { title: 'LENA-9C', score: 1, maxScore: 1 });
+  for (const uid of [lena.id, yilmaz.id, admin.id, 'gibt-es-nicht']) {
+    assert.equal((await L.get(`${base}/${uid}`)).status, 404, uid);
+    assert.equal((await L.post(`${base}/${uid}/loeschen`)).status, 404, uid);
+  }
+  assert.equal(count("SELECT COUNT(*) AS n FROM results WHERE user_id = ? AND title = 'LENA-9C'", lena.id), 1);
+
+  // (c) only the class's teacher or the app's owner takes an app out of a class
+  for (const who of [M, B]) assert.equal((await who.post(`/klassen/${c7}/apps/${quiz.id}/entfernen`)).status, 404);
+  assert.equal((await Y.post(`/klassen/${c7}/apps/${quiz.id}/entfernen`)).status, 404);
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', c7, quiz.id).status, 'approved');
+  assert.equal((await B.post(`/klassen/${cs}/apps/${own.id}/entfernen`)).status, 404, "a classmate cannot withdraw Mia's submission");
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cs, own.id).status, 'pending');
+  assert.equal((await M.post(`/klassen/${cs}/apps/${own.id}/entfernen`)).status, 303, 'the owner withdraws her own');
+  assert.equal(h.db.get('SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ?', cs, own.id), undefined);
+});
+
+test('Beitreten: der Code einer archivierten Klasse verrät nichts – er wird wie ein falscher Code abgelehnt', async () => {
+  await L.post('/klassen', { name: 'Geheimes Archiv' });
+  const arch = teacherClass(lehmann.id, 'Geheimes Archiv');
+  const code = joinCode(arch);
+  await L.post(`/klassen/${arch}/archivieren`);
+  const curious = h.addUser('Neu Gier', 'student');
+  const N = await h.browser().login(curious);
+  const res = await N.get(`/beitreten/${code}`);
+  const wrong = await N.get(`/beitreten/${'Z'.repeat(32)}`);
+  assert.equal(res.status, 400);
+  assert.equal(wrong.status, 400);
+  for (const secret of ['Geheimes Archiv', 'Herr Lehmann']) assert.ok(!res.text.includes(secret), `does not show ${secret}`);
+  const sentence = (t) => /ungültig oder abgelaufen[^<]*/.exec(t)?.[0];
+  assert.ok(sentence(res.text) && sentence(res.text) === sentence(wrong.text), 'the same refusal as for a wrong code');
+  await N.page('/start');
+  assert.equal((await N.post(`/beitreten/${code}`)).status, 400);
+  assert.equal(h.hub.ctx.access.classRole(curious, arch), null);
+});
+
+test('Aufgaben: Ergebnisse von vor der Aufgabe zählen nie – auch nicht aus derselben Minute', async () => {
+  const { assignments } = h.hub.ctx;
+  const { inputDateTime } = require('../src/teachingKit');
+  // Ben finishes a round, then the teacher gives the task "starting now" (the form only shows minutes)
+  const bt = await h.token(B, quiz, c7);
+  await B.api(quiz, bt.token, 'results.add', { title: 'VORHER', score: 1, maxScore: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await L.page(`/klassen/${c7}/aufgaben/neu`);
+  const res = await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, titel: 'Ab jetzt', start: inputDateTime(Date.now()) });
+  assert.equal(res.status, 303);
+  const x = h.db.get('SELECT * FROM assignments WHERE id = ?', assignmentOf(res));
+  assert.equal(x.starts_at, x.created_at, 'a start in the current minute is the moment of creation');
+  assert.ok(x.starts_at > h.db.get("SELECT created_at FROM results WHERE title = 'VORHER'").created_at);
+  assert.notEqual(assignments.stateOf(x, ben.id), 'done', 'the earlier result does not count');
+  assert.ok(assignments.openFor(ben.id).some((t) => t.id === x.id), 'so it is on his start page');
+  // a start in the past is the moment of creation too
+  const past = h.db.get('SELECT * FROM assignments WHERE id = ?', assignmentOf(await L.post(`/klassen/${c7}/aufgaben`, { app: quiz.id, titel: 'Gestern', start: inputDateTime(Date.now() - 86_400_000) })));
+  assert.equal(past.starts_at, past.created_at);
+  // editing without touching the start keeps it exactly
+  await L.post(`/aufgaben/${x.id}/bearbeiten`, { titel: 'Ab jetzt!', start: inputDateTime(x.starts_at) });
+  assert.deepEqual({ ...h.db.get('SELECT title, starts_at FROM assignments WHERE id = ?', x.id) }, { title: 'Ab jetzt!', starts_at: x.starts_at });
 });

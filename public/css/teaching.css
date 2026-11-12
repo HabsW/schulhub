@@ -181,6 +181,11 @@
 
 /* ------------------------------------------------------------ results */
 .teach-nowrap { white-space: nowrap; }
+/* phones: the whole record of a student opens the details (the name link covers it) */
+@media (max-width: 719.98px) {
+  .teach-results tr { position: relative; }
+  .teach-reclink::after { content: ""; position: absolute; inset: 0; }
+}
 @media (min-width: 720px) {
   .teach-results th:first-child { width: 13rem; }
 }
