@@ -190,3 +190,22 @@ test('Aufgaben zählen nur Ergebnisse aus ihrer Klasse; Bestenlisten ignorieren 
     await h.stop();
   }
 });
+
+test('Wiederherstellung: das Referenz-Schema jeder Version entsteht genau wie bei einem echten Upgrade', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { openDb, schemaForVersion, SCHEMA_VERSION } = require('../src/db');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-schema-'));
+  try {
+    const sort = (rows) => rows.map((r) => `${r.type}|${r.name}|${r.sql}`).sort();
+    for (let v = 1; v <= SCHEMA_VERSION; v++) assert.ok(schemaForVersion(v, path.join(dir, `v${v}.sqlite`)).length > 10, `version ${v}`);
+    const real = openDb(path.join(dir, 'real.sqlite'));
+    const viaUpgrade = real.all('SELECT type, name, tbl_name, sql FROM sqlite_master');
+    real.close();
+    assert.deepEqual(sort(schemaForVersion(SCHEMA_VERSION, path.join(dir, 'ref.sqlite'))), sort(viaUpgrade));
+    assert.throws(() => schemaForVersion(SCHEMA_VERSION + 1, path.join(dir, 'x.sqlite')), /unknown schema version/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

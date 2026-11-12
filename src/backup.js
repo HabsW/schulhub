@@ -31,7 +31,7 @@ const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const yauzl = require('yauzl');
 const { DatabaseSync } = require('node:sqlite');
-const { openDb, SCHEMA_VERSION, SCHEMA_V1 } = require('./db');
+const { schemaForVersion, SCHEMA_VERSION } = require('./db');
 const { HttpError, plural } = require('./util');
 
 const STORES = ['blobs', 'userfiles'];
@@ -339,32 +339,12 @@ function schemaMap(rows) {
   return map;
 }
 
-/**
- * The schema SchulHub itself creates for a database version, built fresh in
- * dir: version 1 from SCHEMA_V1, the current version with openDb (all
- * migrations). Versions in between cannot be rebuilt here.
- */
+/** The schema SchulHub itself creates for a database version (src/db.js builds it fresh in dir). */
 function referenceSchema(version, dir) {
-  const file = path.join(dir, `referenz-${version}.sqlite`);
-  const query = 'SELECT type, name, tbl_name, sql FROM sqlite_master';
-  if (version === SCHEMA_VERSION) {
-    const ref = openDb(file);
-    try {
-      return ref.all(query);
-    } finally {
-      ref.close();
-    }
+  if (!Number.isInteger(version) || version < 1 || version > SCHEMA_VERSION) {
+    return fail(`Eine Datenbank der Version ${version} kann dieser Hub nicht prüfen.`);
   }
-  if (version === 1) {
-    const ref = new DatabaseSync(file);
-    try {
-      ref.exec(SCHEMA_V1);
-      return ref.prepare(query).all();
-    } finally {
-      ref.close();
-    }
-  }
-  return fail(`Eine Datenbank der Version ${version} kann dieser Hub nicht prüfen. Spiele die Sicherung mit der SchulHub-Version ein, mit der sie erstellt wurde, und aktualisiere danach.`);
+  return schemaForVersion(version, path.join(dir, `referenz-${version}.sqlite`));
 }
 
 /**

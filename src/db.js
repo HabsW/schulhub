@@ -422,6 +422,24 @@ function migrate(raw) {
   }
 }
 
+/**
+ * The schema SchulHub creates for one version, built fresh in `file` the same
+ * way an upgrade builds it (SCHEMA, then the migrations up to that version).
+ * Used to check restored backups against exactly what a Hub of that version made.
+ */
+function schemaForVersion(version, file) {
+  if (!Number.isInteger(version) || version < 1 || version > SCHEMA_VERSION) throw new Error(`unknown schema version ${version}`);
+  const raw = new DatabaseSync(file);
+  try {
+    raw.exec('PRAGMA foreign_keys = OFF;');
+    raw.exec(SCHEMA);
+    for (let v = 1; v < version; v++) raw.exec(MIGRATIONS[v]);
+    return raw.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master').all();
+  } finally {
+    raw.close();
+  }
+}
+
 function openDb(file) {
   const raw = new DatabaseSync(file);
   raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
@@ -460,4 +478,4 @@ function openDb(file) {
   };
 }
 
-module.exports = { openDb, SCHEMA_VERSION, SCHEMA_V1: SCHEMA };
+module.exports = { openDb, schemaForVersion, SCHEMA_VERSION, SCHEMA_V1: SCHEMA };
