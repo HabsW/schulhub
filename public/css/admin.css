@@ -1,0 +1,18 @@
+/* Verwaltung (package D). Shares the filter bar and pager from school.css.
+   Unlayered (wins over hub.css), one class per selector, tokens only. */
+
+.admin-subhead { margin: var(--s-6) 0 var(--s-3); font-size: var(--fs-h3); }
+.admin-app { display: inline-flex; align-items: center; gap: .55rem; min-width: 0; color: inherit; font-weight: 650; text-decoration: none; }
+.admin-app:hover { text-decoration: underline; text-decoration-color: var(--line-3); }
+.admin-name { font-weight: 650; }
+.admin-mail { display: block; color: var(--ink-3); font-size: var(--fs-meta); font-weight: 400; overflow-wrap: anywhere; }
+.admin-badges { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; }
+.admin-classes { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.admin-log td { vertical-align: top; }
+.admin-backup { display: grid; gap: var(--s-3); justify-items: start; }
+.admin-steps { margin-top: var(--s-2); }
+.admin-code { margin: var(--s-2) 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-options { display: grid; gap: var(--s-2); margin-top: var(--s-2); color: var(--ink-2); font-size: var(--fs-small); }
+.admin-options > div { display: grid; gap: .15rem; }
+.admin-options code { white-space: nowrap; }
+.admin-options dd { margin: 0; }
