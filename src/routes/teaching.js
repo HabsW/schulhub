@@ -11,7 +11,7 @@ const {
   html, raw, page, flash, csrfField, postButton, linkButton, appIcon, appClass, row, list, pageHead, sectionHead, stats, stat,
   badge, notice, empty, field, formValue, dataTable, dueChip, icon,
 } = require('../html');
-const { deny, bad, cleanText, newId, formatDate, formatDay, formatAgo, formatDue, plural } = require('../util');
+const { deny, bad, cleanText, newId, formatDate, formatDay, formatLongDay, formatAgo, formatDue, plural } = require('../util');
 const { manifestOf, validateSettings, effectiveSettings } = require('../manifest');
 const kit = require('../teachingKit');
 
@@ -174,24 +174,24 @@ module.exports = (app, ctx) => {
         ${x.due_at ? (past ? html`<span>abgelaufen ${formatDate(x.due_at)}</span>` : due.tone ? badge(due.text, due.tone) : html`<span>${due.text}</span>`) : html`<span>ohne Termin</span>`}
         ${x.author_name ? html`<span>von ${x.author_name}</span>` : ''}`,
       actions: manage
-        ? html`${linkButton(`${here}/bearbeiten`, 'Bearbeiten', { icon: 'pencil' })}${postButton(req, `${here}/loeschen`, 'Löschen', { kind: 'danger', icon: 'trash', confirm: `Aufgabe „${x.title}“ löschen?\nDie Aufgabe verschwindet für alle Schüler/innen. Ihre Ergebnisse in der App bleiben erhalten.`, confirmLabel: 'Löschen' })}`
+        ? html`${linkButton(`${here}/bearbeiten`, 'Bearbeiten', { icon: 'pencil' })}${kit.headPostButton(req, `${here}/loeschen`, 'Löschen', { kind: 'danger', icon: 'trash', confirm: `Aufgabe „${x.title}“ löschen?\nDie Aufgabe verschwindet für alle Schüler/innen. Ihre Ergebnisse in der App bleiben erhalten.`, confirmLabel: 'Löschen' })}`
         : '',
     })}
     ${x.note ? html`<div class="panel teach-note mb-6"><p class="pre">${x.note}</p></div>` : ''}
     <section class="section" aria-label="Stand der Klasse">
-      ${stats([
+      <div class="stats teach-stats3">${[
         stat({ label: 'Erledigt', value: counts.done, sub: `von ${states.length}`, tone: states.length && counts.done === states.length ? 'ok' : '' }),
         stat({ label: 'Begonnen', value: counts.started }),
         stat({ label: past ? 'Nicht erledigt' : 'Offen', value: counts.open, tone: past && counts.open ? 'danger' : '' }),
-      ])}
+      ]}</div>
     </section>
     <section class="section" aria-labelledby="s-people">${sectionHead('Schüler/innen', {
       id: 's-people',
       sub: 'Erledigt heißt: ein Ergebnis oder voller Fortschritt in der App seit dem Start – oder selbst als erledigt markiert.',
-      actions: html`<nav class="teach-seg" aria-label="Filter">${seg('', 'Alle', states.length)}${seg('offen', 'Offen', counts.open)}${seg('begonnen', 'Begonnen', counts.started)}${seg('erledigt', 'Erledigt', counts.done)}</nav>`,
     })}
+      <div class="teach-filterbar"><nav class="teach-seg" aria-label="Filter">${seg('', 'Alle', states.length)}${seg('offen', 'Offen', counts.open)}${seg('begonnen', 'Begonnen', counts.started)}${seg('erledigt', 'Erledigt', counts.done)}</nav></div>
       ${dataTable({
-        cls: 'teach-table teach-states',
+        cls: 'teach-states',
         columns: [
           { label: 'Name', primary: true, render: (s) => (results ? html`<a href="/klassen/${x.class_id}/apps/${x.app_id}/ergebnisse/${s.id}">${s.name}</a>` : s.name) },
           { label: 'Stand', render: (s) => html`${stateBadge(s)}${manual.has(s.id) ? html` <span class="faint">selbst markiert</span>` : ''}` },
@@ -199,7 +199,7 @@ module.exports = (app, ctx) => {
             label: 'Seit dem Start',
             render: (s) => {
               const r = since.get(s.id);
-              return r ? html`${plural(r.n, 'Ergebnis', 'Ergebnisse')}${r.best !== null ? html` <span class="faint">· bestes ${Math.round(Math.max(0, Math.min(1, r.best)) * 100)} %</span>` : ''}` : '';
+              return r ? html`${plural(r.n, 'Ergebnis', 'Ergebnisse')}${r.best !== null ? html` <span class="faint teach-nowrap">· bestes ${Math.round(Math.max(0, Math.min(1, r.best)) * 100)}\u00a0%</span>` : ''}` : '';
             },
           },
           ...(canFeedback ? [{ label: 'Aktionen', actions: true, render: (s) => linkButton(`${here}?an=${s.id}#rueckmeldung`, 'Rückmeldung', { kind: 'quiet', size: 'sm', icon: 'message' }) }] : []),
@@ -234,10 +234,10 @@ module.exports = (app, ctx) => {
       crumbs: [['/klassen', 'Klassen'], [`/klassen/${x.class_id}`, x.class_name]],
       eyebrow: `Aufgabe · ${x.class_name}`,
       title: x.title,
-      meta: html`${state === 'done' ? badge('erledigt', 'ok') : state === 'started' ? badge('begonnen') : badge('offen', due.tone)}${x.due_at ? html`<span>${due.text}</span>` : html`<span>ohne Termin</span>`}${x.author_name ? html`<span>von ${x.author_name}</span>` : ''}`,
+      meta: html`${state === 'done' ? badge('erledigt', 'ok') : state === 'started' ? badge('begonnen') : badge('offen', due.tone)}${x.author_name ? html`<span>von ${x.author_name}</span>` : ''}`,
       actions: begun && playable
         ? html`${linkButton(`/apps/${x.app_id}/spielen?klasse=${x.class_id}`, 'Öffnen', { kind: 'primary', icon: 'play', size: 'lg' })}
-          ${state !== 'done' && canDone ? postButton(req, `${here}/erledigt`, 'Als erledigt markieren', { icon: 'check', size: 'lg' }) : ''}`
+          ${state !== 'done' && canDone ? kit.headPostButton(req, `${here}/erledigt`, 'Als erledigt markieren', { icon: 'check', size: 'lg' }) : ''}`
         : '',
     })}
     <div class="grid-2">
@@ -253,7 +253,9 @@ module.exports = (app, ctx) => {
             cls: appClass(x),
           })}</ul>
           ${x.note ? html`<div class="panel teach-note mt-4"><p class="pre">${x.note}</p></div>` : ''}
-          <div class="teach-due mt-4">${dueChip(x.due_at, due.tone)}<div><strong>${x.due_at ? formatDate(x.due_at) : 'Ohne Termin'}</strong><span class="meta">${x.due_at ? due.text : 'Mach sie, wenn es passt.'}</span></div></div>
+          <div class="teach-due mt-4">${dueChip(x.due_at, due.tone)}<div>${x.due_at
+            ? html`<strong>Fällig ${formatLongDay(x.due_at)}, ${kit.inputTime(x.due_at)} Uhr</strong>${due.tone ? html`<span class="meta">${due.text}</span>` : ''}`
+            : html`<strong>Ohne Termin</strong><span class="meta">Mach sie, wenn es passt.</span>`}</div></div>
         </section>
         <section class="section" aria-labelledby="s-done">${sectionHead('Wann ist sie erledigt?', { id: 's-done' })}
           <p class="muted">Sobald du in der App ein Ergebnis speicherst oder sie ganz geschafft hast, gilt die Aufgabe als erledigt. Du kannst sie auch selbst als erledigt markieren.</p>
@@ -374,7 +376,7 @@ module.exports = (app, ctx) => {
         ? 'Was du Schüler/innen zurückgemeldet hast. Jede Rückmeldung sehen nur die Person selbst und die Lehrkräfte ihrer Klasse.'
         : 'Was deine Lehrkräfte dir zu deiner Arbeit schreiben. Das sehen nur du und die Lehrkräfte deiner Klasse.',
       meta: unread ? html`<span>${plural(unread, 'neue Rückmeldung', 'neue Rückmeldungen')}</span>` : '',
-      actions: unread ? postButton(req, '/rueckmeldungen/gelesen', 'Alle als gelesen markieren', { icon: 'check' }) : '',
+      actions: unread ? kit.headPostButton(req, '/rueckmeldungen/gelesen', 'Alle als gelesen markieren', { icon: 'check' }) : '',
     })}
     ${received.length || !staff
       ? html`<section class="section" aria-labelledby="s-recv">${staff ? sectionHead('An dich', { id: 's-recv' }) : html`<h2 class="visually-hidden" id="s-recv">An dich</h2>`}
@@ -487,7 +489,8 @@ module.exports = (app, ctx) => {
   function settingField(req, f, value, error, sent) {
     const name = settingName(f.key);
     const id = `f-${name}`;
-    const help = (extra) => [f.help, extra].filter(Boolean).join(' ');
+    // The manifest's own help text if it has one, otherwise our generic hint - never both.
+    const help = (generic) => f.help || generic;
     switch (f.type) {
       case 'boolean': {
         const on = sent ? formValue(req, name, '') === '1' : value === true;
@@ -496,9 +499,14 @@ module.exports = (app, ctx) => {
       }
       case 'choice': {
         const current = sent ? formValue(req, name, '') : value;
+        const radio = (o) => html`<input type="radio" name="${name}" value="${o.value}"${o.value === current ? raw(' checked') : ''}>`;
+        const foot = html`${f.help ? html`<span class="hint">${f.help}</span>` : ''}${error ? html`<span class="error-text">${error}</span>` : ''}`;
+        // Short labels: one segmented control. Longer ones: radio buttons whose text wraps (a select would cut it off on phones).
         if (f.options.length <= 4 && f.options.every((o) => o.label.length <= 18)) {
-          return html`<fieldset class="field"><legend>${f.label}</legend><div class="segmented teach-choice">${f.options.map((o) => html`<label><input type="radio" name="${name}" value="${o.value}"${o.value === current ? raw(' checked') : ''}>${o.label}</label>`)}</div>
-            ${f.help ? html`<span class="hint">${f.help}</span>` : ''}${error ? html`<span class="error-text">${error}</span>` : ''}</fieldset>`;
+          return html`<fieldset class="field"><legend>${f.label}</legend><div class="segmented teach-choice">${f.options.map((o) => html`<label>${radio(o)}${o.label}</label>`)}</div>${foot}</fieldset>`;
+        }
+        if (f.options.length <= 6) {
+          return html`<fieldset class="field"><legend>${f.label}</legend><div class="teach-radios">${f.options.map((o) => html`<label class="check teach-radio">${radio(o)}<span>${o.label}</span></label>`)}</div>${foot}</fieldset>`;
         }
         return field(req, { label: f.label, name, hint: f.help, error, control: html`<select id="${id}" name="${name}">${f.options.map((o) => html`<option value="${o.value}"${o.value === current ? raw(' selected') : ''}>${o.label}</option>`)}</select>` });
       }

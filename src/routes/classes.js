@@ -351,7 +351,7 @@ module.exports = (app, ctx) => {
             actions: change ? linkButton(`${base}/apps#hinzufuegen`, 'App hinzufügen', { icon: 'plus' }) : '',
           })
         : html`${dataTable({
-            cls: 'teach-table teach-matrix',
+            cls: 'teach-matrix',
             columns: [
               { label: 'Name', primary: true, render: (s) => s.name },
               ...shown.map((a) => ({ label: a.name, render: (s) => matrixCell(cls, s, a, value(a.id, s.id)) })),
@@ -375,7 +375,7 @@ module.exports = (app, ctx) => {
         stat({ label: 'Laufende Aufgaben', value: running.length, href: `${base}/aufgaben` }),
       ])}</section>
       <div class="grid-2 even section">
-        <section aria-labelledby="s-week">${sectionHead('Ergebnisse pro Woche', { id: 's-week', sub: 'Alle Apps dieser Klasse, die letzten 8 Wochen.' })}
+        <section aria-labelledby="s-week">${sectionHead('Ergebnisse pro Woche', { id: 's-week', sub: 'Alle Apps dieser Klasse in den letzten 8 Kalenderwochen.' })}
           <div class="panel">${kit.weekChart(bars, `Ergebnisse pro Woche in ${cls.name}`)}</div></section>
         <section aria-labelledby="s-run">${sectionHead('Laufende Aufgaben', { id: 's-run', actions: running.length ? linkButton(`${base}/aufgaben`, 'Alle', { kind: 'quiet', size: 'sm' }) : '' })}
           ${running.length
@@ -415,7 +415,6 @@ module.exports = (app, ctx) => {
         id: 's-run',
         count: running.length ? String(running.length) : null,
         sub: 'Ob jemand fertig ist, erkennt der Hub an Ergebnissen oder vollem Fortschritt nach dem Start – oder die Person markiert es selbst.',
-        actions: change ? linkButton(`${base}/aufgaben/neu`, 'Neue Aufgabe', { icon: 'plus', size: 'sm' }) : '',
       })}
         ${running.length
           ? list(running.map((x) => assignmentRow(x, now, { counts: true })))
@@ -547,11 +546,10 @@ module.exports = (app, ctx) => {
       <section class="section" aria-labelledby="s-students">${sectionHead('Schüler/innen', {
         id: 's-students',
         count: String(students.length),
-        sub: 'Schüler/innen treten selbst per QR-Code oder Link bei. Niemand wird von Hand hinzugefügt.',
-        actions: change ? linkButton(`${base}/qr`, 'Beitreten lassen', { size: 'sm', icon: 'qr' }) : '',
+        sub: change ? 'Schüler/innen treten selbst per QR-Code oder Link bei – über „Beitreten lassen“ oben. Niemand wird von Hand hinzugefügt.' : 'Schüler/innen treten selbst per QR-Code oder Link bei. Niemand wird von Hand hinzugefügt.',
       })}
         ${dataTable({
-          cls: 'teach-table teach-members',
+          cls: 'teach-members',
           columns: [
             { label: 'Name', primary: true, render: (s) => html`<span class="teach-person">${avatar(s.name, 'sm')}<span>${s.name}</span></span>` },
             { label: 'Beigetreten', render: (s) => formatDay(s.joined_at) },
@@ -784,7 +782,7 @@ module.exports = (app, ctx) => {
               <div class="teach-qrtext">
                 <p class="lead teach-qrlead">Scanne den Code mit der Handykamera und melde dich mit deinem Schulkonto an.</p>
                 <p class="teach-qrlink">${url}</p>
-                <p class="meta" id="teach-valid">Gültig bis ${formatDate(code.expires_at)}</p>
+                <p class="teach-qrvalid" id="teach-valid">Gültig bis ${formatDate(code.expires_at)}</p>
                 <p class="teach-qrcount" id="teach-joined" data-status="/klassen/${cls.id}/qr/status" aria-live="polite">${joinedText(studentCount(cls.id))}</p>
               </div>`
             : html`<div class="teach-qrempty"><p class="lead teach-qrlead">${cls.archived_at ? 'Diese Klasse ist archiviert. Niemand kann beitreten.' : 'Es gibt gerade keinen gültigen Beitrittscode.'}</p>
