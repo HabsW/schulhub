@@ -92,13 +92,16 @@ module.exports = (app, ctx) => {
       <p class="muted">von ${owner ? owner.name : '–'}${a.schoolwide_version_id ? html` · <span class="badge ok">Für die ganze Schule</span>` : ''}</p>
       ${a.description ? html`<p class="pre">${a.description}</p>` : ''}</div></div>
 
-    ${reviewing.filter((c) => c.requested_version_id).map((c) => html`<section class="panel attention"><h2>Freigabe für ${c.name}</h2>
+    ${reviewing.filter((c) => c.requested_version_id && c.request_state === 'waiting').map((c) => html`<section class="panel attention"><h2>Freigabe für ${c.name}</h2>
       <p><strong>${label(c.requested_version_id)}</strong> wurde eingereicht${c.version_id ? html` (bisher freigegeben: ${label(c.version_id)})` : ''}.
       Probiere die App aus und sieh dir den Quelltext an, bevor du sie freigibst.</p>
       <p class="actions"><a class="btn" href="/apps/${a.id}/spielen?version=${c.requested_version_id}&amp;klasse=${c.id}">Vorschau öffnen</a>
       <a class="btn" href="/apps/${a.id}/versionen/${c.requested_version_id}/quelltext">Quelltext ansehen</a>
-      ${postButton(req, `/klassen/${c.id}/apps/${a.id}/freigeben`, 'Für die Klasse freigeben', { cls: 'btn primary', fields: { version: c.requested_version_id } })}
-      ${postButton(req, `/klassen/${c.id}/apps/${a.id}/ablehnen`, 'Ablehnen', { cls: 'btn ghost' })}</p></section>`)}
+      ${postButton(req, `/klassen/${c.id}/apps/${a.id}/freigeben`, 'Für die Klasse freigeben', { cls: 'btn primary', fields: { version: c.requested_version_id } })}</p>
+      <form method="post" action="/klassen/${c.id}/apps/${a.id}/ablehnen" class="stack">${csrfField(req)}
+        <input type="hidden" name="version" value="${c.requested_version_id}">
+        <label>Zurückgeben – was fehlt noch? <textarea name="grund" required minlength="3" maxlength="2000"></textarea></label>
+        <button class="btn danger">Zurückgeben</button></form></section>`)}
 
     <section><h2>Versionen</h2>
     ${versions.length ? html`<div class="scroll"><table class="data"><thead><tr><th>Version</th><th>Hochgeladen</th><th>Inhalt</th><th></th></tr></thead><tbody>
@@ -128,8 +131,9 @@ module.exports = (app, ctx) => {
 
     <section class="panel"><h2>Klassen</h2>
       ${classRows.length ? classRows.map((r) => html`<div class="rowline"><span class="grow"><strong>${r.name}</strong>
-        <small>${r.status === 'approved' ? `Freigegeben: ${label(r.version_id)}` : r.status === 'rejected' ? 'Nicht freigegeben' : 'Wartet auf Freigabe'}${r.requested_version_id && r.status === 'approved' ? ` · ${label(r.requested_version_id)} wartet auf Freigabe` : ''}</small></span>
-        ${manage || reviewIds.has(r.class_id) ? postButton(req, `/klassen/${r.class_id}/apps/${a.id}/entfernen`, manage && !reviewIds.has(r.class_id) ? 'Zurückziehen' : 'Aus Klasse entfernen', { cls: 'btn small ghost', confirm: 'Die App aus dieser Klasse entfernen?' }) : ''}</div>`)
+        <small>${r.status === 'approved' ? `Freigegeben: ${label(r.version_id)}` : r.status === 'removed' ? 'Aus der Klasse entfernt' : r.request_state === 'returned' ? 'Zurückgegeben – siehe Kommentare' : 'Wartet auf Freigabe'}${r.requested_version_id && r.status === 'approved' ? ` · ${label(r.requested_version_id)} ${r.request_state === 'returned' ? 'zurückgegeben' : 'wartet auf Freigabe'}` : ''}</small></span>
+        ${a.owner_id === user.id && r.request_state === 'returned' && a.published_version_id ? postButton(req, `/apps/${a.id}/einreichen`, 'Erneut einreichen', { cls: 'btn small', fields: { klasse: r.class_id } }) : ''}
+        ${(manage || reviewIds.has(r.class_id)) && r.status !== 'removed' ? postButton(req, `/klassen/${r.class_id}/apps/${a.id}/entfernen`, manage && !reviewIds.has(r.class_id) ? 'Zurückziehen' : 'Aus Klasse entfernen', { cls: 'btn small ghost', confirm: 'Die App aus dieser Klasse entfernen?' }) : ''}</div>`)
         : html`<p class="muted">Diese App ist noch in keiner Klasse.</p>`}
       ${manage && a.owner_id === user.id && a.published_version_id && submittable.length ? html`<form method="post" action="/apps/${a.id}/einreichen" class="row">${csrfField(req)}
         <label class="grow">In Klasse einbringen<select name="klasse">${submittable.map((c) => html`<option value="${c.id}">${c.name}</option>`)}</select></label>
@@ -244,8 +248,11 @@ module.exports = (app, ctx) => {
     const a = manageApp(req);
     if (a.owner_id !== req.user.id) throw deny();
     const cls = db.get('SELECT * FROM classes WHERE id = ?', String(req.body.klasse || ''));
-    if (!cls || !access.canViewClass(req.user, cls.id)) throw deny();
-    ctx.addAppToClass(req, cls, a);
+    const mode = cls && access.addToClassMode(req.user, a, cls.id);
+    if (!mode) throw deny();
+    // First time, or again after the teacher gave it back: the same rules either way.
+    const result = ctx.classApps.add(req.user, cls, a, mode);
+    flash(req, result === 'approved' ? `„${a.name}“ ist jetzt in der Klasse „${cls.name}“.` : `„${a.name}“ wurde eingereicht. Deine Lehrkraft schaut sie sich an.`);
     res.redirect(303, `/apps/${a.id}`);
   });
 
@@ -293,7 +300,7 @@ module.exports = (app, ctx) => {
     res.setHeader('Content-Type', 'application/zip');
     // Fixed, harmless file name; always a download, never shown inside the Hub.
     res.setHeader('Content-Disposition', `attachment; filename="app-version-${v.number}.zip"`);
-    uploads.writeZip(res, uploads.listFiles(v.id));
+    return uploads.writeZip(res, uploads.listFiles(v.id));
   });
 
   app.post('/apps/:id/kommentare', (req, res) => {
@@ -353,13 +360,7 @@ module.exports = (app, ctx) => {
     const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ?', play.classId) : null;
     // A preview is not a real use of the app: it is never counted, and its
     // token makes the SDK keep everything in memory (see sdkStore.js).
-    if (req.body.first === true && !play.preview) {
-      db.run(
-        `INSERT INTO plays (app_id, user_id, first_at, last_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (app_id, user_id) DO UPDATE SET last_at = excluded.last_at, count = count + 1`,
-        a.id, user.id, Date.now(), Date.now()
-      );
-    }
+    if (req.body.first === true && !play.preview) services.recordPlay(a.id, user.id);
     const token = tokens.sign('sdk', { u: user.id, a: a.id, v: play.version.id, c: play.classId, s: sidHash(req.sessionID), p: play.preview ? 1 : 0 }, config.sdkTokenSeconds);
     res.json({
       token,

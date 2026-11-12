@@ -98,18 +98,22 @@ function createUploads(ctx) {
     return sha;
   }
 
-  /** Delete blobs that no version references any more. */
+  /** Delete blobs that no version and no editor draft references any more. */
   function collectGarbage(shas) {
     for (const sha of new Set(shas)) {
-      if (!db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha)) fs.rmSync(blobPath(sha), { force: true });
+      if (db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha)) continue;
+      if (db.get('SELECT 1 AS used FROM draft_files WHERE sha256 = ? LIMIT 1', sha)) continue;
+      fs.rmSync(blobPath(sha), { force: true });
     }
   }
 
+  /** Bytes an account uses: all versions and editor drafts of all its apps. */
   const userBytes = (ownerId) =>
     db.get(
-      `SELECT COALESCE(SUM(f.size), 0) AS n FROM app_files f
-         JOIN app_versions v ON v.id = f.version_id JOIN apps a ON a.id = v.app_id WHERE a.owner_id = ?`,
-      ownerId
+      `SELECT COALESCE((SELECT SUM(f.size) FROM app_files f JOIN app_versions v ON v.id = f.version_id
+                          JOIN apps a ON a.id = v.app_id WHERE a.owner_id = ?), 0)
+            + COALESCE((SELECT SUM(d.size) FROM draft_files d JOIN apps a ON a.id = d.app_id WHERE a.owner_id = ?), 0) AS n`,
+      ownerId, ownerId
     ).n;
 
   /**
@@ -284,19 +288,93 @@ function createUploads(ctx) {
     }
   }
 
+  // ---------- editor drafts ----------
+  // One mutable draft per app, private to the owner. Files are validated
+  // exactly like uploaded files; unlike a version, a draft file may be
+  // replaced. Versions made from a draft copy its rows (see services.js).
+
+  function ensureDraft(app, basedOnVersionId = null) {
+    db.run('INSERT OR IGNORE INTO app_drafts (app_id, based_on_version_id, created_at, updated_at) VALUES (?, ?, ?, ?)', app.id, basedOnVersionId, Date.now(), Date.now());
+  }
+
+  /** Create or replace one draft file. Returns the normalised path. */
+  function putDraftFile(app, rawPath, buffer) {
+    const p = normalizePath(rawPath);
+    if (isJunk(p)) throw fail(`Versteckte Dateien und Ordner wie "${p.slice(0, 80)}" sind im Editor nicht möglich.`);
+    if (!types[extOf(p)]) throw fail(`Der Dateityp von "${p.slice(0, 80)}" ist nicht erlaubt.`);
+    if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
+    return db.tx(() => {
+      ensureDraft(app);
+      const old = db.get('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? AND path_lower = ?', app.id, p.toLowerCase());
+      const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM draft_files WHERE app_id = ?', app.id);
+      const files = now.files + (old ? 0 : 1);
+      const bytes = now.bytes - (old ? old.size : 0) + buffer.length;
+      if (files > L.maxFiles) throw fail(`Zu viele Dateien (maximal ${L.maxFiles}).`);
+      if (bytes > L.maxVersionBytes) throw fail(`Die App ist zu groß (maximal ${Math.round(L.maxVersionBytes / 1048576)} MB).`);
+      if (userBytes(app.owner_id) - (old ? old.size : 0) + buffer.length > L.maxUserBytes) throw fail('Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
+      const sha = writeBlob(buffer);
+      if (old) db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, old.path);
+      db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', app.id, p, p.toLowerCase(), buffer.length, sha);
+      db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
+      if (old && old.sha256 !== sha) collectGarbage([old.sha256]);
+      return p;
+    });
+  }
+
+  function deleteDraftFile(app, rawPath) {
+    const p = normalizePath(rawPath);
+    const old = db.get('SELECT sha256 FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
+    if (!old) return false;
+    db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
+    db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
+    collectGarbage([old.sha256]);
+    return true;
+  }
+
+  /** Start (or restart) the draft as a copy of one version. Blobs are shared, nothing is copied on disk. */
+  function draftFromVersion(app, version) {
+    const old = db.all('SELECT sha256 FROM draft_files WHERE app_id = ?', app.id).map((r) => r.sha256);
+    db.tx(() => {
+      db.run('DELETE FROM app_drafts WHERE app_id = ?', app.id);
+      ensureDraft(app, version ? version.id : null);
+      if (version) {
+        db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) SELECT ?, path, path_lower, size, sha256 FROM app_files WHERE version_id = ?', app.id, version.id);
+      }
+    });
+    collectGarbage(old);
+  }
+
+  function deleteDraft(app) {
+    const old = db.all('SELECT sha256 FROM draft_files WHERE app_id = ?', app.id).map((r) => r.sha256);
+    db.run('DELETE FROM app_drafts WHERE app_id = ?', app.id);
+    collectGarbage(old);
+  }
+
+  const listDraftFiles = (appId) => db.all('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? ORDER BY path_lower', appId);
+  const findDraftFile = (appId, p) => db.get('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? AND path = ?', appId, p);
+
   // ---------- reading ----------
 
   const listFiles = (versionId) => db.all('SELECT path, size, sha256 FROM app_files WHERE version_id = ? ORDER BY path_lower', versionId);
   const findFile = (versionId, p) => db.get('SELECT path, size, sha256 FROM app_files WHERE version_id = ? AND path = ?', versionId, p);
   const readBlob = (sha) => fs.readFileSync(blobPath(sha));
 
-  /** Stream a version as a zip download (written by hand to avoid a dependency). */
-  function writeZip(res, files) {
+  /**
+   * Stream a zip download (written by hand to avoid a dependency). Each entry is
+   * { path, sha256 } (an app file), { path, file } (a file the server chose on
+   * disk, e.g. for backups) or { path, data } (a Buffer). Compression runs off
+   * the main thread and the response's back-pressure is respected, so a large
+   * download does not block the Hub.
+   */
+  async function writeZip(res, files) {
     const central = [];
     let offset = 0;
+    const deflate = (buf) => new Promise((resolve, reject) => zlib.deflateRaw(buf, (err, out) => (err ? reject(err) : resolve(out))));
+    const write = (chunk) => (res.write(chunk) ? Promise.resolve() : new Promise((resolve) => res.once('drain', resolve)));
     for (const f of files) {
-      const data = readBlob(f.sha256);
-      const packed = zlib.deflateRawSync(data);
+      if (res.destroyed) return;
+      const data = f.data ? f.data : f.file ? await fs.promises.readFile(f.file) : await fs.promises.readFile(blobPath(f.sha256));
+      const packed = await deflate(data);
       const name = Buffer.from(f.path, 'utf8');
       const crc = zlib.crc32(data);
       const head = Buffer.alloc(30);
@@ -309,9 +387,9 @@ function createUploads(ctx) {
       head.writeUInt32LE(packed.length, 18);
       head.writeUInt32LE(data.length, 22);
       head.writeUInt16LE(name.length, 26);
-      res.write(head);
-      res.write(name);
-      res.write(packed);
+      await write(head);
+      await write(name);
+      await write(packed);
       const entry = Buffer.alloc(46);
       entry.writeUInt32LE(0x02014b50, 0);
       entry.writeUInt16LE(20, 4);
@@ -328,11 +406,14 @@ function createUploads(ctx) {
     end.writeUInt16LE(files.length, 10);
     end.writeUInt32LE(dir.length, 12);
     end.writeUInt32LE(offset, 16);
-    res.write(dir);
+    await write(dir);
     res.end(end);
   }
 
-  return { addFile, addZip, addDirectory, receiveToTemp, collectGarbage, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes };
+  return {
+    addFile, addZip, addDirectory, receiveToTemp, collectGarbage, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes,
+    putDraftFile, deleteDraftFile, draftFromVersion, deleteDraft, listDraftFiles, findDraftFile, isAllowedPath: (p) => Boolean(types[extOf(p)]),
+  };
 }
 
-module.exports = { createUploads, normalizePath, isJunk };
+module.exports = { createUploads, normalizePath, isJunk, extOf };

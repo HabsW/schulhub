@@ -3,8 +3,11 @@
 // Permission checks happen in the routes via access.js BEFORE these are called.
 
 const crypto = require('node:crypto');
-const { newId, bad, cleanText } = require('./util');
+const { newId, bad, cleanText, isLocalPath, dayKey } = require('./util');
 const { EMOJIS, COLORS } = require('./html');
+const { analyzeVersion } = require('./checks');
+
+const DAY = 86_400_000;
 
 function createServices(ctx) {
   const { db, config, uploads } = ctx;
@@ -17,7 +20,50 @@ function createServices(ctx) {
     );
   }
   function pruneAudit() {
-    db.run('DELETE FROM audit_log WHERE at < ?', Date.now() - config.auditRetentionDays * 86_400_000);
+    db.run('DELETE FROM audit_log WHERE at < ?', Date.now() - ctx.settings.get('retention.auditDays') * DAY);
+  }
+
+  // ---------- in-Hub messages ----------
+  /**
+   * Leave a short message for some people (no e-mail, no push). Text and link
+   * are composed by the server; names inside the text are escaped when shown.
+   */
+  function notify(userIds, kind, text, href = '') {
+    const now = Date.now();
+    for (const id of new Set(userIds)) {
+      if (!id) continue;
+      db.run('INSERT INTO notices (user_id, kind, text, href, created_at) VALUES (?, ?, ?, ?, ?)', id, String(kind).slice(0, 40), String(text).slice(0, 300), isLocalPath(href) ? href : '', now);
+      db.run('DELETE FROM notices WHERE user_id = ? AND id NOT IN (SELECT id FROM notices WHERE user_id = ? ORDER BY id DESC LIMIT ?)', id, id, config.limits.noticesPerUser);
+    }
+  }
+
+  // ---------- use of an app ----------
+  /** A real (non-preview) opening: personal "last played" plus an anonymous daily count for the author. */
+  function recordPlay(appId, userId) {
+    const now = Date.now();
+    db.run(
+      `INSERT INTO plays (app_id, user_id, first_at, last_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (app_id, user_id) DO UPDATE SET last_at = excluded.last_at, count = count + 1`,
+      appId, userId, now, now
+    );
+    db.run('INSERT INTO app_usage (app_id, day, opens) VALUES (?, ?, 1) ON CONFLICT (app_id, day) DO UPDATE SET opens = opens + 1', appId, dayKey(now));
+  }
+
+  // ---------- retention (runs daily) ----------
+  /** Apply the admin's retention settings. Accounts are only ever flagged, never deleted here. */
+  function maintenance(now = Date.now()) {
+    const s = ctx.settings;
+    db.run('DELETE FROM audit_log WHERE at < ?', now - s.get('retention.auditDays') * DAY);
+    for (const c of db.all('SELECT * FROM classes WHERE archived_at IS NOT NULL AND archived_at < ?', now - s.get('retention.archivedClassDays') * DAY)) {
+      deleteClass(null, c, 'automatisch nach Ablauf der Aufbewahrungsfrist');
+    }
+    db.run(
+      'UPDATE users SET flagged_inactive_at = ? WHERE flagged_inactive_at IS NULL AND COALESCE(last_login_at, created_at) < ?',
+      now, now - s.get('retention.inactiveFlagDays') * DAY
+    );
+    db.run('DELETE FROM notices WHERE created_at < ?', now - 180 * DAY);
+    db.run('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?', now - 30 * DAY);
+    db.run('DELETE FROM app_usage WHERE day < ?', dayKey(now - 400 * DAY));
   }
 
   // ---------- classes ----------
@@ -31,21 +77,26 @@ function createServices(ctx) {
     return id;
   }
 
-  /** New join code; any older code of the class stops working. */
-  function createJoinCode(user, classId, minutes) {
+  /**
+   * New join code; any older code of the same kind for the class stops working.
+   * role 'student' (QR code / link for the class) or 'teacher' (co-teacher invitation).
+   */
+  function createJoinCode(user, classId, minutes, role = 'student') {
+    if (role !== 'student' && role !== 'teacher') throw new Error('bad join code role');
     const code = crypto.randomBytes(24).toString('base64url'); // 192 bits
     db.tx(() => {
-      db.run('DELETE FROM join_codes WHERE class_id = ?', classId);
-      db.run('INSERT INTO join_codes (code, class_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)', code, classId, user.id, Date.now(), Date.now() + minutes * 60_000);
+      db.run('DELETE FROM join_codes WHERE class_id = ? AND role = ?', classId, role);
+      db.run('INSERT INTO join_codes (code, class_id, created_by, created_at, expires_at, role) VALUES (?, ?, ?, ?, ?, ?)', code, classId, user.id, Date.now(), Date.now() + minutes * 60_000, role);
     });
     return code;
   }
 
-  function deleteClass(actor, cls) {
+  /** Delete a class and what belongs only to it (cascades: members, codes, apps in it, assignments, feedback, settings, announcements). */
+  function deleteClass(actor, cls, detail = '') {
     db.tx(() => {
-      db.run("DELETE FROM shared_data WHERE class_id = ?", cls.id);
+      db.run('DELETE FROM shared_data WHERE class_id = ?', cls.id);
       db.run('DELETE FROM classes WHERE id = ?', cls.id);
-      audit(actor, 'klasse_geloescht', cls.name);
+      audit(actor, 'klasse_geloescht', cls.name, detail);
     });
   }
 
@@ -88,16 +139,52 @@ function createServices(ctx) {
     });
   }
 
-  /** Finish an upload: it must contain index.html; afterwards the version never changes. */
+  /**
+   * Finish an upload: it must contain index.html; the checks run once and their
+   * report and the validated manifest are stored; afterwards the version never changes.
+   */
   function finishVersion(actor, app, version) {
     const stats = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id);
     if (!db.get("SELECT 1 AS ok FROM app_files WHERE version_id = ? AND path = 'index.html'", version.id)) {
       deleteVersion(null, app, version);
       throw bad('In der App fehlt die Startdatei "index.html" (sie muss ganz oben im Ordner liegen).');
     }
-    db.run("UPDATE app_versions SET status = 'ready', file_count = ?, total_bytes = ? WHERE id = ?", stats.files, stats.bytes, version.id);
-    db.run('UPDATE apps SET updated_at = ? WHERE id = ?', Date.now(), app.id);
-    audit(actor, 'version_hochgeladen', app.name, `Version ${version.number}, ${stats.files} Dateien`);
+    const { manifest, report } = analyzeVersion(ctx, version);
+    db.tx(() => {
+      db.run(
+        "UPDATE app_versions SET status = 'ready', file_count = ?, total_bytes = ?, manifest = ?, report = ? WHERE id = ?",
+        stats.files, stats.bytes, manifest ? JSON.stringify(manifest) : null, JSON.stringify(report), version.id
+      );
+      db.run('UPDATE apps SET updated_at = ? WHERE id = ?', Date.now(), app.id);
+      // Catalogue data from the manifest fills fields the author has not set yet.
+      if (manifest && manifest.category) db.run("UPDATE apps SET category = ? WHERE id = ? AND category = ''", manifest.category, app.id);
+      if (manifest && manifest.grades) db.run('UPDATE apps SET grade_min = ?, grade_max = ? WHERE id = ? AND grade_min IS NULL', manifest.grades[0], manifest.grades[1], app.id);
+      audit(actor, 'version_hochgeladen', app.name, `Version ${version.number}, ${stats.files} Dateien`);
+    });
+    return report;
+  }
+
+  /**
+   * Save the editor draft as a new, immutable version. Only rows are copied:
+   * file contents are content-addressed and shared on disk.
+   */
+  function versionFromDraft(actor, app, note = '') {
+    const files = uploads.listDraftFiles(app.id);
+    if (!files.some((f) => f.path === 'index.html')) throw bad('In der App fehlt die Startdatei "index.html".');
+    const bytes = files.reduce((n, f) => n + f.size, 0);
+    if (files.length > config.limits.maxFiles) throw bad(`Zu viele Dateien (maximal ${config.limits.maxFiles}).`);
+    if (bytes > config.limits.maxVersionBytes) throw bad(`Die App ist zu groß (maximal ${Math.round(config.limits.maxVersionBytes / 1048576)} MB).`);
+    if (uploads.userBytes(app.owner_id) + bytes > config.limits.maxUserBytes) throw bad('Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
+    const version = createVersion(app);
+    db.tx(() => {
+      for (const f of files) {
+        db.run('INSERT INTO app_files (version_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', version.id, f.path, f.path.toLowerCase(), f.size, f.sha256);
+      }
+      db.run('UPDATE app_versions SET note = ? WHERE id = ?', cleanText(note, 500, { multiline: true }), version.id);
+    });
+    finishVersion(actor, app, version);
+    db.run('UPDATE app_drafts SET based_on_version_id = ? WHERE app_id = ?', version.id, app.id);
+    return db.get('SELECT * FROM app_versions WHERE id = ?', version.id);
   }
 
   function deleteVersionRows(version) {
@@ -119,41 +206,54 @@ function createServices(ctx) {
   function publish(actor, app, version) {
     db.tx(() => {
       db.run('UPDATE apps SET published_version_id = ?, updated_at = ? WHERE id = ?', version.id, Date.now(), app.id);
-      for (const row of db.all('SELECT class_id, status, version_id FROM class_apps WHERE app_id = ?', app.id)) {
-        const trusted = actor.role === 'admin' || ctx.access.classRole(actor, row.class_id) === 'teacher';
-        if (trusted) {
-          db.run("UPDATE class_apps SET status = 'approved', version_id = ?, requested_version_id = NULL, decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?", version.id, actor.id, Date.now(), row.class_id, app.id);
-        } else if (row.version_id !== version.id) {
-          // an already approved app stays approved (old version); a rejected one is asked again
-          db.run("UPDATE class_apps SET requested_version_id = ?, status = CASE WHEN version_id IS NULL THEN 'pending' ELSE status END WHERE class_id = ? AND app_id = ?", version.id, row.class_id, app.id);
-        }
+      // Classes follow at once only where the publisher decides; elsewhere the new version waits.
+      ctx.classApps.onPublish(actor, app, version);
+      // A school-wide app keeps its released version; the update waits for the admin.
+      if (app.schoolwide_version_id && app.schoolwide_version_id !== version.id) {
+        if (actor.role === 'admin') db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', version.id, app.id);
+        else db.run('UPDATE apps SET schoolwide_requested_version_id = ? WHERE id = ?', version.id, app.id);
       }
       audit(actor, 'veroeffentlicht', app.name, `Version ${version.number}`);
     });
   }
 
+  /** Content hashes of app code (versions and drafts) of the given apps. */
+  const codeShas = (appIds) =>
+    appIds.flatMap((id) => [
+      ...db.all('SELECT DISTINCT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ?', id).map((r) => r.sha256),
+      ...db.all('SELECT DISTINCT sha256 FROM draft_files WHERE app_id = ?', id).map((r) => r.sha256),
+    ]);
+
   function deleteApp(actor, app) {
-    const shas = db.tx(() => {
-      const list = db.all('SELECT DISTINCT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ?', app.id).map((r) => r.sha256);
-      db.run('DELETE FROM apps WHERE id = ?', app.id); // cascades to versions, files, saves, scores, results, comments
+    const { code, files } = db.tx(() => {
+      const found = { code: codeShas([app.id]), files: ctx.userFiles.shasOfApp(app.id) };
+      db.run('DELETE FROM apps WHERE id = ?', app.id); // cascades: versions, files, drafts, saves, scores, results, progress, achievements, user files, comments …
       audit(actor, 'app_geloescht', app.name);
-      return list;
+      return found;
     });
-    uploads.collectGarbage(shas);
+    uploads.collectGarbage(code);
+    ctx.userFiles.collectGarbage(files);
   }
 
   // ---------- personal data ----------
   /** Remove everything one user stored in one app. */
   function deleteAppData(appId, userId) {
+    const files = ctx.userFiles.shasOfAppUser(appId, userId);
     db.tx(() => {
-      for (const table of ['saves', 'scores', 'results', 'plays']) db.run(`DELETE FROM ${table} WHERE app_id = ? AND user_id = ?`, appId, userId);
+      // fixed table names, never user input
+      for (const table of ['saves', 'scores', 'results', 'plays', 'progress', 'achievements', 'user_files']) {
+        db.run(`DELETE FROM ${table} WHERE app_id = ? AND user_id = ?`, appId, userId);
+      }
     });
+    ctx.userFiles.collectGarbage(files);
   }
 
   /** Delete an account and everything that belongs to it. */
   function deleteUser(actor, user) {
+    const ownApps = db.all('SELECT id FROM apps WHERE owner_id = ?', user.id).map((r) => r.id);
+    const userFileShas = [...ctx.userFiles.shasOfUser(user.id), ...ownApps.flatMap((id) => ctx.userFiles.shasOfApp(id))];
     const shas = db.tx(() => {
-      const list = db.all('SELECT DISTINCT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id JOIN apps a ON a.id = v.app_id WHERE a.owner_id = ?', user.id).map((r) => r.sha256);
+      const list = codeShas(ownApps);
       // Classes where this user was the only teacher go away with them.
       const orphaned = db.all(
         `SELECT c.id FROM classes c JOIN class_members m ON m.class_id = c.id AND m.user_id = ? AND m.role = 'teacher'
@@ -166,14 +266,22 @@ function createServices(ctx) {
       }
       db.run('DELETE FROM sessions WHERE user_id = ?', user.id);
       db.run("UPDATE audit_log SET actor_id = NULL, actor_label = 'Gelöschtes Konto' WHERE actor_id = ?", user.id);
-      db.run('DELETE FROM users WHERE id = ?', user.id); // cascades: memberships, apps, saves, scores, results, comments
-      audit(actor && actor.id !== user.id ? actor : null, 'konto_geloescht', actor && actor.id !== user.id ? 'durch Verwaltung' : 'durch Nutzer/in selbst');
+      // cascades: memberships, apps (+ versions, drafts), saves, scores, results, progress, achievements,
+      // files, favourites, feedback to them, notices, comments
+      db.run('DELETE FROM users WHERE id = ?', user.id);
+      // The audit entry names the role, never the person (their data is gone).
+      const roleLabel = { student: 'Schüler/in', teacher: 'Lehrkraft', admin: 'Admin' }[user.role] || '';
+      audit(actor && actor.id !== user.id ? actor : null, 'konto_geloescht', `Konto (${roleLabel})`, actor && actor.id !== user.id ? 'durch Verwaltung' : 'durch Nutzer/in selbst');
       return list;
     });
     uploads.collectGarbage(shas);
+    ctx.userFiles.collectGarbage(userFileShas);
   }
 
-  return { audit, pruneAudit, createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, deleteVersion, publish, deleteApp, deleteAppData, deleteUser };
+  return {
+    audit, pruneAudit, notify, recordPlay, maintenance,
+    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser,
+  };
 }
 
 module.exports = { createServices };

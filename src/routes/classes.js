@@ -34,7 +34,7 @@ module.exports = (app, ctx) => {
     if (!cls || !access.canManageClass(req.user, cls.id)) throw deny();
     return cls;
   }
-  const activeCode = (classId) => db.get('SELECT * FROM join_codes WHERE class_id = ? AND expires_at > ?', classId, Date.now());
+  const activeCode = (classId) => db.get("SELECT * FROM join_codes WHERE class_id = ? AND role = 'student' AND expires_at > ?", classId, Date.now());
   const joinUrl = (code) => `${config.hubOrigin}/beitreten/${code}`;
 
   app.get('/klassen', (req, res) => {
@@ -169,7 +169,7 @@ module.exports = (app, ctx) => {
 
   app.post('/klassen/:id/code/loeschen', (req, res) => {
     const cls = manageClass(req);
-    db.run('DELETE FROM join_codes WHERE class_id = ?', cls.id);
+    db.run("DELETE FROM join_codes WHERE class_id = ? AND role = 'student'", cls.id);
     res.redirect(303, `/klassen/${cls.id}`);
   });
 
@@ -236,8 +236,12 @@ module.exports = (app, ctx) => {
   });
 
   app.post('/beitreten/:code', (req, res) => {
-    const { cls } = findCode(req);
-    const added = db.run("INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, 'student', ?)", cls.id, req.user.id, Date.now());
+    const { row, cls } = findCode(req);
+    // The code decides the membership (access.joinRoleFor): a class code always
+    // makes a student, a co-teacher invitation works only for staff accounts.
+    const role = access.joinRoleFor(req.user, row);
+    if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
+    const added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
     if (added.changes) {
       services.audit(req.user, 'klasse_beigetreten', cls.name);
       flash(req, `Willkommen in „${cls.name}“!`);
@@ -246,67 +250,59 @@ module.exports = (app, ctx) => {
   });
 
   // ---------- apps in a class ----------
-  /** Put an app into a class: approved at once for class teachers, a request for everyone else. */
-  ctx.addAppToClass = (req, cls, target) => {
-    const manage = access.canManageClass(req.user, cls.id);
-    // You can add your own apps; class teachers can also add apps released for the whole school.
-    const own = target && target.owner_id === req.user.id;
-    if (!target || !(own || (manage && target.schoolwide_version_id))) throw deny();
-    if (!target.published_version_id) throw bad('Diese App ist noch nicht veröffentlicht.');
-    if (db.get('SELECT 1 AS x FROM class_apps WHERE class_id = ? AND app_id = ?', cls.id, target.id)) throw bad('Diese App ist schon in der Klasse.');
-    if (manage) {
-      // Teachers of the class decide for the class, so their choice is approved right away.
-      const version = own ? target.published_version_id : target.schoolwide_version_id;
-      db.run("INSERT INTO class_apps (class_id, app_id, status, version_id, added_by, decided_by, decided_at, created_at) VALUES (?, ?, 'approved', ?, ?, ?, ?, ?)", cls.id, target.id, version, req.user.id, req.user.id, Date.now(), Date.now());
-      services.audit(req.user, 'app_zugewiesen', target.name, cls.name);
-      flash(req, `„${target.name}“ ist jetzt in der Klasse „${cls.name}“.`);
-    } else {
-      db.run("INSERT INTO class_apps (class_id, app_id, status, requested_version_id, added_by, created_at) VALUES (?, ?, 'pending', ?, ?, ?)", cls.id, target.id, target.published_version_id, req.user.id, Date.now());
-      services.audit(req.user, 'app_eingereicht', target.name, cls.name);
-      flash(req, `„${target.name}“ wurde eingereicht. Deine Lehrkraft schaut sie sich an.`);
-    }
-  };
-
+  /**
+   * Put an app into a class. Who may add what, and whether it is approved at
+   * once or waits for review, is decided by access.addToClassMode.
+   */
   app.post('/klassen/:id/apps', (req, res) => {
     const cls = viewClass(req);
-    ctx.addAppToClass(req, cls, db.get('SELECT * FROM apps WHERE id = ?', String(req.body.app || '')));
+    const target = db.get('SELECT * FROM apps WHERE id = ?', String(req.body.app || ''));
+    const mode = access.addToClassMode(req.user, target, cls.id);
+    if (!mode) throw deny();
+    const result = ctx.classApps.add(req.user, cls, target, mode);
+    flash(req, result === 'approved' ? `„${target.name}“ ist jetzt in der Klasse „${cls.name}“.` : `„${target.name}“ wurde eingereicht. Deine Lehrkraft schaut sie sich an.`);
     res.redirect(303, `/klassen/${cls.id}`);
   });
 
   const classApp = (cls, appId) =>
     db.get('SELECT ca.*, a.name AS app_name, a.owner_id FROM class_apps ca JOIN apps a ON a.id = ca.app_id WHERE ca.class_id = ? AND ca.app_id = ?', cls.id, String(appId));
 
+  const appRow = (row) => db.get('SELECT * FROM apps WHERE id = ?', row.app_id);
+
   app.post('/klassen/:id/apps/:aid/freigeben', (req, res) => {
     const cls = manageClass(req);
     const row = classApp(cls, req.params.aid);
-    if (!row) throw deny();
+    if (!row || !access.canChangeClass(req.user, cls.id)) throw deny();
     // Approve exactly the version that was reviewed (sent by the form, checked against the request).
-    const version = row.requested_version_id;
-    if (!version || String(req.body.version || '') !== version) throw bad('Diese Version steht nicht (mehr) zur Freigabe. Bitte lade die Seite neu.');
-    db.run("UPDATE class_apps SET status = 'approved', version_id = ?, requested_version_id = NULL, decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?", version, req.user.id, Date.now(), cls.id, row.app_id);
-    services.audit(req.user, 'app_freigegeben', row.app_name, cls.name);
+    ctx.classApps.approve(req.user, cls, appRow(row), String(req.body.version || ''), req.body.notiz);
     flash(req, `„${row.app_name}“ ist für ${cls.name} freigegeben.`);
     res.redirect(303, `/apps/${row.app_id}`);
   });
 
+  /** "Zurückgeben": the teacher sends the waiting version back with a reason the student sees. */
   app.post('/klassen/:id/apps/:aid/ablehnen', (req, res) => {
     const cls = manageClass(req);
     const row = classApp(cls, req.params.aid);
-    if (!row) throw deny();
-    // A rejected update leaves the previously approved version in place.
-    db.run("UPDATE class_apps SET status = CASE WHEN version_id IS NULL THEN 'rejected' ELSE 'approved' END, requested_version_id = NULL, decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?", req.user.id, Date.now(), cls.id, row.app_id);
-    services.audit(req.user, 'app_abgelehnt', row.app_name, cls.name);
-    flash(req, `„${row.app_name}“ wurde nicht freigegeben. Ein Kommentar hilft beim Verbessern.`);
+    if (!row || !access.canChangeClass(req.user, cls.id)) throw deny();
+    ctx.classApps.giveBack(req.user, cls, appRow(row), String(req.body.version || ''), req.body.grund);
+    flash(req, `„${row.app_name}“ wurde zurückgegeben. Deine Begründung steht bei der App.`);
     res.redirect(303, `/apps/${row.app_id}`);
   });
 
   app.post('/klassen/:id/apps/:aid/entfernen', (req, res) => {
     const cls = viewClass(req);
     const row = classApp(cls, req.params.aid);
+    const teacher = access.canChangeClass(req.user, cls.id);
     // The class teacher can remove any app; an owner can withdraw their own.
-    if (!row || !(access.canManageClass(req.user, cls.id) || row.owner_id === req.user.id)) throw deny();
-    db.run('DELETE FROM class_apps WHERE class_id = ? AND app_id = ?', cls.id, row.app_id);
-    services.audit(req.user, 'app_aus_klasse_entfernt', row.app_name, cls.name);
-    res.redirect(303, access.canManageClass(req.user, cls.id) ? `/klassen/${cls.id}` : `/apps/${row.app_id}`);
+    if (!row || !(teacher || row.owner_id === req.user.id)) throw deny();
+    const a = appRow(row);
+    if (!teacher && row.requested_version_id) {
+      ctx.classApps.withdraw(req.user, cls, a);
+      flash(req, `Die Einreichung von „${a.name}“ ist zurückgezogen.`);
+    } else {
+      ctx.classApps.remove(req.user, cls, a);
+      flash(req, `„${a.name}“ ist nicht mehr in ${cls.name}. Ergebnisse bleiben für die Lehrkraft lesbar.`);
+    }
+    res.redirect(303, teacher ? `/klassen/${cls.id}` : `/apps/${row.app_id}`);
   });
 };

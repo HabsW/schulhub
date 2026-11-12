@@ -13,6 +13,8 @@
 // Both stores offer exactly the same functions, so every SDK feature gets the
 // preview isolation for free.
 
+const { checkFile, FileError } = require('./userFiles');
+
 class ApiError extends Error {
   constructor(code, message, status = 200) {
     super(message);
@@ -24,7 +26,7 @@ class ApiError extends Error {
 const MB = 1024 * 1024;
 
 /** The real tables. Every query is limited to this app (and this user where personal). */
-function liveStore(db, appRow, user) {
+function liveStore(db, appRow, user, { userFiles } = {}) {
   const A = appRow.id;
   const U = user.id;
   return {
@@ -74,6 +76,7 @@ function liveStore(db, appRow, user) {
         `SELECT s.user_id, s.score, u.name, u.anonymous_scores,
                 EXISTS (SELECT 1 FROM class_members mine
                           JOIN class_members theirs ON theirs.class_id = mine.class_id
+                          JOIN classes c ON c.id = mine.class_id AND c.archived_at IS NULL
                          WHERE mine.user_id = ? AND theirs.user_id = s.user_id) AS shares_class
            FROM scores s JOIN users u ON u.id = s.user_id
           WHERE s.app_id = ? AND s.board = ?
@@ -82,18 +85,40 @@ function liveStore(db, appRow, user) {
         U, A, board, classId || '', classId || '', limit
       ),
 
-    // ----- results -----
+    // ----- results (the class the app was opened from is recorded with each one) -----
     resultAdd: ({ title, score, maxScore, details, classId }, keepNewest) => {
-      db.run('INSERT INTO results (app_id, user_id, title, score, max_score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', A, U, title, score, maxScore, details, Date.now());
+      db.run('INSERT INTO results (app_id, user_id, title, score, max_score, details, class_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', A, U, title, score, maxScore, details, classId || null, Date.now());
       db.run(
         `DELETE FROM results WHERE app_id = ? AND user_id = ? AND id NOT IN
            (SELECT id FROM results WHERE app_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?)`,
         A, U, A, U, keepNewest
       );
-      void classId; // recorded once the results table knows classes (migration 2)
     },
     resultsMine: (limit) =>
       db.all('SELECT title, score, max_score, details, created_at FROM results WHERE app_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?', A, U, limit),
+
+    // ----- progress (0..1) -----
+    progressGet: () => db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', A, U) || null,
+    progressPut: (value, label) =>
+      db.run(
+        `INSERT INTO progress (app_id, user_id, value, label, updated_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (app_id, user_id) DO UPDATE SET value = excluded.value, label = excluded.label, updated_at = excluded.updated_at`,
+        A, U, value, label, Date.now()
+      ),
+
+    // ----- achievements (definitions come from the version's schulhub.json) -----
+    achievementsUnlocked: () => db.all('SELECT achievement, unlocked_at FROM achievements WHERE app_id = ? AND user_id = ?', A, U),
+    /** true if newly unlocked, false if it already was. */
+    achievementPut: (id) => db.run('INSERT OR IGNORE INTO achievements (app_id, user_id, achievement, unlocked_at) VALUES (?, ?, ?, ?)', A, U, id, Date.now()).changes > 0,
+
+    // ----- files (hub.files) -----
+    fileList: () => userFiles.list(A, U),
+    fileGet: (name) => {
+      const row = userFiles.get(A, U, name);
+      return row ? { name: row.name, type: row.type, size: row.size, updated_at: row.updated_at, data: () => userFiles.read(row) } : null;
+    },
+    filePut: (name, type, buffer) => userFiles.put(A, U, name, type, buffer),
+    fileDelete: (name) => userFiles.remove(A, U, name),
   };
 }
 
@@ -121,7 +146,7 @@ function createPreviewStores({ maxBytes = 2 * MB, maxStores = 400, maxTotalBytes
   function stateFor(key) {
     let s = stores.get(key);
     if (s) stores.delete(key);
-    else s = { bytes: 0, save: new Map(), shared: new Map(), scores: new Map(), results: [] };
+    else s = { bytes: 0, save: new Map(), shared: new Map(), scores: new Map(), results: [], progress: null, achievements: new Map(), files: new Map() };
     s.last = Date.now();
     stores.set(key, s);
     while (stores.size > maxStores) drop(stores.keys().next().value);
@@ -142,7 +167,7 @@ function createPreviewStores({ maxBytes = 2 * MB, maxStores = 400, maxTotalBytes
   const SEP = '\u0000';
 
   /** A store with the same functions as liveStore, writing only to memory. */
-  function previewStore(db, appRow, user, key) {
+  function previewStore(db, appRow, user, key, limits) {
     const live = liveStore(db, appRow, user);
     const s = stateFor(key);
 
@@ -224,6 +249,44 @@ function createPreviewStores({ maxBytes = 2 * MB, maxStores = 400, maxTotalBytes
         while (s.results.length > 100) charge(key, s, -s.results.pop().size);
       },
       resultsMine: (limit) => s.results.slice(0, limit),
+
+      progressGet: () => s.progress,
+      progressPut: (value, label) => {
+        if (!s.progress) charge(key, s, 128);
+        s.progress = { value, label, updated_at: Date.now() };
+      },
+
+      achievementsUnlocked: () => [...s.achievements].map(([achievement, at]) => ({ achievement, unlocked_at: at })),
+      achievementPut: (id) => {
+        if (s.achievements.has(id)) return false;
+        charge(key, s, 64);
+        s.achievements.set(id, Date.now());
+        return true;
+      },
+
+      fileList: () => [...s.files.values()].map(({ name, type, size, updated_at }) => ({ name, type, size, updated_at })).sort((a, b) => (a.name < b.name ? -1 : 1)),
+      fileGet: (name) => {
+        const f = s.files.get(name);
+        return f ? { name: f.name, type: f.type, size: f.size, updated_at: f.updated_at, data: () => f.data } : null;
+      },
+      filePut: (name, type, buffer) => {
+        const t = checkFile(name, type, buffer, limits);
+        let n = 0;
+        let bytes = 0;
+        for (const f of s.files.values()) if (f.name !== name) (n += 1), (bytes += f.size);
+        if (n >= limits.filesPerApp || bytes + buffer.length > limits.fileTotalBytes) throw new FileError('quota', 'Dein Platz für Dateien in dieser App ist voll.');
+        const old = s.files.get(name);
+        charge(key, s, buffer.length - (old ? old.size : 0));
+        s.files.set(name, { name, type: t, size: buffer.length, data: Buffer.from(buffer), updated_at: Date.now() });
+        return { name, type: t, size: buffer.length };
+      },
+      fileDelete: (name) => {
+        const old = s.files.get(name);
+        if (!old) return false;
+        charge(key, s, -old.size);
+        s.files.delete(name);
+        return true;
+      },
     };
   }
 

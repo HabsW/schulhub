@@ -61,6 +61,43 @@ Datenbank…*, *Beitrittscodes…*, *Schüler und fremde Lehrkräfte…*, *Wem e
 
 Tests: *App-Isolation…*, *App-Dateien…*, *SDK-Rechte…*, *Vorschau…*
 
+### SDK features of version 2
+
+| Threat | Handling |
+|---|---|
+| App unlocks arbitrary "achievements" (e.g. offensive titles shown in the Hub) | Only achievements declared in the version's `schulhub.json` can be unlocked. The manifest is uploaded data: parsed as JSON (never executed), validated field by field (`src/manifest.js`), lengths capped, emojis from a fixed list. It is part of the version the teacher reviews. Titles are always shown escaped. |
+| App changes per-class settings | There is no write path from apps (`settings.set` does not exist). Teachers edit settings in the Hub; values are validated against the manifest's field types and capped at 64 KB. Apps read only the settings of the class they were opened from. |
+| Files as an attack channel (`hub.files`) | Per person and app only. Allow-list of passive types (PNG, JPEG, WebP, GIF, JSON, text, CSV); images must start with the right magic bytes, JSON must parse; no HTML, no SVG. Stored by content hash in `data/userfiles/` (apart from app code), names validated like keys. Served on the app's origin only, with the stored type, `nosniff`, `Content-Disposition: attachment` and the app CSP. 1 MB per file, 50 files and 10 MB per person and app, rate-limited. Deleted with the person's app data or account (contents garbage-collected). |
+| Progress values | Numbers only, clamped to 0..1; label capped at 60 characters. |
+| Previews | All of the above go to the in-memory preview store during a preview, like saves and scores. |
+| Uploaded copies of Hub files | `hub-sdk.js` and `hub-ui.css` (at any path) and fonts under `hub-ui-fonts/` are always served from the Hub's own files. |
+
+Tests: *schulhub.json…*, *SDK-Fortschritt…*, *SDK-Erfolge…*, *SDK-Einstellungen…*, *SDK-Dateien…*, *Die Hub-eigenen Dateien…* (`test/foundation.test.js`)
+
+### Editor drafts
+
+| Threat | Handling |
+|---|---|
+| Changing code after approval through the editor | The editor writes to one mutable **draft** per app (`app_drafts`, `draft_files`), never to a version. "Save as version" copies the draft's rows into a new version, which is immutable like any upload and goes through the same publish and review rules. |
+| Draft files bypassing upload rules | Every draft write goes through the same path, extension, size, file-count, version-size and account-quota checks as uploads (`uploads.putDraftFile`). Drafts count toward the account quota. |
+| Others reading a draft | Draft files are served only with a file token that names the draft (`d: 1`) for exactly that app, issued after `canManageApp`; never cached (`no-store`). A version token never reads draft files and vice versa. Draft previews always use the in-memory SDK store. |
+| Deleting a draft deleting a version's files | Content blobs are shared; garbage collection keeps a blob while any version or draft references it. |
+
+Tests: *Editor-Entwurf…*
+
+### Classes: review, co-teachers, archive
+
+| Threat | Handling |
+|---|---|
+| Approving something other than what was reviewed | Every change to an app in a class goes through one state machine (`src/classApps.js`). Approving and giving back name the exact waiting version; anything else is refused. |
+| A returned app vanishing from the reviewer | A returned version stays visible to the class's teachers (`request_state = 'returned'`) and the reason is kept as a review comment. The owner can resubmit; the student gets an in-Hub notice. |
+| Removing an app destroying results | An app that was ever approved becomes `removed`: not playable any more, but its results stay readable for the class's teachers (`canSeeStudentData` accepts `approved` and `removed`). Publishing a new version never brings it back. |
+| Students bypassing review by "sharing" | Sharing with colleagues (`apps.shared`) only works for apps whose owner is staff (`access.isSharedWith`). A colleague may preview the shared app's published version before adding it. |
+| Co-teacher invitations used by students | A join code has a role. A class code always creates a **student** membership, whoever uses it. A teacher invitation creates a teacher membership only for staff accounts; a student using it gets nothing. One active code per class and role. |
+| Archived classes | Read-only (`canChangeClass` is false). Students lose access and class context; nobody can join; teachers keep read access to results. Archived classes do not count for "shares a class" on leaderboards. |
+
+Tests: *Prüfen: Zurückgeben…*, *Entfernte Apps…*, *Kolleg/innen teilen Apps…*, *Lehrkraft-Einladung…*, *Archivierte Klassen…*
+
 ### Uploads
 
 | Threat | Handling |
@@ -105,6 +142,14 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
   classes, teachers of other classes, the whole school in a school-wide app – sees "Anonym".
   Test: *Bestenliste: Namen sehen nur Personen aus derselben Klasse…*
 - "Meine Daten" shows everything, exports it as JSON, deletes per app or the whole account. Deleting an account removes its rows and anonymises its audit entries. Test: *Meine Daten…*
+- Retention (`src/settings.js`, run daily by `services.maintenance`): audit log 365 days; archived
+  classes are deleted 12 months after archiving; accounts without sign-in for 15 months are
+  only **flagged** for the admin and never deleted automatically; in-Hub notices fade after
+  6 months; anonymous daily usage counts after 400 days. The admin can change the periods within
+  fixed ranges. Test: *Aufbewahrung…*
+- Usage numbers for app authors are anonymous daily counts (`app_usage`: app, day, count) – no
+  people, no classes.
+- The audit entry for a deleted account names only the role, not the person.
 
 ## Where security won over a feature
 
@@ -126,4 +171,17 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*
 - **No malware scanning** of uploads. Files are only ever delivered to browsers inside the sandbox; a teacher who downloads a zip should treat it like any download.
 - **The admin can see everything**, and the database and blobs are not encrypted at rest. Protect the server, backups and the `data/` folder accordingly.
 - **Godot/Unity builds that need threads** (cross-origin isolation) are not supported yet.
+- **Multiplayer is prepared, not built.** The SDK has `hub.room()`, the API has `room.join`, the
+  permission rule exists (`access.canJoinRoom`: active class, app approved there, teacher's
+  opt-in `class_apps.multiplayer`), but there is no transport and every call answers
+  `not_available`. Questions to settle before switching it on:
+  - It is a channel between minors. What may travel (only structured game state, or any text)?
+    Who can read it afterwards – nobody (ephemeral), or the teacher?
+  - Moderation: can a teacher see who is in a room, mute or end it? What is logged (membership,
+    never content)?
+  - Abuse limits: message size and rate per person, room size, number of rooms per class.
+  - Transport: WebSocket or Server-Sent Events on the app origin, authenticated by the same
+    short-lived SDK token; it must die at logout and class removal like the token does today.
+  - Preview: a preview must never join a real room.
+  - Scaling: rooms live in memory in one process (same limit as rate limits today).
 - **No formal privacy review.** Before real use, the school's data protection officer should check this against the school's obligations.

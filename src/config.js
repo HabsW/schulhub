@@ -93,6 +93,12 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       boardsPerApp: 20,
       commentsPerApp: 500,
       classesPerTeacher: 60,
+      fileBytes: 1 * MB, // hub.files: one file
+      filesPerApp: 50, // hub.files: files per person per app
+      fileTotalBytes: 10 * MB, // hub.files: all files of one person in one app
+      achievementsPerApp: 50,
+      noticesPerUser: 200, // older in-Hub messages are dropped
+      feedbackChars: 2000,
     },
     // [max events, per milliseconds]
     rate: {
@@ -103,7 +109,9 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       uploadFiles: [6000, 60 * 60_000], // per user
       uploadVersions: [30, 60 * 60_000], // per user
       sdk: [600, 60_000], // SDK calls per user and app
+      sdkFiles: [120, 60_000], // hub.files uploads per user and app
       appFiles: [3000, 60_000], // static app files per IP
+      draftWrites: [600, 60_000], // editor saves per user
     },
   };
   Object.assign(config.limits, overrides.limits);

@@ -14,7 +14,7 @@ let cls; // teacher's class with mia + ben
 let teacherApp, miaApp;
 
 const classOf = (userId) => h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher'", userId).id;
-const joinCode = (classId) => h.db.get('SELECT code FROM join_codes WHERE class_id = ?', classId).code;
+const joinCode = (classId) => h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", classId).code;
 
 before(async () => {
   h = await startHub({ limits: { maxFileBytes: 200 * 1024, maxVersionBytes: 400 * 1024, maxFiles: 20 } });

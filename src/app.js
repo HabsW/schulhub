@@ -15,6 +15,9 @@ const { createSessionStore } = require('./sessions');
 const { createAccess } = require('./access');
 const { createUploads } = require('./uploads');
 const { createServices } = require('./services');
+const { createUserFiles } = require('./userFiles');
+const { createClassApps } = require('./classApps');
+const { createSettings } = require('./settings');
 const { createAuth } = require('./auth');
 const { createAppsHost } = require('./appsHost');
 const { HttpError } = require('./util');
@@ -131,8 +134,11 @@ function createHub(config) {
   ctx.tokens = createTokens(config.sessionSecret);
   ctx.limiter = createLimiter(config.rate);
   ctx.access = createAccess(db);
+  ctx.settings = createSettings(db, config);
   ctx.uploads = createUploads(ctx);
+  ctx.userFiles = createUserFiles(ctx);
   ctx.services = createServices(ctx);
+  ctx.classApps = createClassApps(ctx);
   ctx.auth = createAuth(ctx);
 
   const hubApp = createHubApp(ctx);
@@ -159,8 +165,9 @@ function createHub(config) {
       });
     });
 
-  ctx.services.pruneAudit();
-  const daily = setInterval(() => ctx.services.pruneAudit(), 86_400_000);
+  // Retention (audit log, archived classes, inactive-account flags): at start and daily.
+  ctx.services.maintenance();
+  const daily = setInterval(() => ctx.services.maintenance(), 86_400_000);
   daily.unref();
 
   return {

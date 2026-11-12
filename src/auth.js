@@ -87,7 +87,7 @@ function createAuth(ctx) {
       if (user.disabled) throw new HttpError(403, 'Dieses Konto wurde gesperrt. Bitte wende dich an die Verwaltung.');
       // The stored role stays (the admin may have changed it); ADMIN_EMAILS always wins.
       const role = initial === 'admin' ? 'admin' : user.role;
-      db.run('UPDATE users SET name = ?, email = ?, role = ?, last_login_at = ? WHERE id = ?', cleanName, cleanEmail, role, Date.now(), user.id);
+      db.run('UPDATE users SET name = ?, email = ?, role = ?, last_login_at = ?, flagged_inactive_at = NULL WHERE id = ?', cleanName, cleanEmail, role, Date.now(), user.id);
       user = db.get('SELECT * FROM users WHERE id = ?', user.id);
     }
     return user;

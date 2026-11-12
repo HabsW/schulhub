@@ -13,17 +13,28 @@ const path = require('node:path');
 const { appHeaders } = require('./security');
 const { cleanText } = require('./util');
 const { ApiError, liveStore, createPreviewStores } = require('./sdkStore');
+const { FileError } = require('./userFiles');
+const { manifestOf, parseManifest, effectiveSettings } = require('./manifest');
 
 const KEY = /^[A-Za-z0-9_.:-]{1,64}$/;
+// Fonts the Hub's UI kit (hub-ui.css) may load from an app origin. Fixed list.
+const UI_FONTS = new Set(['atkinson-next-latin.woff2', 'atkinson-next-latin-ext.woff2', 'atkinson-mono-latin.woff2', 'atkinson-mono-latin-ext.woff2']);
 
 function createAppsHost(ctx) {
-  const { db, config, tokens, uploads, limiter, access } = ctx;
+  const { db, config, tokens, uploads, limiter, access, userFiles } = ctx;
   const L = config.limits;
   // Previews write only to memory (see sdkStore.js).
   const previewStores = (ctx.previewStores = createPreviewStores());
-  const sdkFile = path.join(config.root, 'sdk', 'hub-sdk.js');
-  let sdkCache = null;
-  const sdkSource = () => (config.dev || !sdkCache ? (sdkCache = fs.readFileSync(sdkFile)) : sdkCache);
+  // Files the Hub itself provides on every app origin, whatever was uploaded under these names.
+  const hubAssets = {
+    'hub-sdk.js': { file: path.join(config.root, 'sdk', 'hub-sdk.js'), type: 'text/javascript; charset=utf-8' },
+    'hub-ui.css': { file: path.join(config.root, 'sdk', 'hub-ui.css'), type: 'text/css; charset=utf-8' },
+  };
+  const assetCache = new Map();
+  const hubAsset = (file) => {
+    if (config.dev || !assetCache.has(file)) assetCache.set(file, fs.existsSync(file) ? fs.readFileSync(file) : null);
+    return assetCache.get(file);
+  };
 
   const clientIp = (req) => (config.trustProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : req.socket.remoteAddress);
 
@@ -50,17 +61,28 @@ function createAppsHost(ctx) {
     }
     if (rel === '' || rel.endsWith('/')) rel += 'index.html';
 
-    // The Hub always provides its own, current SDK - whatever was uploaded under that name.
-    if (rel === 'hub-sdk.js' || rel.endsWith('/hub-sdk.js')) {
-      return send(res, 200, req.method === 'HEAD' ? undefined : sdkSource(), { 'Content-Type': 'text/javascript; charset=utf-8' });
+    // The Hub always provides its own, current SDK and UI kit - whatever was uploaded under those names.
+    const base = rel.slice(rel.lastIndexOf('/') + 1);
+    if (Object.hasOwn(hubAssets, base)) {
+      const body = hubAsset(hubAssets[base].file);
+      if (!body) return sendText(res, 404, 'Datei nicht gefunden.');
+      return send(res, 200, req.method === 'HEAD' ? undefined : body, { 'Content-Type': hubAssets[base].type });
+    }
+    const font = /(?:^|\/)hub-ui-fonts\/([a-z0-9-]+\.woff2)$/.exec(rel);
+    if (font && UI_FONTS.has(font[1])) {
+      const body = hubAsset(path.join(config.root, 'public', 'fonts', font[1]));
+      if (!body) return sendText(res, 404, 'Datei nicht gefunden.');
+      return send(res, 200, req.method === 'HEAD' ? undefined : body, { 'Content-Type': 'font/woff2', 'Cache-Control': 'private, max-age=86400' });
     }
     // Looked up by exact name in the database; the disk path comes from the content hash.
-    const file = uploads.findFile(payload.v, rel);
+    // A draft token (the owner's editor preview) reads the app's mutable draft instead of a version.
+    const draft = payload.d === 1;
+    const file = draft ? uploads.findDraftFile(appRow.id, rel) : uploads.findFile(payload.v, rel);
     if (!file) return sendText(res, 404, 'Datei nicht gefunden.');
 
     const headers = {
       'Content-Type': uploads.contentType(file.path),
-      'Cache-Control': 'private, max-age=600',
+      'Cache-Control': draft ? 'no-store' : 'private, max-age=600',
       ETag: `"${file.sha256}"`,
       'Accept-Ranges': 'bytes',
     };
@@ -165,16 +187,80 @@ function createAppsHost(ctx) {
   }
 
   /**
+   * The validated schulhub.json of the code that is running: a version's stored
+   * copy, or - for the owner's editor preview - the draft's file, parsed now.
+   */
+  function manifestFor(appRow, versionId) {
+    if (versionId === 'draft') {
+      const f = uploads.findDraftFile(appRow.id, 'schulhub.json');
+      return f && f.size <= 64 * 1024 ? parseManifest(uploads.readBlob(f.sha256).toString('utf8')).manifest || manifestOf(null) : manifestOf(null);
+    }
+    return manifestOf(db.get('SELECT manifest FROM app_versions WHERE id = ? AND app_id = ?', versionId, appRow.id));
+  }
+
+  /**
    * All methods. Permissions are decided here; `store` only keeps data and is
    * always limited to this app (live tables, or memory during a preview).
    */
-  function methods(appRow, user, classId, store) {
+  function methods(appRow, user, classId, store, versionId) {
     const shared = sharedApi(store, '', appRow.owner_id === user.id || access.isAdmin(user));
     const needClass = () => {
       if (!classId) throw new ApiError('no_class', 'Die App wurde nicht aus einer Klasse heraus geöffnet.');
       return sharedApi(store, classId, access.canManageClass(user, classId));
     };
+    let manifestCache = null;
+    const manifest = () => (manifestCache = manifestCache || manifestFor(appRow, versionId));
+    const achievementDef = (id) => manifest().achievements.find((a) => a.id === id);
+    const publicAchievement = (def, at) =>
+      def.secret && !at
+        ? { id: def.id, title: 'Geheimer Erfolg', description: '', emoji: '❔', secret: true, unlocked: false, at: null }
+        : { id: def.id, title: def.title, description: def.description, emoji: def.emoji, secret: def.secret, unlocked: Boolean(at), at: at || null };
+    const fileName = (p) => {
+      if (!p || typeof p.name !== 'string' || !KEY.test(p.name)) throw new ApiError('bad_key', 'Ungültiger Dateiname (erlaubt: Buchstaben, Ziffern, _ . : -, höchstens 64 Zeichen).');
+      return p.name;
+    };
     return {
+      // ----- progress: one number 0..1 per person and app, shown to them and their teachers -----
+      'progress.set': (p) => {
+        const v = number(p && p.value);
+        if (v === null) throw new ApiError('bad_value', 'Der Fortschritt muss eine Zahl zwischen 0 und 1 sein.');
+        store.progressPut(Math.min(1, Math.max(0, v)), cleanText(p.label, 60));
+        return true;
+      },
+      'progress.get': () => {
+        const r = store.progressGet();
+        return r ? { value: r.value, label: r.label, at: r.updated_at } : null;
+      },
+
+      // ----- achievements: only those declared in schulhub.json can be unlocked -----
+      'achievements.list': () => {
+        const unlocked = new Map(store.achievementsUnlocked().map((r) => [r.achievement, r.unlocked_at]));
+        return manifest().achievements.map((def) => publicAchievement(def, unlocked.get(def.id)));
+      },
+      'achievements.unlock': (p) => {
+        const id = p && typeof p.id === 'string' ? p.id : '';
+        const def = KEY.test(id) && achievementDef(id);
+        if (!def) throw new ApiError('unknown_achievement', 'Diesen Erfolg gibt es nicht. Erfolge stehen in schulhub.json unter "achievements".');
+        const isNew = store.achievementPut(def.id);
+        return { ...publicAchievement(def, Date.now()), new: isNew };
+      },
+
+      // ----- per-class settings: the teacher edits them in the Hub; apps only read -----
+      'settings.all': () => {
+        const row = classId ? db.get('SELECT value FROM class_app_settings WHERE class_id = ? AND app_id = ?', classId, appRow.id) : null;
+        return effectiveSettings(manifest(), row ? JSON.parse(row.value) : null);
+      },
+
+      // ----- files (content travels through PUT/GET /_hub/files/<name>; these are the small calls) -----
+      'files.list': () => store.fileList().map((f) => ({ name: f.name, type: f.type, size: f.size, updatedAt: f.updated_at })),
+      'files.remove': (p) => store.fileDelete(fileName(p)),
+
+      // ----- multiplayer: PREPARED, NOT ENABLED (see SECURITY.md "Still open") -----
+      // The permission rule exists (access.canJoinRoom); a transport does not.
+      'room.join': () => {
+        throw new ApiError('not_available', 'Mehrspieler ist in diesem Hub noch nicht eingeschaltet.');
+      },
+
       'save.get': (p) => decode(store.saveGet(key(p))),
       'save.keys': () => store.saveKeys(),
       'save.set': (p) => {
@@ -236,24 +322,80 @@ function createAppsHost(ctx) {
     };
   }
 
+  /** Who is calling, and which store their data goes to (memory for previews). */
+  function caller(req, appRow) {
+    // Same-origin calls only: a foreign page cannot use this API even with a stolen token header.
+    const origin = req.headers.origin;
+    if (origin && origin !== config.appOrigin(appRow.origin_key)) throw new ApiError('forbidden', 'Nicht erlaubt.', 403);
+    const who = authenticate(req, appRow);
+    if (!limiter.hit('sdk', `${who.user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Anfragen. Bitte kurz warten.', 429);
+    const store = who.preview
+      ? previewStores.previewStore(db, appRow, who.user, `${who.sid}:${appRow.id}:${who.versionId}`, L)
+      : liveStore(db, appRow, who.user, { userFiles });
+    return { ...who, store };
+  }
+  function apiFailure(res, err) {
+    if (err instanceof ApiError || err instanceof FileError) return sendJson(res, err.status === 200 ? 200 : err.status, { ok: false, error: { code: err.code, message: err.message } });
+    console.error(err);
+    sendJson(res, 500, { ok: false, error: { code: 'server_error', message: 'Da ist etwas schiefgegangen.' } });
+  }
+
   async function api(req, res, appRow) {
     try {
-      // Same-origin calls only: a foreign page cannot use this API even with a stolen token header.
-      const origin = req.headers.origin;
-      if (origin && origin !== config.appOrigin(appRow.origin_key)) throw new ApiError('forbidden', 'Nicht erlaubt.', 403);
-      const { user, classId, preview, versionId, sid } = authenticate(req, appRow);
-      if (!limiter.hit('sdk', `${user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Anfragen. Bitte kurz warten.', 429);
+      const { user, classId, versionId, store } = caller(req, appRow);
       const body = await readJson(req, L.saveValueBytes + 4096);
-      const store = preview ? previewStores.previewStore(db, appRow, user, `${sid}:${appRow.id}:${versionId}`) : liveStore(db, appRow, user);
-      const table = methods(appRow, user, classId, store);
+      const table = methods(appRow, user, classId, store, versionId);
       const fn = body && typeof body.method === 'string' && Object.hasOwn(table, body.method) ? table[body.method] : null;
       if (!fn) throw new ApiError('unknown_method', 'Diese Funktion gibt es nicht.');
       const params = body.params && typeof body.params === 'object' ? body.params : {};
       sendJson(res, 200, { ok: true, result: fn(params) });
     } catch (err) {
-      if (err instanceof ApiError) return sendJson(res, err.status, { ok: false, error: { code: err.code, message: err.message } });
-      console.error(err);
-      sendJson(res, 500, { ok: false, error: { code: 'server_error', message: 'Da ist etwas schiefgegangen.' } });
+      apiFailure(res, err);
+    }
+  }
+
+  /** Raw request body, refused beyond `max` bytes. */
+  function readBody(req, max) {
+    return new Promise((resolve, reject) => {
+      const chunks = [];
+      let size = 0;
+      req.on('data', (c) => {
+        size += c.length;
+        if (size <= max) return chunks.push(c);
+        chunks.length = 0;
+        reject(new ApiError('too_large', `Die Datei ist zu groß (höchstens ${Math.round(max / 1024)} KB).`, 413));
+        if (size > max * 4) req.destroy();
+      });
+      req.on('error', () => reject(new ApiError('bad_request', 'Ungültige Anfrage.', 400)));
+      req.on('end', () => (size > max ? undefined : resolve(Buffer.concat(chunks))));
+    });
+  }
+
+  /**
+   * hub.files content: PUT /_hub/files/<name> stores one file for the calling
+   * person, GET returns it. Same token, origin and rate rules as the API. The
+   * stored type comes from a fixed list and is always sent with nosniff.
+   */
+  async function filesApi(req, res, appRow, rawName) {
+    try {
+      let name;
+      try {
+        name = decodeURIComponent(rawName);
+      } catch {
+        throw new ApiError('bad_key', 'Ungültiger Dateiname.');
+      }
+      if (!KEY.test(name)) throw new ApiError('bad_key', 'Ungültiger Dateiname (erlaubt: Buchstaben, Ziffern, _ . : -, höchstens 64 Zeichen).');
+      const { user, store } = caller(req, appRow);
+      if (req.method === 'PUT') {
+        if (!limiter.hit('sdkFiles', `${user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Dateien in kurzer Zeit. Bitte kurz warten.', 429);
+        const body = await readBody(req, L.fileBytes);
+        return sendJson(res, 200, { ok: true, result: store.filePut(name, req.headers['content-type'], body) });
+      }
+      const f = store.fileGet(name);
+      if (!f) return sendJson(res, 404, { ok: false, error: { code: 'not_found', message: 'Diese Datei gibt es nicht.' } });
+      send(res, 200, f.data(), { 'Content-Type': f.type, 'Content-Disposition': 'attachment', 'Content-Length': f.size });
+    } catch (err) {
+      apiFailure(res, err);
     }
   }
 
@@ -265,6 +407,7 @@ function createAppsHost(ctx) {
       const pathname = String(req.url).split('?')[0];
       if (pathname === '/_hub/info' && req.method === 'GET') return sendJson(res, 200, { hub: true, hubOrigin: config.hubOrigin });
       if (pathname === '/_hub/api' && req.method === 'POST') return void api(req, res, appRow);
+      if (pathname.startsWith('/_hub/files/') && (req.method === 'GET' || req.method === 'PUT')) return void filesApi(req, res, appRow, pathname.slice(12));
       if (pathname.startsWith('/~') && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, appRow, pathname.slice(2));
       return sendText(res, 404, 'Nicht gefunden.');
     } catch (err) {

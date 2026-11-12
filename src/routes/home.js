@@ -70,7 +70,7 @@ module.exports = (app, ctx) => {
     app.post('/dev/login', (req, res, next) => {
       const user = db.get("SELECT * FROM users WHERE id = ? AND oid LIKE 'dev-%' AND disabled = 0", String(req.body.user || ''));
       if (!user) return next(new HttpError(400, 'Diese Testperson gibt es nicht.'));
-      db.run('UPDATE users SET last_login_at = ? WHERE id = ?', Date.now(), user.id);
+      db.run('UPDATE users SET last_login_at = ?, flagged_inactive_at = NULL WHERE id = ?', Date.now(), user.id);
       auth.establishSession(req, user, (err, target) => (err ? next(err) : res.redirect(303, target)));
     });
   }

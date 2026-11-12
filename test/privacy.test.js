@@ -14,7 +14,7 @@ let A, L, Y, K, M, B, LE;
 let cls7b, cls9a, game, miaApp;
 
 const teacherClass = (userId) => h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher'", userId).id;
-const joinCode = (classId) => h.db.get('SELECT code FROM join_codes WHERE class_id = ?', classId).code;
+const joinCode = (classId) => h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", classId).code;
 const names = (res) => res.json().result.entries.map((e) => e.name);
 
 before(async () => {
