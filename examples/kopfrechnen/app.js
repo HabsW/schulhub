@@ -33,7 +33,11 @@ function el(tag, attrs, ...children) {
   for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) node.append(c);
   return node;
 }
-const show = (view) => document.querySelectorAll('[data-view]').forEach((s) => (s.hidden = s.dataset.view !== view));
+/** Eine Ansicht zeigen. body[data-screen] erlaubt dem CSS, auf kleinen Bildschirmen beim Spielen Platz zu sparen. */
+function show(view) {
+  document.querySelectorAll('[data-view]').forEach((s) => (s.hidden = s.dataset.view !== view));
+  document.body.dataset.screen = view;
+}
 const firstName = (name) => (/^(Herr|Frau)\s/.test(name) ? name : name.split(' ')[0]);
 const rnd = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 const decimal = (n, digits = 1) => n.toLocaleString('de-DE', { minimumFractionDigits: digits, maximumFractionDigits: digits });
