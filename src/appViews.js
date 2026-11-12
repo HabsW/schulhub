@@ -59,7 +59,7 @@ function reportList(report, { href = null } = {}) {
     const where = it.file ? `${it.file}${it.line ? `, Zeile ${it.line}` : ''}` : '';
     const link = href && it.file ? href(it) : '';
     return html`<li class="apps-report-item"><span class="apps-level apps-level-${level}">${icon(LEVELS[level].icon)}</span>
-      <div class="apps-report-text"><span><span class="visually-hidden">${LEVELS[level].label}: </span>${it.text}</span>${where ? html`<span class="meta">${link ? html`<a href="${link}">${where}</a>` : where}</span>` : ''}</div></li>`;
+      <div class="apps-report-text"><span><span class="visually-hidden">${LEVELS[level].label}: </span>${it.text}</span>${where ? html`<span class="meta">${link ? html`<a class="apps-loclink" href="${link}">${where}</a>` : where}</span>` : ''}</div></li>`;
   })}</ul>`;
 }
 

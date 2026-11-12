@@ -24,8 +24,9 @@
     sheet.addEventListener('toggle', function () {
       if (!sheet.open) return;
       sheets.forEach(function (other) { if (other !== sheet) other.open = false; });
+      // The sheet opens right at the bar, so it is already in view: never scroll the page for it.
       var text = sheet.querySelector('textarea');
-      if (text) text.focus();
+      if (text) text.focus({ preventScroll: true });
     });
   });
   document.addEventListener('keydown', function (event) {

@@ -105,6 +105,7 @@ module.exports = (app, ctx) => {
     const diff = baseVisible ? diffVersions(uploads, base.id, version.id) : null;
     const report = V.parseReport(version);
     const sourceHref = (p) => `/apps/${a.id}/versionen/${version.id}/quelltext?datei=${encodeURIComponent(p)}`;
+    const fileLink = (p) => `${sourceHref(p)}#datei`; // opens the source viewer at the code
 
     // ----- preview: embedded exactly like the player -----
     const fileToken = tokens.sign('files', { a: a.id, v: version.id }, config.fileTokenSeconds);
@@ -163,16 +164,16 @@ module.exports = (app, ctx) => {
 
     const reportBlock = html`<section class="review-block" id="bericht" aria-labelledby="h-bericht">
       <div class="review-blockhead"><h2 id="h-bericht">Prüfbericht</h2>${V.reportBadges(report)}</div>
-      ${V.reportList(report, { href: (it) => `${sourceHref(it.file)}${it.line ? `#L${it.line}` : ''}` })}
+      ${V.reportList(report, { href: (it) => `${sourceHref(it.file)}${it.line ? `#L${it.line}` : '#datei'}` })}
     </section>`;
 
     const changesBlock = html`<section class="review-block" id="aenderungen" aria-labelledby="h-aenderungen">
       <div class="review-blockhead"><h2 id="h-aenderungen">${diff ? `Änderungen seit Version ${base.number}` : 'Dateien'}</h2>${diff && diff.unchanged ? html`<span class="meta">${plural(diff.unchanged, 'Datei', 'Dateien')} unverändert</span>` : ''}</div>
-      ${diff ? V.diffView(diff, { sourceHref })
+      ${diff ? V.diffView(diff, { sourceHref: fileLink })
         : html`<p class="meta mb-4">${base && !baseVisible ? 'Die bisher freigegebene Version kannst du nicht ansehen.'
           : request.version_id === version.id ? `Genau diese Version war in ${cls.name} schon freigegeben – es gibt nichts zu vergleichen.`
             : `Erste Einreichung in ${cls.name} – es gibt noch nichts zum Vergleichen.`} Diese Dateien gehören zur Version:</p>
-          ${V.fileListView(uploads.listFiles(version.id), { sourceHref, isText: uploads.isTextFile })}`}
+          ${V.fileListView(uploads.listFiles(version.id), { sourceHref: fileLink, isText: uploads.isTextFile })}`}
     </section>`;
 
     const declaredBlock = html`<section class="review-block" aria-labelledby="h-erklaert">
@@ -201,7 +202,7 @@ module.exports = (app, ctx) => {
       });
     }
     const decide = readOnly ? '' : html`<div class="review-decide" id="entscheiden">
-      <p class="review-decide-what"><span>Version ${version.number}</span> <span class="meta">für</span> <strong>${cls.name}</strong></p>
+      <p class="review-decide-what">Version ${version.number} <span class="meta">für</span> <strong>${cls.name}</strong></p>
       <div class="review-decide-actions">
         <details class="review-act"${kept(req, 'grund') ? html` open` : ''}>
           <summary class="btn danger review-act-btn">${icon('undo')}<span>Zurückgeben</span></summary>
@@ -231,13 +232,12 @@ module.exports = (app, ctx) => {
       actions: html`${linkButton(`/apps/${a.id}/versionen/${version.id}/quelltext`, 'Quelltext', { kind: 'quiet', icon: 'fileCode' })}${next ? linkButton(`/pruefen/${next.class_id}/${next.app_id}`, 'Überspringen', { kind: 'quiet', icon: 'arrowRight' }) : ''}`,
     });
 
-    // The decision bar is the bench's last item: it spans the whole bench and sticks to the bottom
-    // of the screen while the bench is in view (CSS only; see review.css).
+    // The decision bar opens the panel: from 1200px it stays at the top of the panel, next to the
+    // preview's toolbar; below that it is fixed at the bottom of the screen (see review.css).
     const body = html`${head}${top}
       <div class="review-bench">
         ${preview}
-        <div class="review-panel${readOnly ? '' : ' review-panel-decide'}">${whatsNew}${reportBlock}${changesBlock}${declaredBlock}${historyBlock}</div>
-        ${decide}
+        <div class="review-panel${readOnly ? '' : ' review-panel-decide'}">${decide}${whatsNew}${reportBlock}${changesBlock}${declaredBlock}${historyBlock}</div>
       </div>`;
     res.send(page(req, {
       title: `Prüfen: ${a.name}`, body, active: 'klassen', width: 'wide', classId: cls.id,
