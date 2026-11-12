@@ -375,7 +375,7 @@ module.exports = (app, ctx) => {
       'INSERT INTO feedback (id, class_id, student_id, author_id, app_id, assignment_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       newId(), cls.id, student.id, req.user.id, appId, x ? x.id : null, text, Date.now()
     );
-    services.notify([student.id], 'rueckmeldung', `Neue Rückmeldung von ${req.user.name}${x ? ` zu „${x.title}“` : appName ? ` zu „${appName}“` : ''} (${cls.name})`, '/rueckmeldungen');
+    services.notify([student.id], 'rueckmeldung', `Neue Rückmeldung von ${req.user.name}${x ? ` zu „${x.title}“` : appName ? ` zu „${appName}“` : ''} (${cls.name})`, '/rueckmeldungen', { subjectId: req.user.id });
     flash(req, `Deine Rückmeldung an ${student.name} ist gesendet.`);
     res.redirect(303, kit.backTo(req.body.zurueck, `/klassen/${cls.id}`));
   });

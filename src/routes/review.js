@@ -108,7 +108,7 @@ module.exports = (app, ctx) => {
     const fileLink = (p) => `${sourceHref(p)}#datei`; // opens the source viewer at the code
 
     // ----- preview: embedded exactly like the player -----
-    const fileToken = tokens.sign('files', { a: a.id, v: version.id }, config.fileTokenSeconds);
+    const fileToken = tokens.sign('files', { a: a.id, v: version.id, u: req.user.id }, config.fileTokenSeconds);
     const origin = config.appOrigin(a.origin_key);
     const preview = html`<section class="review-preview" aria-label="Vorschau von Version ${version.number}">
       <div class="review-toolbar">
@@ -241,7 +241,7 @@ module.exports = (app, ctx) => {
       </div>`;
     res.send(page(req, {
       title: `Prüfen: ${a.name}`, body, active: 'klassen', width: 'wide', classId: cls.id,
-      styles: ['css/apps.css', 'css/review.css'], scripts: ['player.js', 'review.js'],
+      styles: ['css/apps.css', 'css/review.css', 'css/frames.css'], scripts: ['player.js', 'review.js'],
     }));
   });
 
@@ -280,7 +280,7 @@ module.exports = (app, ctx) => {
       "INSERT INTO comments (id, app_id, author_id, body, created_at, kind, version_id, class_id) VALUES (?, ?, ?, ?, ?, 'comment', ?, ?)",
       newId(), a.id, req.user.id, text, Date.now(), version.id, cls.id
     );
-    if (a.owner_id !== req.user.id) services.notify([a.owner_id], 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`);
+    if (a.owner_id !== req.user.id) services.notify([a.owner_id], 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`, { subjectId: req.user.id });
     flash(req, 'Kommentar gesendet.');
     res.redirect(303, `/pruefen/${cls.id}/${a.id}#verlauf`);
   });

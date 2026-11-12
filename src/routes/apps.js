@@ -923,7 +923,7 @@ module.exports = (app, ctx) => {
     db.run("INSERT INTO comments (id, app_id, author_id, body, created_at, kind) VALUES (?, ?, ?, ?, ?, 'comment')", newId(), a.id, req.user.id, text, Date.now());
     // Tell the other side: the owner when someone else writes; the reviewing teachers when the owner writes.
     if (a.owner_id !== req.user.id) {
-      services.notify([a.owner_id], 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`);
+      services.notify([a.owner_id], 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`, { subjectId: req.user.id });
     } else {
       const teachers = db.all(
         `SELECT DISTINCT m.user_id FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
@@ -931,7 +931,7 @@ module.exports = (app, ctx) => {
           WHERE ca.app_id = ? AND ca.request_state IS NOT NULL`,
         a.id
       ).map((r) => r.user_id);
-      services.notify(teachers, 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`);
+      services.notify(teachers, 'kommentar', `${req.user.name} hat „${a.name}“ kommentiert.`, `/apps/${a.id}#verlauf`, { subjectId: req.user.id });
     }
     flash(req, 'Kommentar gesendet.');
     res.redirect(303, `/apps/${a.id}#verlauf`);
