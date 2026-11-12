@@ -93,7 +93,7 @@
 
     if (msg.hub === 'hello') {
       current.then(
-        function (d) { reply({ hub: 'welcome', id: msg.id, token: d.token, expiresIn: d.expiresIn, mode: d.mode, user: d.user, class: d.class, app: d.app }); },
+        function (d) { reply({ hub: 'welcome', id: msg.id, token: d.token, expiresIn: d.expiresIn, mode: d.mode, user: d.user, class: d.class, app: d.app, theme: d.theme }); },
         function () { reply({ hub: 'error', id: msg.id }); }
       );
     } else if (msg.hub === 'refresh') {

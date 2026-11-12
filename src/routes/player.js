@@ -100,6 +100,8 @@ module.exports = (app, ctx) => {
       },
       class: cls ? { id: tokens.pseudonym('class', `${a.id}:${cls.id}`), name: cls.name } : null,
       app: { name: a.name, version: play.version.number },
+      // The display choice only (dark / light / auto) - lets UI-kit apps match the Hub.
+      theme: ['dark', 'light'].includes(user.pref_theme) ? user.pref_theme : 'auto',
     });
   });
 

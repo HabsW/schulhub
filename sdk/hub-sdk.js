@@ -122,7 +122,7 @@
       // get a fresh token shortly before the current one runs out
       setInterval(function () { refresh().catch(function () {}); }, Math.max(60, welcome.expiresIn - 90) * 1000);
       if (welcome.mode === 'preview') forwardConsole(hubOrigin);
-      return { call: call, files: files, mode: welcome.mode, user: welcome.user, class: welcome.class, app: welcome.app };
+      return { call: call, files: files, mode: welcome.mode, user: welcome.user, class: welcome.class, app: welcome.app, theme: welcome.theme === 'light' || welcome.theme === 'dark' ? welcome.theme : 'auto' };
     });
   }
 
@@ -202,12 +202,12 @@
     var cls = store('class');
     var rivals = [['Ada', 0.9], ['Linus', 0.6], ['Grace', 0.35]]; // pretend classmates
 
-    // schulhub.json (achievements, settings) - readable when served by a local web server.
-    var manifest = (global.fetch && global.location && /^https?:$/.test(global.location.protocol)
+    // schulhub.json (achievements, settings): passed in (works on file://), or read from a local web server.
+    var manifest = (opt.manifest && typeof opt.manifest === 'object' ? Promise.resolve(opt.manifest) : global.fetch && global.location && /^https?:$/.test(global.location.protocol)
       ? fetch('schulhub.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
       : Promise.resolve(null)
     ).then(function (m) {
-      if (!m && global.console) console.info('[Hub SDK] Keine schulhub.json gefunden (oder per Doppelklick geöffnet): Erfolge werden lokal ohne Prüfung angenommen.');
+      if (!m && global.console) console.info('[Hub SDK] Keine schulhub.json gefunden (per Doppelklick geöffnet?). Tipp: Hub.connect({ local: { manifest: {...} } }). Erfolge werden lokal ohne Prüfung angenommen.');
       return m || null;
     });
 
@@ -315,7 +315,7 @@
     };
 
     if (global.console) console.info('[Hub SDK] Lokaler Modus: Testperson "' + user.name + '", Daten liegen nur in diesem Browser.');
-    return Promise.resolve({ call: call, files: files, mode: 'local', user: user, class: { id: 'lokal-klasse', name: 'Testklasse' }, app: { name: global.document ? document.title : 'App', version: 0 } });
+    return Promise.resolve({ call: call, files: files, mode: 'local', user: user, class: { id: 'lokal-klasse', name: 'Testklasse' }, app: { name: global.document ? document.title : 'App', version: 0 }, theme: opt.theme === 'light' || opt.theme === 'dark' ? opt.theme : 'auto' });
   }
 
   // ------------------------------------------------------------------- API
@@ -350,6 +350,8 @@
       /** { id, name } der Klasse, aus der die App geöffnet wurde - oder null. */
       class: b.class,
       app: b.app,
+      /** Darstellung, die die Person im Hub gewählt hat: 'dark', 'light' oder 'auto' (wie das Gerät). Mit hub-ui.css wird sie automatisch übernommen. */
+      theme: b.theme,
       /** Spielstand NUR für diese Person in dieser App. */
       save: kv('save'),
       /** Daten für ALLE, die die App nutzen. Lesen: alle. Schreiben: Besitzer/in der App. */
@@ -429,7 +431,13 @@
       .then(function (info) {
         return info && info.hub === true && typeof info.hubOrigin === 'string' ? hubBackend(info.hubOrigin) : localBackend(options);
       })
-      .then(buildApi);
+      .then(buildApi)
+      .then(function (hub) {
+        // Apps that use the UI kit (body.hub-ui) follow the theme chosen in the Hub.
+        var doc = global.document;
+        if (doc && doc.body && doc.body.classList.contains('hub-ui') && hub.theme !== 'auto') doc.documentElement.setAttribute('data-theme', hub.theme);
+        return hub;
+      });
     return connection;
   }
 

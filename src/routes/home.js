@@ -128,7 +128,7 @@ module.exports = (app, ctx) => {
     return html`<div class="stack mb-6">${items.map((an) => notice({
       icon: 'megaphone',
       title: an.title,
-      text: html`${an.body ? html`<span class="pre">${an.body}</span>` : ''}<span class="meta">${an.class_name ? `${an.class_name} · ` : 'Ganze Schule · '}${an.author_name || 'Verwaltung'} · ${formatAgo(an.created_at)}</span>`,
+      text: html`${an.body ? html`<p class="pre">${an.body}</p>` : ''}<p class="meta">${an.class_name ? `${an.class_name} · ` : 'Ganze Schule · '}${an.author_name || 'Verwaltung'} · ${formatAgo(an.created_at)}</p>`,
       actions: postButton(req, `/mitteilungen/ankuendigung/${an.id}/ausblenden`, 'Ausblenden', { kind: 'quiet', size: 'sm' }),
     }))}</div>`;
   }

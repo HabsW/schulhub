@@ -224,7 +224,7 @@ function empty({ icon: ico = 'inbox', title, text = '', actions = '' }) {
 /** Callout. tone: '' | 'ok' | 'wait' | 'danger'. */
 function notice({ tone = '', title = '', text = '', actions = '', icon: ico = '', role = '', cls = '' }) {
   const glyph = ico || { ok: 'checkCircle', wait: 'clock', danger: 'alert' }[tone] || 'info';
-  return html`<div class="notice${tone ? ` ${tone}` : ''}${cls ? ` ${cls}` : ''}"${role ? html` role="${role}"` : ''}>${icon(glyph)}<div class="notice-body">${title ? html`<strong>${title}</strong>` : ''}${text ? html`<span>${text}</span>` : ''}${actions ? html`<div class="actions">${actions}</div>` : ''}</div></div>`;
+  return html`<div class="notice${tone ? ` ${tone}` : ''}${cls ? ` ${cls}` : ''}"${role ? html` role="${role}"` : ''}>${icon(glyph)}<div class="notice-body">${title ? html`<strong>${title}</strong>` : ''}${text ? html`<div class="notice-text">${text}</div>` : ''}${actions ? html`<div class="actions">${actions}</div>` : ''}</div></div>`;
 }
 
 /**
