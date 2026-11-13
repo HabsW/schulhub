@@ -161,3 +161,30 @@ test('Verwaltung: archivierte Klassen nennen den Löschtag mit Jahr – „Sa., 
   const row = list.split(`>${c.name}</a>`)[1].split('</tr>')[0];
   assert.ok(row.includes(`wird am ${day} gelöscht`), row.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200));
 });
+
+// ------------------------------------------------------------- hand-made requests
+
+test('Formulare der Klassen ohne Inhalt (nur das CSRF-Token im Kopf): eine Antwort, kein Serverfehler', async () => {
+  const c = await newClass(T);
+  const csrf = csrfOf(await T.page(`/klassen/${c.id}/einstellungen`));
+  const errors = [];
+  const original = console.error;
+  console.error = (...args) => errors.push(args);
+  try {
+    for (const [url, want] of [
+      ['/klassen', 400], // no name
+      [`/klassen/${c.id}/bearbeiten`, 400],
+      [`/klassen/${c.id}/umbenennen`, 400],
+      [`/klassen/${c.id}/code`, 303], // like the form with its default duration
+      [`/klassen/${c.id}/einladung`, 303],
+      [`/klassen/${c.id}/apps`, 404], // no app
+    ]) {
+      const res = await T.raw('POST', url, { headers: { 'x-csrf-token': csrf } });
+      assert.equal(res.status, want, `${url} -> ${res.status}`);
+    }
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(errors, [], 'nothing was logged as a server error');
+  assert.equal(h.db.get('SELECT name FROM classes WHERE id = ?', c.id).name, c.name, 'the class is unchanged');
+});
