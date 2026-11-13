@@ -318,7 +318,7 @@ npm run restore -- schulhub-sicherung-2026-11-12-2030.zip
 ```
 
 Das Werkzeug prüft das Archiv **vollständig, bevor es etwas schreibt**: nur erlaubte Dateinamen, keine
-Verknüpfungen, begrenzte Größen, genug freier Platz, die Prüfsumme jeder Datei und eine gültige
+Verknüpfungen, begrenzte Größen, genug freier Platz, die Prüfsumme jeder App-Datei und eine gültige
 SchulHub-Datenbank. Erst dann werden die Daten an ihren Platz gelegt. Aus dem Archiv wird nie etwas
 ausgeführt.
 

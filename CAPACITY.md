@@ -194,9 +194,9 @@ again. After every kill the database file is opened and checked before the next 
 2. **Bursts of page requests in the same second.** 90 students joining by QR code in the same second all
    want rendered pages at once; the last waited 0.3 s (before: 1.2 s). Pages cost milliseconds of CPU,
    API calls fractions of one.
-3. **Uploads in memory.** A file upload is read into memory before it is checked (≤ 25 MB, at most 4 at a
-   time per person). A whole class uploading big files at once costs RAM (4 × 25 MB per person) – fine
-   for a school, but the reason not to run on 512 MB.
+3. **Uploads in memory.** A file upload is read into memory before it is checked (≤ 25 MB). Big file bodies
+   held at the same time are capped at 256 MB for everybody together (one person: a quarter); beyond, the
+   uploader waits and sends the file again. Saves of apps never wait for this.
 4. **The disk, for deletions.** Deletions still wait for one flush each (on purpose).
 
 ## Still risky
@@ -204,8 +204,9 @@ again. After every kill the database file is opened and checked before the next 
 - **Measured on a fast desktop CPU and NVMe disk.** A small VM is slower per core and its disk flushes take
   2–10 ms. The margin (66× at saturation, 8 % busy at 3×) is large, but it was not measured on such a VM.
 - **Power cuts / operating-system crashes:** with `synchronous=NORMAL` the last commits before a checkpoint
-  can be lost (the database stays consistent; deletions are flushed and cannot come back). A process
-  crash or `kill -9` loses nothing – tested.
+  can be lost (the database stays consistent). Deletions are flushed (accounts, apps, classes, app data),
+  and a content file is removed only after the commit that freed it is on the disk – so deleted data does
+  not come back and no row points at a removed file. A process crash or `kill -9` loses nothing – tested.
 - **Microsoft sign-in itself** was replaced by a stand-in; Microsoft's own latency and limits are not part
   of these numbers.
 - **One process, one server:** no failover. A restart takes about a second; sessions survive it.
