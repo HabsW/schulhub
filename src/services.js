@@ -438,6 +438,8 @@ function createServices(ctx) {
       setPendingDeletions(pendingDeletions().filter((x) => x.id !== userId));
     }, { durable: true });
   }
+  /** Is the deletion of this account decided and not yet finished? (Then it is never given back by an admin.) */
+  const deletionPending = (userId) => pendingDeletions().some((p) => p.id === userId);
   const PENDING_KEY = 'accounts.deleting';
   function pendingDeletions() {
     try {
@@ -562,7 +564,7 @@ function createServices(ctx) {
   return {
     announcementLink, feedbackLink,
     audit, pruneAudit, notify, recordPlay, maintenance, maintenanceInSteps,
-    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData, markForDeletion, unmarkForDeletion, finishDeletions,
+    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData, markForDeletion, unmarkForDeletion, finishDeletions, deletionPending,
   };
 }
 

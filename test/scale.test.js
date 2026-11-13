@@ -747,7 +747,7 @@ test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist – nie o
       return fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map((f) => pathMod.join(dir, String(f))).filter((f) => fs.statSync(f).isFile()) : [];
     }).sort();
     // A copy of the folder WITHOUT its database - every file in it older than an hour, so only the guards
-    // against a foreign database protect them: a start there must not touch a single file, and must say so.
+    // against a foreign database protect them.
     const bare = fs.mkdtempSync(pathMod.join(require('node:os').tmpdir(), 'schulhub-bare-'));
     copies.push(bare);
     for (const sub of ['blobs', 'userfiles']) fs.cpSync(pathMod.join(dataDir, sub), pathMod.join(bare, sub), { recursive: true });
@@ -755,16 +755,47 @@ test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist – nie o
     for (const f of filesIn(bare)) fs.utimesSync(f, aged, aged);
     const before = filesIn(bare);
     assert.ok(before.some((f) => f.includes(`${pathMod.sep}blobs${pathMod.sep}`)) && before.some((f) => f.includes(`${pathMod.sep}userfiles${pathMod.sep}`)), 'precondition: app files and files from apps');
+    // 1. hub.sqlite missing, or an empty file: the Hub does not start at all - no empty school next to the old
+    //    files, nothing written, nothing removed - and it says what to do.
+    const dbFile = pathMod.join(bare, 'hub.sqlite');
+    /** The error a start on `dir` fails with - or null, after stopping the Hub that started after all. */
+    const startError = async (dir) => {
+      let started;
+      try {
+        started = await startHub({ dataDir: dir });
+      } catch (err) {
+        return err;
+      }
+      await started.stop();
+      return null;
+    };
+    const missing = await startError(bare);
+    assert.equal(missing && missing.code, 'SCHULHUB_DATABASE_MISSING', 'it does not start');
+    assert.match(missing.message, /npm run restore/, 'and says what to do');
+    assert.equal(fs.existsSync(dbFile), false, 'no database was made');
+    fs.writeFileSync(dbFile, '');
+    const empty = await startError(bare);
+    assert.equal(empty && empty.code, 'SCHULHUB_DATABASE_MISSING', 'an empty hub.sqlite is no database either');
+    assert.equal(fs.statSync(dbFile).size, 0, 'the empty file stays empty');
+    assert.deepEqual(filesIn(bare), before, 'not one file touched');
+    // 2. Some other SQLite file named hub.sqlite (no SchulHub tables): the Hub starts with a new school there,
+    //    touches none of the files and says so loudly; started again, it still touches none (its database names
+    //    none of them).
+    fs.rmSync(dbFile);
+    const { DatabaseSync } = require('node:sqlite');
+    const other = new DatabaseSync(dbFile);
+    other.exec('CREATE TABLE notizen (text TEXT); INSERT INTO notizen VALUES (\'etwas anderes\');');
+    other.close();
     const said = [];
     const log = console.error;
     console.error = (...args) => said.push(args.join(' '));
     try {
       const h0 = await startHub({ dataDir: bare });
       await h0.stop(); // removes the helper's own empty folder, not `bare`
-      assert.deepEqual(filesIn(bare), before, 'no database of its own: every file stays');
-      assert.equal(said.filter((s) => /neu angelegt.*hub\.sqlite/.test(s)).length, 2, `and whoever runs the Hub is told (app files, files from apps): ${said}`);
-      // It starts there again (a process manager restarting it): the database is not new any more, but it names
-      // none of these files - still not one of them is touched.
+      assert.deepEqual(filesIn(bare), before, 'a database of its own made at this start: every file stays');
+      const warned = said.filter((s) => s.includes(`${dbFile} wurde bei diesem Start neu angelegt`));
+      assert.equal(warned.length, 2, `and whoever runs the Hub is told (app files, files from apps): ${said}`);
+      assert.ok(warned.some((s) => /schon \d+ App-Dateien?\b/.test(s)) && warned.some((s) => /schon \d+ Dateie?n? aus Apps/.test(s)));
       said.length = 0;
       const h0b = await startHub({ dataDir: bare });
       await h0b.stop();
@@ -1116,6 +1147,59 @@ test('Konto löschen: eine beschlossene Löschung, die nicht fertig wurde, holt 
     assert.ok(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', tara.id), 'given back: still there');
     assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', tara.id).disabled, 0, 'and not blocked');
     assert.deepEqual(pendingOf(h.db), []);
+    // 3. One that keeps failing (a trigger stands in for a full disk) neither ends the night nor stops the
+    //    others: the retention after it still runs, and the account stays blocked and decided.
+    const uwe = h.addUser('Uwe Klemmt', 'student');
+    const ute = h.addUser('Ute Geht', 'student');
+    services.markForDeletion(uwe.id, admin.id);
+    services.markForDeletion(ute.id, admin.id);
+    h.db.run(`CREATE TRIGGER test_no_delete BEFORE DELETE ON users WHEN OLD.id = '${uwe.id}' BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`);
+    services.audit(null, 'test_alt', 'alt');
+    h.db.run("UPDATE audit_log SET at = 1 WHERE action = 'test_alt'");
+    const quiet = console.error;
+    console.error = () => {};
+    try {
+      await services.maintenanceInSteps();
+    } finally {
+      console.error = quiet;
+    }
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', uwe.id).disabled, 1, 'Uwe stays blocked');
+    assert.deepEqual(pendingOf(h.db).map((p) => p.id), [uwe.id], 'and his deletion stays decided');
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', ute.id), undefined, 'Ute\'s deletion is done');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'test_alt'").n, 0, 'and the retention ran');
+    h.db.run('DROP TRIGGER test_no_delete');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Konto löschen: eine beschlossene Löschung lässt sich nicht durch Entsperren zurücknehmen – die Seite sagt „Löschung ausstehend“', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const A = await h.browser().login(admin);
+    const kid = h.addUser('Kim Kind', 'student');
+    services.markForDeletion(kid.id, admin.id); // decided, not finished (it failed at the last start, say)
+    const page = (await A.page(`/admin/konten/${kid.id}`)).text;
+    assert.match(page, /Löschung ausstehend/);
+    assert.ok(!page.includes(`/admin/nutzer/${kid.id}/sperren`), 'no „Entsperren“ button that cannot keep its promise');
+    const res = await A.post(`/admin/nutzer/${kid.id}/sperren`, { an: '0' });
+    assert.equal(res.status, 400);
+    assert.match(res.text, /beschlossen/);
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, 1, 'still blocked');
+    assert.deepEqual(pendingOf(h.db).map((p) => p.id), [kid.id], 'still decided');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'konto_entsperrt'").n, 0);
+    // An ordinary block can still be lifted.
+    const ole = h.addUser('Ole Ander', 'student');
+    await A.page(`/admin/konten/${ole.id}`);
+    assert.equal((await A.post(`/admin/nutzer/${ole.id}/sperren`, { an: '1' })).status, 303);
+    assert.match((await A.page(`/admin/konten/${ole.id}`)).text, /Entsperren/);
+    assert.equal((await A.post(`/admin/nutzer/${ole.id}/sperren`, { an: '0' })).status, 303);
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', ole.id).disabled, 0);
+    // The decided deletion is finished at night.
+    await services.maintenanceInSteps();
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', kid.id), undefined);
   } finally {
     await h.stop();
   }
@@ -1251,7 +1335,15 @@ test('Eigenes Konto löschen: bricht die Löschung nach dem ersten Schritt ab, i
     assert.equal(res.status, 500);
     assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, 0, 'not left blocked');
     assert.deepEqual(pendingOf(h.db), [], 'nothing pending');
-    assert.ok(await h.browser().login(kid), 'she can sign in again');
+    const again = await h.browser().login(kid); // she can sign in again
+    // ... and delete her account for good this time: the log says she did it herself, and names nobody.
+    await again.page('/meine-daten');
+    assert.equal((await again.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' })).status, 303);
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', kid.id), undefined);
+    const entry = h.db.get("SELECT * FROM audit_log WHERE action = 'konto_geloescht' ORDER BY id DESC LIMIT 1");
+    assert.equal(entry.detail, 'durch Nutzer/in selbst');
+    assert.equal(entry.actor_id, null);
+    assert.doesNotMatch(entry.actor_label + entry.target, /Kim/);
   } finally {
     console.error = quiet;
     services.deleteUser = deleteUser;

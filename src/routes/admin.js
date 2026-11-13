@@ -289,6 +289,7 @@ module.exports = (app, ctx) => {
       u.id
     );
     const lastAdmin = u.role === 'admin' && !u.disabled && admins() <= 1;
+    const pending = services.deletionPending(u.id);
     const here = `/admin/konten/${u.id}`;
 
     const roleConfirm = (r) => {
@@ -306,7 +307,7 @@ module.exports = (app, ctx) => {
         <dl class="kv school-kv">
           <div><dt>E-Mail</dt><dd>${u.email}</dd></div>
           <div><dt>Rolle</dt><dd>${ROLE_LABEL[u.role]}</dd></div>
-          <div><dt>Status</dt><dd>${u.disabled ? badge('gesperrt', 'danger') : badge('aktiv', 'ok')}${u.flagged_inactive_at ? html` ${badge(`inaktiv markiert seit ${formatDay(u.flagged_inactive_at)}`, 'wait')}` : ''}</dd></div>
+          <div><dt>Status</dt><dd>${pending ? badge('Löschung ausstehend', 'danger') : u.disabled ? badge('gesperrt', 'danger') : badge('aktiv', 'ok')}${u.flagged_inactive_at ? html` ${badge(`inaktiv markiert seit ${formatDay(u.flagged_inactive_at)}`, 'wait')}` : ''}</dd></div>
           <div><dt>Konto angelegt</dt><dd>${formatDate(u.created_at)}</dd></div>
           <div><dt>Letzte Anmeldung</dt><dd>${u.last_login_at ? formatDate(u.last_login_at) : 'nie'}</dd></div>
           <div><dt>Klassen</dt><dd>${classes.length
@@ -329,6 +330,7 @@ module.exports = (app, ctx) => {
     </div><div>
       <section class="section" aria-labelledby="s-sperren">${sectionHead(u.disabled ? 'Gesperrt' : 'Sperren', { id: 's-sperren' })}
         ${self ? html`<p class="school-note">Dich selbst kannst du nicht sperren.</p>`
+          : pending ? html`<p class="school-note">Die Löschung dieses Kontos ist beschlossen, aber noch nicht fertig. Sie wird in der Nacht oder beim nächsten Start des Hubs zu Ende geführt – „Konto endgültig löschen“ versucht es sofort noch einmal. Entsperren geht nicht mehr.</p>`
           : u.disabled ? html`<p class="muted mb-4">${u.name} kann sich nicht anmelden. Alle Daten sind erhalten.</p>
               ${postButton(req, `/admin/nutzer/${u.id}/sperren`, 'Entsperren', { icon: 'lock', fields: { an: '0', zurueck: here }, confirm: `${u.name} entsperren?\n${u.name} kann sich danach wieder mit dem Schulkonto anmelden.` })}`
             : html`<p class="muted mb-4">Ein gesperrtes Konto wird sofort überall abgemeldet und kann sich nicht mehr anmelden. Alle Daten bleiben erhalten.</p>
@@ -392,6 +394,9 @@ module.exports = (app, ctx) => {
     const u = target(req);
     if (u.id === req.user.id) throw bad('Du kannst dich nicht selbst sperren.');
     const on = req.body.an === '1';
+    // A decided deletion (it could not be finished yet) is finished at night or at the next start - unblocking
+    // must not pretend the person can come back.
+    if (!on && services.deletionPending(u.id)) throw bad(`Die Löschung des Kontos von ${u.name} ist beschlossen und wird zu Ende geführt – entsperren geht nicht mehr.`);
     db.run('UPDATE users SET disabled = ? WHERE id = ?', on ? 1 : 0, u.id);
     if (on) db.run('DELETE FROM sessions WHERE user_id = ?', u.id); // signed out everywhere, immediately
     services.audit(req.user, on ? 'konto_gesperrt' : 'konto_entsperrt', u.name, '', { subjectId: u.id });

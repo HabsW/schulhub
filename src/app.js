@@ -4,6 +4,7 @@
 //   - <key>.<apps domain>     -> appsHost.js (static app files + SDK data API)
 // Any other Host header is refused.
 
+const fs = require('node:fs');
 const path = require('node:path');
 const http = require('node:http');
 const express = require('express');
@@ -203,8 +204,50 @@ function keptFields(body) {
   return out;
 }
 
+/**
+ * A data folder with content files but without its database - hub.sqlite missing or empty (moved away, lost, a
+ * copy of the folder without it) - does not start: the Hub would open an empty school next to the old files, and
+ * once that school named files of its own, a later start would remove the old ones (uploads.sweep).
+ */
+function checkDataFolder(dataDir) {
+  const dbFile = path.join(dataDir, 'hub.sqlite');
+  let size = 0;
+  try {
+    size = fs.statSync(dbFile).size;
+  } catch {
+    // missing
+  }
+  if (size > 0) return;
+  const found = ['blobs', 'userfiles'].filter((sub) => hasContentFile(path.join(dataDir, sub))).map((sub) => `${sub}/`);
+  if (!found.length) return;
+  throw Object.assign(new Error(
+    `Die Datenbank ${dbFile} fehlt (oder ist leer), aber im Datenordner liegen schon Dateien (${found.join(', ')}). ` +
+      'Der Hub startet so nicht: Er würde eine leere Schule neben den alten Dateien anlegen. ' +
+      'Lege die richtige hub.sqlite zurück oder stelle eine Sicherung wieder her (npm run restore). ' +
+      `Wer bewusst ganz neu beginnt, löscht den ganzen Datenordner – oder räumt auch ${found.join(' und ')} weg.`
+  ), { code: 'SCHULHUB_DATABASE_MISSING' });
+}
+/** Is there at least one stored content file (<dir>/<xx>/<sha256>)? */
+function hasContentFile(dir) {
+  let subs;
+  try {
+    subs = fs.readdirSync(dir);
+  } catch {
+    return false;
+  }
+  return subs.some((sub) => {
+    if (!/^[0-9a-f]{2}$/.test(sub)) return false;
+    try {
+      return fs.readdirSync(path.join(dir, sub)).some((name) => /^[0-9a-f]{64}$/.test(name));
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** Create everything. Returns { ctx, start(), stop() }. */
 function createHub(config) {
+  checkDataFolder(config.dataDir);
   const db = openDb(path.join(config.dataDir, 'hub.sqlite'));
   const ctx = { config, db };
   // While a backup copies the database (in a worker thread, see dbJobs.js), no content file may be

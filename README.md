@@ -317,12 +317,11 @@ npm run restore -- schulhub-sicherung-2026-11-12-2030.zip
 # 3. Hub starten – alle melden sich neu an
 ```
 
-Den Hub nie ohne seine Datenbank `data/hub.sqlite` starten (etwa während einer Kopie) und nie eine ältere
-oder fremde `hub.sqlite` von Hand hineinlegen – wiederherstellen nur mit `npm run restore`. Ohne Datenbank
-legt der Hub eine leere Schule an und meldet das im Log („ACHTUNG: Die Datenbank wurde bei diesem Start neu
-angelegt …“): dann sofort stoppen und die richtige Datenbank zurücklegen – sobald in der leeren Schule etwas
-hochgeladen wurde, entfernt ein späterer Start die alten Dateien. Eine ältere oder fremde Datenbank entfernt
-beim Start alle Dateien, die sie nicht kennt und die älter als eine Stunde sind.
+Fehlt die Datenbank `data/hub.sqlite` (oder ist sie leer), während im Datenordner schon Dateien liegen,
+**startet der Hub nicht** und sagt, was zu tun ist – statt eine leere Schule neben den alten Dateien
+anzulegen. Nie eine ältere oder fremde `hub.sqlite` von Hand hineinlegen – wiederherstellen nur mit
+`npm run restore`: Der Hub räumt beim Start Dateien weg, die seine Datenbank nicht kennt und die älter als
+eine Stunde sind; mit der falschen Datenbank wären das die Dateien der Schule.
 
 Das Werkzeug prüft das Archiv **vollständig, bevor es etwas schreibt**: nur erlaubte Dateinamen, keine
 Verknüpfungen, begrenzte Größen, genug freier Platz, die Prüfsumme jeder App-Datei und eine gültige

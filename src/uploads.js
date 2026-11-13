@@ -11,7 +11,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const yauzl = require('yauzl');
-const { HttpError } = require('./util');
+const { HttpError, plural } = require('./util');
 const invisible = require('./invisible');
 
 // Allowed file types -> the Content-Type they are served with.
@@ -158,9 +158,10 @@ function createUploads(ctx) {
       }
     }
     if (db.createdNow) {
-      // hub.sqlite was missing (moved away, a copy of the folder without it): these files are not this database's.
-      // Untouched - and whoever runs the Hub has to hear of it before anybody works on in an empty school.
-      if (present) console.error(`ACHTUNG: Die Datenbank wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${present} App-Dateien. Fehlt die richtige data/hub.sqlite? Hub stoppen und sie zurücklegen (oder npm run restore), bevor jemand etwas hochlädt – sonst entfernt ein späterer Start diese Dateien.`);
+      // A database created at this start next to files: a hub.sqlite without SchulHub's tables (some other SQLite
+      // file put there; a missing or empty one does not even start, see app.js). These files are not its own:
+      // untouched - and whoever runs the Hub has to hear of it before anybody works on in an empty school.
+      if (present) console.error(`ACHTUNG: Die Datenbank ${db.file} wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${plural(present, 'App-Datei', 'App-Dateien')}. Ist das die richtige Datenbank? Hub stoppen und die richtige zurücklegen (oder npm run restore), bevor jemand weiterarbeitet – sonst entfernt ein späterer Start diese Dateien.`);
       return 0;
     }
     if (present && !used.size) return 0; // files, but a database that names none of them: not this folder's database

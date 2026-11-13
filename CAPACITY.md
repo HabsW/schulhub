@@ -252,9 +252,10 @@ lesson to see what memory really stays.
   backup below the browser download's limit (3.5 GB; beyond, copy `data/` on the server).
 - **A second start on the same data folder** (e.g. a second service by mistake) runs the migrations, the
   retention and the cleanup of unreferenced files on the live data before it fails on the port. Let the
-  process manager run exactly one, never start the Hub without its `hub.sqlite` in place, and never put an
-  older or foreign `hub.sqlite` there by hand (restore with `npm run restore`): the cleanup at start trusts
-  the database it finds and removes the content files it does not name (older than an hour).
+  process manager run exactly one, and never put an older or foreign `hub.sqlite` there by hand (restore
+  with `npm run restore`): the cleanup at start trusts the SchulHub database it finds and removes the content
+  files it does not name (older than an hour). A missing or empty `hub.sqlite` next to content files stops
+  the start with a message.
 
 ## Before go-live: the server
 
@@ -360,6 +361,8 @@ and SECURITY.md name them. Severity as judged when found.
 | 46 | Housekeeping at start that failed – a decided account deletion that could not be finished, the retention on a full disk – kept the Hub from starting (a restart loop); such a deletion is now also tried again every night | low |
 | 47 | An account deleted by an admin whose own account went meanwhile was logged as deleted „durch Nutzer/in selbst“ | low |
 | 48 | Two admins deleting the same account at once, both failing: the account stayed blocked | low |
+| 49 | „Entsperren“ of an account whose deletion was decided said the person could sign in again – the night deleted it anyway | low |
+| 50 | Started without its `hub.sqlite`, the Hub opened an empty school next to the old files; once that school stored a file, a later start removed the old ones. Now such a start is refused | low |
 
 **Open** (documented in SECURITY.md "Still open"): an app that lowers a student's progress can turn a done
 assignment back to open (test marked `todo`); a big upload by an owner with very many stored files costs

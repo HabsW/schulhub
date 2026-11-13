@@ -30,7 +30,14 @@ try {
   process.exit(1);
 }
 
-const hub = createHub(config);
+let hub;
+try {
+  hub = createHub(config);
+} catch (err) {
+  // A refusal whoever runs the Hub can act on (a data folder without its database): the message alone.
+  console.error(err.code === 'SCHULHUB_DATABASE_MISSING' ? err.message : err);
+  process.exit(1);
+}
 if (dev) seedDemo(hub.ctx);
 
 hub.start().then(

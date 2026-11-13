@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { KEY } = require('./manifest');
+const { plural } = require('./util');
 
 const FILE_TYPES = {
   'image/png': (b) => b.length > 8 && b[0] === 0x89 && b.toString('latin1', 1, 4) === 'PNG',
@@ -107,8 +108,8 @@ function createUserFiles(ctx) {
       }
     }
     if (db.createdNow) {
-      // hub.sqlite was missing: these files are not this database's - untouched, and said loudly (see uploads.sweep).
-      if (present) console.error(`ACHTUNG: Die Datenbank wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${present} Dateien aus Apps. Fehlt die richtige data/hub.sqlite? Hub stoppen und sie zurücklegen (oder npm run restore), bevor jemand weiterarbeitet – sonst entfernt ein späterer Start diese Dateien.`);
+      // Not this database's files - untouched, and said loudly (see uploads.sweep).
+      if (present) console.error(`ACHTUNG: Die Datenbank ${db.file} wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${plural(present, 'Datei aus Apps', 'Dateien aus Apps')}. Ist das die richtige Datenbank? Hub stoppen und die richtige zurücklegen (oder npm run restore), bevor jemand weiterarbeitet – sonst entfernt ein späterer Start diese Dateien.`);
       return 0;
     }
     if (present && !used.size) return 0; // files, but a database that names none of them
