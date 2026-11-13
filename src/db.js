@@ -400,6 +400,39 @@ const MIGRATIONS = [
   CREATE INDEX audit_app ON audit_log(app_id);
   CREATE INDEX audit_actor ON audit_log(actor_id);
   `,
+  // ---------------------------------------------------------------- 4 -> 5
+  `
+  -- Every foreign key column gets an index it leads. Without one, deleting a person, an app or a
+  -- class makes SQLite read the whole child table for each row it deletes (ON DELETE CASCADE /
+  -- SET NULL), and "everything of one person" (start page, Meine Daten, quotas) reads whole tables.
+  -- test/scale.test.js fails if a new foreign key comes without one.
+  CREATE INDEX join_codes_class ON join_codes(class_id);
+  CREATE INDEX saves_user ON saves(user_id);
+  CREATE INDEX scores_user ON scores(user_id);
+  CREATE INDEX results_user ON results(user_id, app_id);
+  CREATE INDEX comments_author ON comments(author_id);
+  CREATE INDEX favorites_app ON favorites(app_id);
+  CREATE INDEX assignments_creator ON assignments(created_by);
+  CREATE INDEX assignments_app ON assignments(app_id);
+  CREATE INDEX assignment_done_user ON assignment_done(user_id);
+  CREATE INDEX feedback_assignment ON feedback(assignment_id);
+  CREATE INDEX feedback_app ON feedback(app_id);
+  CREATE INDEX feedback_author ON feedback(author_id);
+  CREATE INDEX progress_user ON progress(user_id);
+  CREATE INDEX achievements_user ON achievements(user_id, unlocked_at);
+  CREATE INDEX class_app_settings_editor ON class_app_settings(updated_by);
+  CREATE INDEX class_app_settings_app ON class_app_settings(app_id);
+  CREATE INDEX user_files_user ON user_files(user_id);
+  CREATE INDEX announcements_author ON announcements(author_id);
+  CREATE INDEX announcements_class ON announcements(class_id);
+  CREATE INDEX announcement_dismissed_user ON announcement_dismissed(user_id);
+  -- Results of a class by time (the teachers' start page counts the last 14 days of each class).
+  CREATE INDEX results_class_time ON results(class_id, created_at);
+  -- Notices by link (an app, its review or an assignment is deleted: its notices go with it).
+  CREATE INDEX notices_href ON notices(href);
+  -- The audit log by kind of entry (its filter, and the last backups on the backup page).
+  CREATE INDEX audit_action ON audit_log(action, id);
+  `,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;
@@ -451,8 +484,17 @@ function schemaForVersion(version, file) {
 
 function openDb(file) {
   const raw = new DatabaseSync(file);
-  raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // WAL with synchronous=NORMAL: a commit is written to the WAL but not flushed to the disk at once
+  // (only at checkpoints). node:sqlite runs inside the one Node process, so a flush at every commit
+  // (the default, FULL) would stop the whole Hub for each save - about 1 ms on a fast SSD, 2-10 ms on
+  // the disks of virtual servers - and cap the school at a few hundred saves per second. NORMAL keeps
+  // the database consistent in every case and loses nothing when the process crashes or is killed;
+  // only a power cut or an operating-system crash can undo the last commits before the checkpoint.
+  // Deleting data must survive even that: those transactions are flushed (tx with { durable: true }).
+  raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   migrate(raw);
+  // Statistics for the query planner (cheap: SQLite only looks at tables that need it, with a row limit).
+  raw.exec('PRAGMA optimize = 0x10002;');
 
   const cache = new Map();
   const stmt = (sql) => {
@@ -465,9 +507,14 @@ function openDb(file) {
     get: (sql, ...params) => stmt(sql).get(...params),
     all: (sql, ...params) => stmt(sql).all(...params),
     run: (sql, ...params) => stmt(sql).run(...params),
-    /** Run fn atomically. fn must be synchronous. Nested calls join the outer one. */
-    tx(fn) {
+    /**
+     * Run fn atomically. fn must be synchronous. Nested calls join the outer one.
+     * durable: the commit is flushed to the disk before tx returns (deletions that must never come
+     * back, even after a power cut) - it then also flushes everything committed before it.
+     */
+    tx(fn, { durable = false } = {}) {
       if (depth > 0) return fn();
+      if (durable) raw.exec('PRAGMA synchronous = FULL;');
       raw.exec('BEGIN IMMEDIATE');
       depth++;
       try {
@@ -479,9 +526,14 @@ function openDb(file) {
         throw err;
       } finally {
         depth--;
+        if (durable) raw.exec('PRAGMA synchronous = NORMAL;');
       }
     },
-    /** Consistent copy of the whole database into a new file (for backups). */
+    /** Planner statistics, refreshed (daily maintenance). */
+    optimize: () => raw.exec('PRAGMA optimize;'),
+    /** The database file (long jobs open their own connection to it, see dbJobs.js). */
+    file,
+    /** Consistent copy of the whole database into a new file, on this thread (tests, scripts). */
     snapshot: (target) => raw.prepare('VACUUM INTO ?').run(target),
     close: () => raw.close(),
   };

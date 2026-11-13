@@ -111,8 +111,12 @@ function createUploads(ctx) {
     return sha;
   }
 
-  /** Delete blobs that no version and no editor draft references any more. */
+  /** Delete blobs that no version and no editor draft references any more (after a running backup). */
   function collectGarbage(shas) {
+    if (ctx.gcHold && ctx.gcHold.count > 0) {
+      for (const sha of shas) ctx.gcHold.blobs.add(sha);
+      return;
+    }
     for (const sha of new Set(shas)) {
       if (db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha)) continue;
       if (db.get('SELECT 1 AS used FROM draft_files WHERE sha256 = ? LIMIT 1', sha)) continue;
@@ -145,6 +149,12 @@ function createUploads(ctx) {
   function addFile(version, ownerId, rawPath, buffer) {
     const { p, junk } = versionFileName(rawPath);
     if (junk) return false;
+    // Checked again now that the body is complete (it may have taken minutes): a version that was
+    // finished meanwhile - and perhaps approved since - never takes another file. From here to the
+    // INSERT below nothing else runs, so this check and the write are one step.
+    if (!db.get("SELECT 1 AS open FROM app_versions WHERE id = ? AND status = 'uploading'", version.id)) {
+      throw fail('Diese Version ist schon fertig und ändert sich nicht mehr. Lade die Datei in eine neue Version hoch.');
+    }
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
 
     const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id);
