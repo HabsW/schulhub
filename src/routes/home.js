@@ -180,7 +180,9 @@ module.exports = (app, ctx) => {
 
   function studentStart(req, user) {
     const recent = recentApps(user, 4);
-    const tasks = assignments.openFor(user.id, { limit: 6 });
+    // The most urgent six are listed; the head counts all of them (each class page lists its own).
+    const open = assignments.openFor(user.id, { limit: 200 });
+    const tasks = open.slice(0, 6);
     const feedback = db.all(
       `SELECT f.*, u.name AS author_name, a.name AS app_name FROM feedback f LEFT JOIN users u ON u.id = f.author_id LEFT JOIN apps a ON a.id = f.app_id
         WHERE f.student_id = ? ORDER BY f.created_at DESC LIMIT 3`,
@@ -220,7 +222,7 @@ module.exports = (app, ctx) => {
           end: a.progress ? html`<span class="num meta">${Math.round(a.progress.value * 100)} %</span>` : '',
         })))}</div>` : ''}</section>` : ''}
 
-      <section class="section" aria-labelledby="s-tasks">${sectionHead('Aufgaben', { id: 's-tasks', count: tasks.length ? String(tasks.length) : null })}
+      <section class="section" aria-labelledby="s-tasks">${sectionHead('Aufgaben', { id: 's-tasks', count: open.length ? String(open.length) : null })}
         ${tasks.length ? list(tasks.map((t) => {
           const due = formatDue(t.due_at);
           return row({
@@ -229,6 +231,7 @@ module.exports = (app, ctx) => {
             end: html`${due.tone ? badge(due.text, due.tone) : html`<span class="meta hide-phone">${due.text}</span>`}${t.started ? html` ${badge('begonnen')}` : ''}`,
           });
         })) : empty({ icon: 'checkCircle', title: 'Keine offenen Aufgaben', text: 'Wenn deine Lehrkraft eine Aufgabe stellt, steht sie hier – mit Termin.' })}
+        ${open.length > tasks.length ? html`<p class="meta mt-2">Hier stehen die ${tasks.length} dringendsten. Alle offenen Aufgaben einer Klasse stehen auf der Seite der Klasse (<a href="/klassen">Klassen</a>).</p>` : ''}
       </section>
 
       ${schoolwide.length ? html`<section class="section" aria-labelledby="s-school">${sectionHead('Für die ganze Schule', { id: 's-school', actions: linkButton('/katalog', 'Alle Apps', { kind: 'quiet', size: 'sm' }) })}
@@ -269,15 +272,26 @@ module.exports = (app, ctx) => {
   }
 
   function teacherStart(req, user) {
+    // Since when the waiting VERSION waits (its submission), oldest first - as in the review queue
+    // (/pruefen). The app's row in the class may be months older (approved in September, version 2 today).
     const waiting = db.all(
-      `SELECT a.id, a.name, a.emoji, a.color, c.id AS class_id, c.name AS class_name, u.name AS owner_name, v.number AS version_number, ca.created_at
+      `SELECT a.id, a.name, a.emoji, a.color, c.id AS class_id, c.name AS class_name, u.name AS owner_name, v.number AS version_number,
+              COALESCE((SELECT MAX(cm.created_at) FROM comments cm
+                         WHERE cm.app_id = ca.app_id AND cm.class_id = ca.class_id AND cm.kind = 'submitted'), ca.created_at) AS since
          FROM class_apps ca JOIN apps a ON a.id = ca.app_id JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
          JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ? AND m.role = 'teacher'
          JOIN users u ON u.id = a.owner_id LEFT JOIN app_versions v ON v.id = ca.requested_version_id
-        WHERE ca.request_state = 'waiting' ORDER BY ca.created_at LIMIT 20`,
+        WHERE ca.request_state = 'waiting' ORDER BY since, a.name COLLATE NOCASE LIMIT 6`,
       user.id
     );
-    const classes = access.visibleClasses(user).filter((c) => c.my_role === 'teacher' || user.role === 'admin').slice(0, 12);
+    // The numbers count everything, not only what the lists below show (the navigation counts the same way).
+    const waitingCount = db.get(
+      `SELECT COUNT(*) AS n FROM class_apps ca JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ? AND m.role = 'teacher'
+         JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL WHERE ca.request_state = 'waiting'`,
+      user.id
+    ).n;
+    const teaching = access.visibleClasses(user).filter((c) => c.my_role === 'teacher' || user.role === 'admin');
+    const classes = teaching.slice(0, 12);
     const now = Date.now();
     const days = [...Array(14)].map((_, i) => dayKey(now - (13 - i) * 86_400_000));
     const activity = (classId) => {
@@ -293,25 +307,38 @@ module.exports = (app, ctx) => {
         WHERE x.due_at IS NOT NULL AND x.due_at > ? ORDER BY x.due_at LIMIT 5`,
       user.id, now - 86_400_000
     );
+    const dueCount = db.get(
+      `SELECT COUNT(*) AS n FROM assignments x
+         JOIN classes c ON c.id = x.class_id AND c.archived_at IS NULL
+         JOIN class_members m ON m.class_id = x.class_id AND m.user_id = ? AND m.role = 'teacher'
+        WHERE x.due_at IS NOT NULL AND x.due_at > ?`,
+      user.id, now - 86_400_000
+    ).n;
+    // Students of the teacher's ACTIVE classes who opened one of that class's apps - what the class
+    // page counts as "aktiv" and what teachers may see (teacherView.js): not last year's archived
+    // classes, not apps of other classes or school-wide apps used at home.
     const activeToday = db.get(
       `SELECT COUNT(DISTINCT p.user_id) AS n FROM plays p JOIN class_members s ON s.user_id = p.user_id AND s.role = 'student'
-         JOIN class_members t ON t.class_id = s.class_id AND t.user_id = ? AND t.role = 'teacher' WHERE p.last_at > ?`,
+         JOIN class_members t ON t.class_id = s.class_id AND t.user_id = ? AND t.role = 'teacher'
+         JOIN classes c ON c.id = s.class_id AND c.archived_at IS NULL
+         JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = s.class_id AND ca.status IN ('approved','removed')
+        WHERE p.last_at > ?`,
       user.id, now - 86_400_000
     ).n;
     const recent = recentApps(user, 3);
 
     return html`
       ${classes.length ? stats([
-        stat({ label: 'Warten auf Prüfung', value: waiting.length, tone: waiting.length ? 'wait' : '', href: '/pruefen', sub: waiting.length ? 'Apps von Schüler/innen' : 'Alles geprüft' }),
-        stat({ label: 'Klassen', value: classes.length, href: '/klassen' }),
+        stat({ label: 'Warten auf Prüfung', value: waitingCount, tone: waitingCount ? 'wait' : '', href: '/pruefen', sub: waitingCount ? 'Apps von Schüler/innen' : 'Alles geprüft' }),
+        stat({ label: 'Klassen', value: teaching.length, href: '/klassen' }),
         stat({ label: 'Heute aktiv', value: activeToday, sub: 'Schüler/innen in deinen Klassen' }),
-        stat({ label: 'Aufgaben fällig', value: dueSoon.length, sub: 'in den nächsten Tagen' }),
+        stat({ label: 'Aufgaben fällig', value: dueCount, sub: 'in den nächsten Tagen' }),
       ]) : ''}
       <div class="grid-2 mt-6"><div>
-        ${waiting.length ? html`<section class="section" aria-labelledby="s-wait">${sectionHead('Wartet auf dich', { id: 's-wait', count: String(waiting.length), actions: linkButton('/pruefen', 'Alle prüfen', { kind: 'quiet', size: 'sm' }) })}
-          <div class="list attention">${waiting.slice(0, 6).map((w) => html`<div class="row">${appIcon(w)}<div class="row-main">
+        ${waiting.length ? html`<section class="section" aria-labelledby="s-wait">${sectionHead('Wartet auf dich', { id: 's-wait', count: String(waitingCount), actions: linkButton('/pruefen', 'Alle prüfen', { kind: 'quiet', size: 'sm' }) })}
+          <div class="list attention">${waiting.map((w) => html`<div class="row">${appIcon(w)}<div class="row-main">
             <a class="row-link row-title" href="/pruefen/${w.class_id}/${w.id}">${w.name}</a>
-            <span class="row-sub">von ${w.owner_name} · ${w.class_name} · Version ${w.version_number || '–'} · ${formatAgo(w.created_at)}</span></div>
+            <span class="row-sub">von ${w.owner_name} · ${w.class_name} · Version ${w.version_number || '–'} · ${formatAgo(w.since)}</span></div>
             <div class="row-end">${badge('wartet', 'wait')}${icon('chevronRight', { cls: 'chev' })}</div></div>`)}</div></section>` : ''}
 
         <section class="section" aria-labelledby="s-cls">${sectionHead('Deine Klassen', { id: 's-cls', actions: classes.length ? linkButton('/klassen/neu', 'Klasse anlegen', { kind: 'quiet', size: 'sm', icon: 'plus' }) : '' })}
@@ -324,6 +351,7 @@ module.exports = (app, ctx) => {
             });
           }))
           : empty({ icon: 'school', title: 'Noch keine Klasse', text: 'Lege deine erste Klasse an. Deine Schüler/innen treten dann per QR-Code oder Link bei.', actions: linkButton('/klassen/neu', 'Erste Klasse anlegen', { kind: 'primary', icon: 'plus' }) })}
+          ${teaching.length > classes.length ? html`<p class="mt-2">${linkButton('/klassen', `Alle ${teaching.length} Klassen`, { kind: 'quiet', size: 'sm' })}</p>` : ''}
         </section>
       </div><div>
         ${dueSoon.length ? html`<section class="section" aria-labelledby="s-due">${sectionHead('Bald fällig', { id: 's-due' })}

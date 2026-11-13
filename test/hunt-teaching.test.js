@@ -152,6 +152,108 @@ test('Mitteilung „Neue Aufgabe“: der Termin steht als Datum drin – „morg
   assert.ok(text.includes(formatDay(dueAt)), `the date itself: ${text}`);
 });
 
+test('Start (Lehrkraft): „Wartet auf dich“ nennt, seit wann die Version wartet – wie die Prüfen-Liste', async () => {
+  const { b: L } = await person('Frau Neu', 'teacher');
+  const { b: M } = await person('Mila Bauerin', 'student');
+  const cls = await newClass(L, '5a');
+  assert.equal((await M.post(`/beitreten/${joinCode(cls)}`)).status, 303);
+  const app = await h.makeApp(M, 'Milas Spiel', { 'index.html': 'v1' });
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: app.published_version_id })).status, 303);
+  // Approved in September; today she publishes version 2, which waits for the teacher.
+  h.db.run('UPDATE class_apps SET created_at = ? WHERE class_id = ? AND app_id = ?', Date.now() - 60 * DAY, cls, app.id);
+  h.db.run("UPDATE comments SET created_at = ? WHERE app_id = ? AND kind = 'submitted'", Date.now() - 60 * DAY, app.id);
+  const v2 = await h.uploadFolder(M, app.id, { 'index.html': 'v2' });
+  assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, { version: v2 })).status, 303);
+  const rowOf = (text) => (/<a class="row-link row-title" href="\/pruefen\/[^"]+">Milas Spiel<\/a>\s*<span class="row-sub">([^<]*)<\/span>/.exec(text) || [])[1] || '';
+  const queue = (await L.get('/pruefen')).text;
+  assert.match(queue, /eingereicht gerade eben/, 'precondition: the review queue says it was just submitted');
+  const start = rowOf((await L.get('/start')).text);
+  assert.ok(start.includes('Version 2'), `precondition: ${start}`);
+  assert.ok(start.endsWith('gerade eben'), `the start page agrees: ${start}`);
+});
+
+// ------------------------------------------------------------------ counts on the start pages
+
+test('Start (Schüler/in): die Zahl der offenen Aufgaben stimmt auch bei mehr als sechs', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ b: K }] = kids;
+  for (let i = 1; i <= 7; i++) {
+    const faellig = new Date(Date.now() + (i + 3) * DAY).toISOString().slice(0, 10);
+    assert.equal((await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: `Aufgabe Nr. ${i}`, faellig })).status, 303);
+  }
+  const start = (await K.get('/start')).text;
+  assert.equal(sectionCount(start, 's-tasks'), '7', 'the head says how many are open');
+});
+
+test('Start (Lehrkraft): Klassen, wartende Apps und fällige Aufgaben werden ganz gezählt – nicht nur so viele, wie die Liste zeigt', async () => {
+  const { b: T } = await person('Frau Viele', 'teacher');
+  const classes = [];
+  for (let i = 0; i < 13; i++) classes.push(await newClass(T, `Kurs ${String(i).padStart(2, '0')}`));
+  const app = await h.makeApp(T, 'Viel-App', { 'index.html': 'x' });
+  for (const c of classes.slice(0, 6)) assert.equal((await T.post(`/klassen/${c}/apps`, { app: app.id })).status, 303);
+  for (const [i, c] of classes.slice(0, 6).entries()) {
+    const faellig = new Date(Date.now() + (i + 1) * DAY).toISOString().slice(0, 10);
+    assert.equal((await T.post(`/klassen/${c}/aufgaben`, { app: app.id, titel: `Bald ${i}`, faellig })).status, 303);
+  }
+  const start = (await T.get('/start')).text;
+  assert.equal(statValue(start, 'Klassen'), '13', 'all 13 classes are counted');
+  assert.equal(statValue(start, 'Aufgaben fällig'), '6', 'all 6 assignments due soon are counted');
+});
+
+test('Start (Lehrkraft): „Wartet auf dich“ zählt alle wartenden Apps – wie die Navigation', async () => {
+  const { b: T } = await person('Herr Prüfer', 'teacher');
+  const cls = await newClass(T, 'Prüfklasse');
+  const now = Date.now();
+  // 21 student apps waiting in his class (written directly: the submission route has its own limits).
+  for (let i = 0; i < 21; i++) {
+    const kid = h.addUser(`Bauer ${i} ${++seq}`, 'student');
+    h.db.run("INSERT INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, 'student', ?)", cls, kid.id, now);
+    const appId = `warte-${seq}`;
+    h.db.run("INSERT INTO apps (id, owner_id, name, emoji, origin_key, created_at, updated_at) VALUES (?, ?, ?, '🎮', ?, ?, ?)", appId, kid.id, `Warte-App ${i}`, `o${seq}x${i}`, now, now);
+    h.db.run("INSERT INTO app_versions (id, app_id, number, status, created_at) VALUES (?, ?, 1, 'ready', ?)", `${appId}-v1`, appId, now);
+    h.db.run('UPDATE apps SET published_version_id = ? WHERE id = ?', `${appId}-v1`, appId);
+    h.db.run("INSERT INTO class_apps (class_id, app_id, status, requested_version_id, request_state, added_by, created_at) VALUES (?, ?, 'pending', ?, 'waiting', ?, ?)", cls, appId, `${appId}-v1`, kid.id, now + i);
+  }
+  const start = (await T.get('/start')).text;
+  assert.match(start, /aria-label="21 warten auf Prüfung"/, 'precondition: the navigation counts 21');
+  assert.equal(statValue(start, 'Warten auf Prüfung'), '21', 'the stat counts all of them');
+  assert.equal(sectionCount(start, 's-wait'), '21', '… and so does the head of the list');
+});
+
+test('Start (Lehrkraft): „Heute aktiv“ zählt keine Schüler/innen aus archivierten Klassen', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ b: K }] = kids;
+  // Last year's class used the same app; it is archived now. A former student of it uses the app
+  // today - in her new class, with a colleague who added his shared app there.
+  const old = await newClass(T, 'Vorjahr');
+  assert.equal((await T.post(`/klassen/${old}/apps`, { app: app.id })).status, 303);
+  const former = await person('Ehemalige', 'student');
+  assert.equal((await former.b.post(`/beitreten/${joinCode(old)}`)).status, 303);
+  assert.equal((await T.post(`/klassen/${old}/archivieren`)).status, 303);
+  const colleague = await person('Frau Kollegin', 'teacher');
+  const fresh = await newClass(colleague.b, 'Neue Klasse');
+  h.db.run('UPDATE apps SET shared = 1 WHERE id = ?', app.id);
+  assert.equal((await colleague.b.post(`/klassen/${fresh}/apps`, { app: app.id })).status, 303);
+  assert.equal((await former.b.post(`/beitreten/${joinCode(fresh)}`)).status, 303);
+  assert.ok(await h.token(former.b, app, fresh), 'she plays the app in her new class today');
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '0', 'nobody of his active classes was active');
+  assert.ok(await h.token(K, app, cls));
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '1', 'his own student, in his class');
+});
+
+test('Start (Lehrkraft): „Heute aktiv“ zählt nur, was die Lehrkraft sehen darf – Apps ihrer Klasse, nicht Apps anderer Klassen', async () => {
+  const { T, cls, kids } = await world(1);
+  const [{ b: K }] = kids;
+  // The student also is in another teacher's class and plays there - an app the first teacher never sees.
+  const elsewhere = await world(0);
+  assert.equal((await K.post(`/beitreten/${joinCode(elsewhere.cls)}`)).status, 303);
+  assert.ok(await h.token(K, elsewhere.app, elsewhere.cls));
+  const overview = (await T.get(`/klassen/${cls}`)).text;
+  assert.equal(statValue(overview, 'Aktiv diese Woche'), '0', 'precondition: the class page counts her as not active in this class');
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '0', 'the start page agrees with the class page');
+});
+
 // ------------------------------------------------------------------ assignment of a removed app
 
 test('Aufgabe zu einer entfernten App: die Schülerin kann sie trotzdem selbst als erledigt markieren', async () => {
