@@ -95,3 +95,52 @@ test('Startseite: eine Lehrkraft mit mehr als 12 Klassen sieht die richtige Zahl
   assert.ok(listed.length === 13 || /href="\/klassen"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span>Alle 13 Klassen<\/span>/.test(main), `listed ${listed.length} of 13 and no link to all of them`);
   assert.equal(h.db.get("SELECT COUNT(*) AS n FROM class_members WHERE user_id = ? AND role = 'teacher'", user.id).n, 13);
 });
+
+// ------------------------------------------------------------- deleting a class
+
+test('Klasse löschen: Mitteilungen, die in die Klasse führen, verschwinden mit ihr – auf jedem Weg, andere Klassen bleiben', async () => {
+  const quiz = await h.makeApp(T, uniq('Quiz'), { 'index.html': '<h1>Quiz</h1>' });
+  h.db.run('UPDATE apps SET shared = 1 WHERE id = ?', quiz.id); // colleagues may use it in their classes
+  const own = await h.makeApp(M, uniq('Mias Spiel'), { 'index.html': '<h1>Mia</h1>' });
+
+  /** A class of `Tb` with Mia, an assignment (Mia is told) and Mia's app waiting (the teachers are told). */
+  async function busyClass(Tb) {
+    const c = await newClass(Tb);
+    assert.equal((await M.post(`/beitreten/${joinCode(c.id)}`)).status, 303);
+    assert.equal((await Tb.post(`/klassen/${c.id}/apps`, { app: quiz.id })).status, 303);
+    const x = await Tb.post(`/klassen/${c.id}/aufgaben`, { app: quiz.id, titel: uniq('Aufgabe') });
+    assert.equal(x.status, 303);
+    assert.equal((await M.post(`/klassen/${c.id}/apps`, { app: own.id })).status, 303);
+    return { ...c, x: idFrom(x) };
+  }
+  const leading = (c) => h.db.all("SELECT user_id, href FROM notices WHERE href = ? OR href LIKE '/pruefen/' || ? || '/%'", `/aufgaben/${c.x}`, c.id);
+
+  const keep = await busyClass(T);
+  // (1) The teacher deletes the class.
+  const gone = await busyClass(T);
+  assert.equal(leading(gone).length, 2, 'Mia was told about the assignment, Tom about the waiting app');
+  await T.page(`/klassen/${gone.id}/einstellungen`);
+  assert.equal((await T.post(`/klassen/${gone.id}/loeschen`)).status, 303);
+  assert.equal((await M.get(`/aufgaben/${gone.x}`)).status, 404, 'the assignment is gone');
+  assert.deepEqual(leading(gone), [], 'no notice leads into the deleted class');
+
+  // (2) The retention rule deletes an archived class.
+  const old = await busyClass(T);
+  await T.page(`/klassen/${old.id}/einstellungen`);
+  assert.equal((await T.post(`/klassen/${old.id}/archivieren`)).status, 303);
+  h.db.run('UPDATE classes SET archived_at = ? WHERE id = ?', Date.now() - 400 * 86_400_000, old.id);
+  h.hub.ctx.services.maintenance();
+  assert.equal(h.db.get('SELECT 1 AS ok FROM classes WHERE id = ?', old.id), undefined);
+  assert.deepEqual(leading(old), []);
+
+  // (3) The only teacher deletes their account: the class goes with it.
+  const solo = await person('Frau Solo', 'teacher');
+  const orphan = await busyClass(solo.b);
+  await solo.b.page('/meine-daten');
+  assert.equal((await solo.b.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' })).status, 303);
+  assert.equal(h.db.get('SELECT 1 AS ok FROM classes WHERE id = ?', orphan.id), undefined);
+  assert.deepEqual(leading(orphan), []);
+
+  // The other class keeps its notices.
+  assert.equal(leading(keep).length, 2, 'notices of another class stay');
+});
