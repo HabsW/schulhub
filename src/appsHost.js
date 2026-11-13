@@ -425,10 +425,20 @@ function createAppsHost(ctx) {
     if (origin && origin !== config.appOrigin(appRow.origin_key)) throw new ApiError('forbidden', 'Nicht erlaubt.', 403);
     const who = authenticate(req, appRow);
     if (!limiter.hit('sdk', `${who.user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Anfragen. Bitte kurz warten.', 429);
-    const store = who.preview
-      ? previewStores.previewStore(db, appRow, who.user, `${who.sid}:${appRow.id}:${who.versionId}`, L)
-      : liveStore(db, appRow, who.user, { userFiles });
-    return { ...who, store };
+    return { ...who, store: storeFor(who, appRow) };
+  }
+  const storeFor = (who, appRow) =>
+    who.preview ? previewStores.previewStore(db, appRow, who.user, `${who.sid}:${appRow.id}:${who.versionId}`, L) : liveStore(db, appRow, who.user, { userFiles });
+  /**
+   * The same question again once the body is read (that takes time): meanwhile the account may have
+   * been deleted or blocked, the person removed from the class, the class archived, the app deleted.
+   * What the call does is decided by the state now - never by the one before the body arrived.
+   */
+  function callerNow(req, appRow) {
+    const app = db.get('SELECT * FROM apps WHERE id = ?', appRow.id);
+    if (!app) throw new ApiError('not_found', 'Diese App gibt es nicht mehr.', 404);
+    const who = authenticate(req, app);
+    return { ...who, app, store: storeFor(who, app) };
   }
   function apiFailure(res, err) {
     if (err instanceof ApiError || err instanceof FileError) return sendJson(res, err.status === 200 ? 200 : err.status, { ok: false, error: { code: err.code, message: err.message } });
@@ -452,13 +462,13 @@ function createAppsHost(ctx) {
 
   async function api(req, res, appRow) {
     try {
-      const { user, classId, versionId, store } = caller(req, appRow);
       admit(req, res, {
-        person: user.id, name: 'Anfrage', into: null, maxBytes: L.saveValueBytes + 4096, tooLarge: 'Die Anfrage ist zu groß.',
+        person: caller(req, appRow).user.id, name: 'Anfrage', into: null, maxBytes: L.saveValueBytes + 4096, tooLarge: 'Die Anfrage ist zu groß.',
         bucket: 'api', limit: L.parallelApiCalls, busy: 'Zu viele gleichzeitige Anfragen. Bitte kurz warten.',
       });
       const body = await readJson(req, L.saveValueBytes + 4096);
-      const table = methods(appRow, user, classId, store, versionId);
+      const { app, user, classId, versionId, store } = callerNow(req, appRow);
+      const table = methods(app, user, classId, store, versionId);
       const fn = body && typeof body.method === 'string' && Object.hasOwn(table, body.method) ? table[body.method] : null;
       if (!fn) throw new ApiError('unknown_method', 'Diese Funktion gibt es nicht.');
       const params = body.params && typeof body.params === 'object' ? body.params : {};
@@ -505,7 +515,7 @@ function createAppsHost(ctx) {
         // Shares the person's upload places with folder, editor and ZIP uploads.
         admit(req, res, { person: user.id, name, into: null, maxBytes: L.fileBytes });
         const body = await readBody(req, L.fileBytes);
-        return sendJson(res, 200, { ok: true, result: store.filePut(name, req.headers['content-type'], body) });
+        return sendJson(res, 200, { ok: true, result: callerNow(req, appRow).store.filePut(name, req.headers['content-type'], body) });
       }
       const f = store.fileGet(name);
       if (!f) return sendJson(res, 404, { ok: false, error: { code: 'not_found', message: 'Diese Datei gibt es nicht.' } });

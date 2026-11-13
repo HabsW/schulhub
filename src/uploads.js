@@ -45,6 +45,7 @@ const extOf = (p) => {
   return dot > 0 ? base.slice(dot + 1).toLowerCase() : '';
 };
 const fail = (message) => new HttpError(400, message);
+const gone = () => new HttpError(404, 'Diese App gibt es nicht mehr.');
 
 /**
  * Validate a relative file path. Returns the normalised path or throws.
@@ -153,6 +154,8 @@ function createUploads(ctx) {
     if (db.get('SELECT 1 AS dup FROM app_files WHERE version_id = ? AND path_lower = ?', version.id, p.toLowerCase())) {
       throw fail(`Die Datei "${p.slice(0, 80)}" kommt doppelt vor.`);
     }
+    // The body took a while: the version may be gone by now (with its app, or its owner's account).
+    if (!db.get("SELECT 1 AS ok FROM app_versions WHERE id = ? AND status = 'uploading'", version.id)) throw gone();
     const sha = writeBlob(buffer);
     db.run('INSERT INTO app_files (version_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', version.id, p, p.toLowerCase(), buffer.length, sha);
     return true;
@@ -328,6 +331,8 @@ function createUploads(ctx) {
     const p = draftFileName(rawPath);
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
     return db.tx(() => {
+      // As with versions: the app (and its owner's account) may be gone by the time the body is read.
+      if (!db.get('SELECT 1 AS ok FROM apps WHERE id = ?', app.id)) throw gone();
       ensureDraft(app);
       const old = db.get('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? AND path_lower = ?', app.id, p.toLowerCase());
       const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM draft_files WHERE app_id = ?', app.id);
