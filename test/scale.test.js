@@ -344,3 +344,32 @@ test('Sicherung: Datenbank und Dateien werden gestreamt – nie als Ganzes in de
     await h.stop();
   }
 });
+
+test('Aufbewahrung: viele alte Protokolleinträge gehen in Schritten – der Hub antwortet dazwischen', async () => {
+  const h = await startHub();
+  try {
+    const old = Date.now() - 400 * 86_400_000;
+    h.db.tx(() => {
+      for (let i = 0; i < 12000; i++) h.db.run("INSERT INTO audit_log (at, actor_label, action, target) VALUES (?, 'System', 'anmeldung', '')", old - i);
+    });
+    const statements = [];
+    const run = h.db.run;
+    h.db.run = (sql, ...p) => {
+      if (/DELETE FROM audit_log/.test(sql)) statements.push(sql);
+      return run(sql, ...p);
+    };
+    let other = 0;
+    const ticker = setInterval(() => other++, 0);
+    try {
+      await h.hub.ctx.services.maintenanceInSteps();
+    } finally {
+      clearInterval(ticker);
+      h.db.run = run;
+    }
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM audit_log WHERE at < ?', Date.now() - 365 * 86_400_000).n, 0, 'all of them are gone');
+    assert.ok(statements.filter((s) => /LIMIT/.test(s)).length >= 6, `in batches (${statements.length} statements)`);
+    assert.ok(other >= 3, 'other work ran between the batches');
+  } finally {
+    await h.stop();
+  }
+});

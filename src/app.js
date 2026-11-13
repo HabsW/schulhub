@@ -243,9 +243,22 @@ function createHub(config) {
       });
     });
 
-  // Retention (audit log, archived classes, inactive-account flags): at start and daily.
+  // Retention (audit log, archived classes, inactive-account flags): at start, then every night at 3 o'clock
+  // (server time) - outside lessons, and with the bulky deletions in batches (services.maintenanceInSteps).
   ctx.services.maintenance();
-  const daily = setInterval(() => ctx.services.maintenance(), 86_400_000);
+  const untilNight = () => {
+    const next = new Date();
+    next.setHours(3, 0, 0, 0);
+    if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+    return next.getTime() - Date.now();
+  };
+  let daily;
+  const nightly = () => {
+    ctx.services.maintenanceInSteps().catch((err) => console.error(err));
+    daily = setTimeout(nightly, untilNight());
+    daily.unref();
+  };
+  daily = setTimeout(nightly, untilNight());
   daily.unref();
 
   return {
@@ -267,7 +280,7 @@ function createHub(config) {
             })
         )
       ).then(() => {
-        clearInterval(daily);
+        clearTimeout(daily);
         db.close();
       }),
   };

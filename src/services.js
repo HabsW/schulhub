@@ -94,6 +94,23 @@ function createServices(ctx) {
     db.optimize();
   }
 
+  /**
+   * Rows of a big table matching `where`, deleted in batches with a pause between them: lowering the
+   * audit retention from 365 to 30 days deletes hundreds of thousands of rows (1.8 s in one statement
+   * on six months of data, measured), and the Hub must keep answering meanwhile. Fixed table names only.
+   */
+  async function deleteInBatches(table, where, value, batch = 2000) {
+    while (db.run(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${where} LIMIT ?)`, value, batch).changes > 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+  /** The daily maintenance while the Hub runs: the bulky deletions in batches first, then the rest (now small). */
+  async function maintenanceInSteps(now = Date.now()) {
+    await deleteInBatches('audit_log', 'at < ?', now - ctx.settings.get('retention.auditDays') * DAY);
+    await deleteInBatches('notices', 'created_at < ?', now - 180 * DAY);
+    maintenance(now);
+  }
+
   // ---------- classes ----------
   function createClass(user, name) {
     const id = newId();
@@ -451,7 +468,7 @@ function createServices(ctx) {
 
   return {
     announcementLink, feedbackLink,
-    audit, pruneAudit, notify, recordPlay, maintenance,
+    audit, pruneAudit, notify, recordPlay, maintenance, maintenanceInSteps,
     createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData,
   };
 }
