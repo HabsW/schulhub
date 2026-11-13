@@ -15,7 +15,19 @@ if (!isMainThread && workerData && workerData.schulhubDbJob) {
     db.exec('PRAGMA busy_timeout = 10000;');
     if (job === 'snapshot') {
       db.prepare('VACUUM INTO ?').run(target);
-      parentPort.postMessage({ ok: true });
+      // The content files the copy refers to (read here, not on the Hub's thread): only these belong into
+      // the backup - a file whose rows were deleted before the copy (an account, app data) is not part of it.
+      const copy = new DatabaseSync(target, { readOnly: true });
+      try {
+        const shas = (sql) => copy.prepare(sql).all().map((r) => r.sha256);
+        parentPort.postMessage({
+          ok: true,
+          blobs: shas('SELECT sha256 FROM app_files UNION SELECT sha256 FROM draft_files'),
+          userfiles: shas('SELECT DISTINCT sha256 FROM user_files'),
+        });
+      } finally {
+        copy.close();
+      }
     } else if (job === 'check') {
       parentPort.postMessage({ ok: true, rows: db.prepare('PRAGMA quick_check').all().map((r) => String(Object.values(r)[0])) });
     }
@@ -37,8 +49,8 @@ function run(file, job, target = null) {
 }
 
 module.exports = {
-  /** A consistent copy of the database file in `target` (for backups). */
-  snapshot: (file, target) => run(file, 'snapshot', target).then(() => undefined),
+  /** A consistent copy of the database file in `target` (for backups); resolves to the content hashes it refers to. */
+  snapshot: (file, target) => run(file, 'snapshot', target).then((a) => ({ blobs: new Set(a.blobs), userfiles: new Set(a.userfiles) })),
   /** PRAGMA quick_check of the database file: ['ok'] or the problems found. */
   quickCheck: (file) => run(file, 'check').then((a) => a.rows),
 };

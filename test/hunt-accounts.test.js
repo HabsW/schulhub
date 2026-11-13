@@ -100,3 +100,80 @@ test('Konto löschen: wer nicht mehr Lehrkraft ist, erfährt trotzdem, welche Kl
   assert.equal(h.db.get('SELECT 1 AS ok FROM classes WHERE id = ?', cls), undefined);
   assert.equal(h.db.get('SELECT COUNT(*) AS n FROM class_members WHERE user_id = ?', student.id).n, 0);
 });
+
+// ------------------------------------------------------------------ backups
+
+test('Sicherung während einer Kontolöschung: die Dateien der gelöschten Person kommen beim Wiederherstellen nicht zurück', async () => {
+  const student = h.addUser('Sina Sicherung', 'student');
+  const S = await h.browser().login(student);
+  const own = await h.makeApp(S, 'Sinas Tagebuch');
+  const t = await h.token(S, own);
+  const drawing = PNG(42);
+  assert.equal((await appRequest(S, own, 'PUT', '/_hub/files/geheim', { token: t.token, body: drawing, type: 'image/png' })).json().ok, true);
+  const sha = sha256(drawing);
+  await S.page('/meine-daten');
+
+  // Sina deletes her account while the backup copies the database (the copy runs in a worker thread
+  // and takes seconds on a big database; here the deletion is put exactly into that moment).
+  const original = dbJobs.snapshot;
+  dbJobs.snapshot = async (...args) => {
+    assert.equal((await S.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' })).status, 303);
+    return original(...args);
+  };
+  let zip;
+  try {
+    await A.page('/admin/sicherung');
+    const res = await A.post('/admin/sicherung');
+    assert.equal(res.status, 200);
+    zip = res.buffer;
+  } finally {
+    dbJobs.snapshot = original;
+  }
+  assert.equal(h.db.get('SELECT 1 AS ok FROM users WHERE id = ?', student.id), undefined, 'the account is gone');
+  assert.ok(!fs.existsSync(h.hub.ctx.userFiles.blobPath(sha)), 'and so is her file in the running Hub');
+
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-hunt-restore-'));
+  try {
+    const zipFile = path.join(work, 'sicherung.zip');
+    fs.writeFileSync(zipFile, zip);
+    const target = path.join(work, 'data');
+    const result = await restoreBackup({ zipFile, dataDir: target });
+    assert.equal(result.missing.userfiles, 0);
+    // The restored database knows nothing of Sina - and her drawing must not lie on the disk without
+    // an owner either, where nothing ever deletes it and every later backup takes it along.
+    const { DatabaseSync } = require('node:sqlite');
+    const restored = new DatabaseSync(path.join(target, 'hub.sqlite'), { readOnly: true });
+    let referenced;
+    try {
+      assert.equal(restored.prepare('SELECT COUNT(*) AS n FROM users WHERE id = ?').get(student.id).n, 0);
+      referenced = new Set(restored.prepare('SELECT DISTINCT sha256 FROM user_files').all().map((r) => r.sha256));
+    } finally {
+      restored.close();
+    }
+    assert.ok(!fs.existsSync(path.join(target, 'userfiles', sha.slice(0, 2), sha)), 'the deleted drawing is not restored');
+    for (const rel of await listStore(path.join(target, 'userfiles'))) assert.ok(referenced.has(rel.split('/')[1]), `no file without an owner: ${rel}`);
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('Wiederherstellung: Dateien, auf die die Datenbank nicht verweist, kommen nicht auf die Platte', async () => {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-hunt-orphan-'));
+  try {
+    // An archive as a backup made before this fix could be: the database plus a file that nobody owns.
+    const dbCopy = path.join(work, 'copy.sqlite');
+    h.db.snapshot(dbCopy);
+    const orphan = PNG(77);
+    const sha = sha256(orphan);
+    const zipFile = path.join(work, 'alt.zip');
+    fs.writeFileSync(zipFile, makeZip([{ name: 'hub.sqlite', data: fs.readFileSync(dbCopy) }, { name: `userfiles/${sha.slice(0, 2)}/${sha}`, data: orphan }]));
+    const lines = [];
+    const target = path.join(work, 'data');
+    const result = await restoreBackup({ zipFile, dataDir: target, log: (l) => lines.push(l) });
+    assert.ok(!fs.existsSync(path.join(target, 'userfiles', sha.slice(0, 2), sha)), 'the file without an owner is not restored');
+    assert.equal(result.userfiles, 0, 'and not counted as restored');
+    assert.ok(lines.some((l) => l.includes('ohne Bezug')), 'the restore says so');
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+});
