@@ -1,0 +1,26 @@
+SchulHub – Demo
+===============
+
+Die ausführliche Anleitung mit Bildern liegt als PDF neben dieser ZIP-Datei:
+"SchulHub-Demo-Anleitung-Mac-Windows.pdf". Alles über SchulHub steht in
+"SchulHub-Dokumentation.pdf".
+
+Kurzfassung
+-----------
+1. Node.js installieren: die LTS-Version von https://nodejs.org (nur einmal nötig).
+2. Diese ZIP-Datei vollständig entpacken
+   (Windows: Rechtsklick auf die ZIP-Datei > "Alle extrahieren ...").
+3. Starten
+   Windows 11: "Start-Windows.cmd" doppelt anklicken.
+   Mac: das Programm "Terminal" öffnen, "cd " tippen (mit Leerzeichen danach),
+        diesen Ordner in das Terminal-Fenster ziehen, Enter drücken
+        und dann eingeben:  npm run demo
+4. Der Browser öffnet http://localhost:3000 – dort eine Testperson anklicken.
+   Am besten Chrome, Edge oder Firefox (Safari ist nicht getestet).
+
+Beenden:      das Fenster mit dem Server schließen.
+Zurücksetzen: den Ordner "data" in diesem Ordner löschen; beim nächsten Start
+              entstehen die Beispieldaten neu.
+
+Das ist der lokale Testmodus: ohne Microsoft-Anmeldung, nur auf diesem Rechner
+erreichbar, mit erfundenen Beispieldaten. So niemals ins Internet stellen.

@@ -331,7 +331,8 @@ sdk/hub-ui.css       das UI-Kit für Apps
 public/              hub.css (Design-System), Seiten-CSS in public/css/, Skripte, Schriften, vendor/
 templates/           Vorlagen für neue Apps
 examples/            sechs Beispiel-Apps
-scripts/             restore.js; vendor/ (Bau von CodeMirror und Symbolen, nur für Maintainer)
+scripts/             restore.js; vendor/ (Bau von CodeMirror und Symbolen, nur für Maintainer);
+                     demo-paket/ (Demo-ZIP mit Startdateien für Mac und Windows bauen)
 test/                Tests, die die Regeln zu brechen versuchen
 licenses/            Lizenzen der eingebundenen Schriften und Symbole
 ```
@@ -376,6 +377,9 @@ Details und geprüfte Punkte: `scripts/vendor/README.md`.
 ## Entwicklung
 
 - Gestaltung und Bausteine: [DESIGN.md](DESIGN.md). Seiten-CSS gehört nach `public/css/<bereich>.css`.
+- Demo zum Weitergeben: `scripts/demo-paket/build.sh <zielordner>` baut `SchulHub-Demo.zip` aus dem
+  letzten Commit – mit allen npm-Paketen (kein `npm install` nötig) und Startdateien für Windows
+  (`Start-Windows.cmd`) und Mac (`Start-Mac.command`, oder im Terminal `npm run demo`).
 - Jede neue Funktion braucht eine Prüfung auf dem Server (`src/access.js`), einen Angriffstest in
   `test/` und einen Eintrag in [SECURITY.md](SECURITY.md).
 - Git: `main` ist der Stand vor dem Umbau, `redesign` der Umbau mit einem Commit pro Etappe.
