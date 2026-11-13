@@ -19,7 +19,10 @@ function createSessionStore(db, sessionMs) {
     }
     set(sid, sess, cb) {
       try {
-        const expires = sess.cookie && sess.cookie.expires ? new Date(sess.cookie.expires).getTime() : Date.now() + sessionMs;
+        const cookieEnd = sess.cookie && sess.cookie.expires ? new Date(sess.cookie.expires).getTime() : Date.now() + sessionMs;
+        // A signed-in session ends sessionMs after sign-in, however often it is saved. The stored expiry
+        // never moves past that point, so nothing that only looks at the row (the SDK API) outlives it.
+        const expires = sess.createdAt ? Math.min(cookieEnd, sess.createdAt + sessionMs) : cookieEnd;
         db.run(
           `INSERT INTO sessions (sid_hash, user_id, data, expires_at) VALUES (?, ?, ?, ?)
            ON CONFLICT (sid_hash) DO UPDATE SET user_id = excluded.user_id, data = excluded.data, expires_at = excluded.expires_at`,

@@ -20,7 +20,7 @@ const { randomUUID } = require('node:crypto');
 const { startHub, makeZip } = require('./helpers');
 const { loadConfig } = require('../src/config');
 const { createAuth } = require('../src/auth');
-const { sidHash } = require('../src/sessions');
+const { sidHash, createSessionStore } = require('../src/sessions');
 
 const teacherClass = (h, userId) => h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher' ORDER BY joined_at DESC LIMIT 1", userId).id;
 const joinCode = (h, classId) => h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", classId).code;
@@ -194,6 +194,33 @@ test('Rückkehr nach der Anmeldung: //fremd und /\\fremd führen auf /start – 
     await P.get('/klassen');
     await P.page('/');
     assert.equal((await P.post('/dev/login', { user: mia.id })).headers.location, '/klassen');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Sitzungsspeicher: eine Anmeldung wird nie über die feste Höchstdauer hinaus gespeichert – das SDK-Token endet mit ihr', async () => {
+  const h = await startHub();
+  try {
+    const mia = h.addUser('Mia', 'student');
+    const M = await h.browser().login(mia);
+    const app = await h.makeApp(await h.browser().login(h.addUser('Frau Yilmaz', 'teacher')), 'Für alle', { 'index.html': 'x' });
+    h.db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', app.id);
+    await M.page('/start');
+    const sdk = (await h.token(M, app)).token;
+    assert.equal((await M.api(app, sdk, 'save.keys')).status, 200, 'precondition: her app works');
+    // Her session is saved once more (as after any change), when her sign-in lies longer ago than sessionMs
+    // and the cookie would still last an hour. No Hub request follows: only the SDK asks.
+    const sid = decodeURIComponent([...M.jar.values()][0]).replace(/^s:/, '').replace(/\.[^.]*$/, '');
+    const row = h.db.get('SELECT data FROM sessions WHERE sid_hash = ?', sidHash(sid));
+    assert.ok(row, 'precondition: the cookie names the stored session');
+    const data = JSON.parse(row.data);
+    data.createdAt = Date.now() - h.config.sessionMs - 60_000;
+    data.cookie.expires = new Date(Date.now() + 60 * 60_000).toISOString();
+    const store = createSessionStore(h.db, h.config.sessionMs);
+    await new Promise((resolve, reject) => store.set(sid, data, (err) => (err ? reject(err) : resolve())));
+    assert.ok(h.db.get('SELECT expires_at FROM sessions WHERE sid_hash = ?', sidHash(sid)).expires_at <= Date.now(), 'stored end = sign-in + sessionMs, not the cookie end');
+    assert.equal((await M.api(app, sdk, 'save.keys')).status, 401, 'the SDK token ends with the session');
   } finally {
     await h.stop();
   }
