@@ -89,7 +89,6 @@ function createUserFiles(ctx) {
 
   /** At start: files no row refers to are removed - with the same guards as uploads.sweep. */
   function sweep() {
-    if (db.createdNow) return 0;
     let entries;
     try {
       entries = fs.readdirSync(dir);
@@ -106,6 +105,11 @@ function createUserFiles(ctx) {
         present++;
         if (!used.has(name)) candidates.push(path.join(dir, sub, name));
       }
+    }
+    if (db.createdNow) {
+      // hub.sqlite was missing: these files are not this database's - untouched, and said loudly (see uploads.sweep).
+      if (present) console.error(`ACHTUNG: Die Datenbank wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${present} Dateien aus Apps. Fehlt die richtige data/hub.sqlite? Hub stoppen und sie zurücklegen (oder npm run restore), bevor jemand weiterarbeitet – sonst entfernt ein späterer Start diese Dateien.`);
+      return 0;
     }
     if (present && !used.size) return 0; // files, but a database that names none of them
     let removed = 0;

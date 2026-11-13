@@ -140,7 +140,6 @@ function createUploads(ctx) {
    * process on the same folder may be about to name it).
    */
   function sweep() {
-    if (db.createdNow) return 0;
     let entries;
     try {
       entries = fs.readdirSync(blobDir);
@@ -157,6 +156,12 @@ function createUploads(ctx) {
         present++;
         if (!used.has(name)) candidates.push(path.join(blobDir, dir, name));
       }
+    }
+    if (db.createdNow) {
+      // hub.sqlite was missing (moved away, a copy of the folder without it): these files are not this database's.
+      // Untouched - and whoever runs the Hub has to hear of it before anybody works on in an empty school.
+      if (present) console.error(`ACHTUNG: Die Datenbank wurde bei diesem Start neu angelegt, aber im Datenordner liegen schon ${present} App-Dateien. Fehlt die richtige data/hub.sqlite? Hub stoppen und sie zurücklegen (oder npm run restore), bevor jemand etwas hochlädt – sonst entfernt ein späterer Start diese Dateien.`);
+      return 0;
     }
     if (present && !used.size) return 0; // files, but a database that names none of them: not this folder's database
     let removed = 0;

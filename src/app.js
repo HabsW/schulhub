@@ -245,14 +245,23 @@ function createHub(config) {
       });
     });
 
+  // Housekeeping at start never keeps the Hub from starting (a full disk, a file it cannot read): what fails is
+  // logged and done again later - decided deletions and the retention every night, the sweep at the next start.
+  const atStart = (what, fn) => {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`Beim Start fehlgeschlagen (${what}):`, err);
+    }
+  };
   // Account deletions that were decided but not finished when the Hub stopped.
-  ctx.services.finishDeletions();
+  atStart('Kontolöschungen', () => ctx.services.finishDeletions());
   // Content files nothing refers to (a stop between disk and database, deletions that waited for a backup).
-  ctx.uploads.sweep();
-  ctx.userFiles.sweep();
+  atStart('App-Dateien aufräumen', () => ctx.uploads.sweep());
+  atStart('Dateien aus Apps aufräumen', () => ctx.userFiles.sweep());
   // Retention (audit log, archived classes, inactive-account flags): at start, then every night at 3 o'clock
   // (server time) - outside lessons, and with the bulky deletions in batches (services.maintenanceInSteps).
-  ctx.services.maintenance();
+  atStart('Aufbewahrung', () => ctx.services.maintenance());
   const untilNight = () => {
     const next = new Date();
     next.setHours(3, 0, 0, 0);

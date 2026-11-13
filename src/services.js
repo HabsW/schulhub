@@ -106,6 +106,7 @@ function createServices(ctx) {
   }
   /** The daily maintenance while the Hub runs: the bulky deletions in batches first, then the rest (now small). */
   async function maintenanceInSteps(now = Date.now()) {
+    await finishDeletionsInSteps();
     await deleteInBatches('audit_log', 'at < ?', now - ctx.settings.get('retention.auditDays') * DAY);
     await deleteInBatches('notices', 'created_at < ?', now - 180 * DAY);
     maintenance(now);
@@ -412,14 +413,27 @@ function createServices(ctx) {
       db.run('UPDATE users SET disabled = 1 WHERE id = ?', userId);
       db.run('DELETE FROM sessions WHERE user_id = ?', userId);
       // Remembered until the deletion is done: a stop in between is finished at the next start (finishDeletions).
-      setPendingDeletions([...pendingDeletions().filter((p) => p.id !== userId), { id: userId, by: actorId || null, wasDisabled: before.disabled ? 1 : 0 }]);
+      // A second deletion of the same account while the first is on its way (two admins at once): the account is
+      // remembered as it was before the first one, and `runs` counts the deletions still on their way.
+      const prev = pendingDeletions().find((p) => p.id === userId);
+      const entry = prev
+        ? { ...prev, by: actorId || null, runs: (prev.runs || 1) + 1 }
+        : { id: userId, by: actorId || null, wasDisabled: before.disabled ? 1 : 0, runs: 1 };
+      setPendingDeletions([...pendingDeletions().filter((p) => p.id !== userId), entry]);
     }, { durable: true });
   }
-  /** The deletion after the mark failed: the account is as it was before (blocked only if it was), and it can be tried again. */
+  /**
+   * The deletion after the mark failed: the account is as it was before (blocked only if it was), and it can be
+   * tried again - unless another deletion of it is still on its way: then that one decides.
+   */
   function unmarkForDeletion(userId) {
     db.tx(() => {
       const p = pendingDeletions().find((x) => x.id === userId);
       if (!p) return;
+      if ((p.runs || 1) > 1) {
+        setPendingDeletions(pendingDeletions().map((x) => (x.id === userId ? { ...x, runs: (p.runs || 1) - 1 } : x)));
+        return;
+      }
       if (!p.wasDisabled) db.run('UPDATE users SET disabled = 0 WHERE id = ?', userId);
       setPendingDeletions(pendingDeletions().filter((x) => x.id !== userId));
     }, { durable: true });
@@ -437,16 +451,40 @@ function createServices(ctx) {
     if (!list.length) return db.run('DELETE FROM hub_settings WHERE key = ?', PENDING_KEY);
     db.run('INSERT INTO hub_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at', PENDING_KEY, JSON.stringify(list), Date.now());
   }
-  /** At start: deletions that were decided (marked) but not finished when the Hub stopped are finished now. */
+  /**
+   * At start: deletions that were decided (marked) but not finished when the Hub stopped are finished now.
+   * One that fails (a full disk, say) is logged and stays decided - the account stays blocked and signed out -
+   * and is tried again every night and at the next start: it never keeps the Hub from starting.
+   */
   function finishDeletions() {
     for (const p of pendingDeletions()) {
-      const user = db.get('SELECT * FROM users WHERE id = ?', p.id);
-      if (user) {
-        const by = p.by ? db.get('SELECT * FROM users WHERE id = ?', p.by) : null;
-        deleteUser(p.by === p.id ? user : by, user);
-      } else {
-        db.tx(() => setPendingDeletions(pendingDeletions().filter((x) => x.id !== p.id)), { durable: true });
+      try {
+        finishDeletion(p);
+      } catch (err) {
+        console.error('Eine beschlossene Kontolöschung ist nicht fertig geworden – das Konto bleibt gesperrt, neuer Versuch in der Nacht und beim nächsten Start:', err);
       }
+    }
+  }
+  /** While the Hub runs (every night): the same, with the data of the person's apps in batches first. */
+  async function finishDeletionsInSteps() {
+    for (const p of pendingDeletions()) {
+      try {
+        await trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', p.id).map((r) => r.id));
+        // As it is after the pause: finished meanwhile (gone), or given back by a deletion that failed - then not.
+        const still = pendingDeletions().find((x) => x.id === p.id);
+        if (still) finishDeletion(still);
+      } catch (err) {
+        console.error('Eine beschlossene Kontolöschung ist nicht fertig geworden – das Konto bleibt gesperrt:', err);
+      }
+    }
+  }
+  function finishDeletion(p) {
+    const user = db.get('SELECT * FROM users WHERE id = ?', p.id);
+    if (user) {
+      const by = p.by ? db.get('SELECT * FROM users WHERE id = ?', p.by) : null;
+      deleteUser(p.by === p.id ? user : by, user);
+    } else {
+      db.tx(() => setPendingDeletions(pendingDeletions().filter((x) => x.id !== p.id)), { durable: true });
     }
   }
 
@@ -510,9 +548,11 @@ function createServices(ctx) {
       // progress, achievements, files, favourites, feedback to them, notices, comments
       db.run('DELETE FROM users WHERE id = ?', user.id);
       setPendingDeletions(pendingDeletions().filter((p) => p.id !== user.id));
-      // The audit entry names the role, never the person (their data is gone).
+      // The audit entry names the role, never the person (their data is gone) - and who decided: the person, or
+      // the administration (an admin whose own account is gone by now is not named: actor null).
       const roleLabel = { student: 'Schüler/in', teacher: 'Lehrkraft', admin: 'Admin' }[user.role] || '';
-      audit(actor && actor.id !== user.id ? actor : null, 'konto_geloescht', `Konto (${roleLabel})`, actor && actor.id !== user.id ? 'durch Verwaltung' : 'durch Nutzer/in selbst');
+      const self = Boolean(actor && actor.id === user.id);
+      audit(self ? null : actor, 'konto_geloescht', `Konto (${roleLabel})`, self ? 'durch Nutzer/in selbst' : 'durch Verwaltung');
       return list;
     }, { durable: true });
     uploads.collectGarbage(shas);

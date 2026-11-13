@@ -254,6 +254,20 @@ test('Start (Lehrkraft): „Heute aktiv“ zählt nur, was die Lehrkraft sehen d
   assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '0', 'the start page agrees with the class page');
 });
 
+test('Start (Lehrkraft): „Heute aktiv“ zählt weiter, wer eine App der Klasse heute benutzt hat – auch wenn die App inzwischen wieder auf Prüfung wartet', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ b: K }] = kids;
+  assert.ok(await h.token(K, app, cls), 'she plays the app of her class today');
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '1');
+  // Afterwards the app is taken out of the class and submitted again: it waits for review there now (the row
+  // keeps the version the class used). Her results stay visible to the teacher - and she still was active today.
+  assert.equal((await T.post(`/klassen/${cls}/apps/${app.id}/entfernen`)).status, 303);
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '1', 'taken out');
+  h.db.run("UPDATE class_apps SET status = 'pending' WHERE class_id = ? AND app_id = ?", cls, app.id);
+  assert.ok(h.db.get('SELECT version_id FROM class_apps WHERE class_id = ? AND app_id = ?', cls, app.id).version_id, 'precondition: the version the class used is kept');
+  assert.equal(statValue((await T.get('/start')).text, 'Heute aktiv'), '1', 'waiting again');
+});
+
 // ------------------------------------------------------------------ assignment of a removed app
 
 test('Aufgabe zu einer entfernten App: die Schülerin kann sie trotzdem selbst als erledigt markieren', async () => {

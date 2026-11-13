@@ -389,12 +389,12 @@ test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine
     for (let i = 0; i < names.length; i++) apps.push(await h.makeApp(B[i], `App ${names[i]}`));
     const versions = [];
     for (let i = 0; i < names.length; i++) versions.push((await B[i].send('POST', `/apps/${apps[i].id}/versionen`)).json());
-    /** A 500 KB file body that is sent slowly: the request is admitted, its body stays on its way. */
-    async function hold(i, file) {
+    /** A file body (500 KB unless said) that is sent slowly: the request is admitted, its body stays on its way. */
+    async function hold(i, file, bytes = 500 * 1024) {
       const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await B[i].page('/apps')).text)[1];
       const req = http.request({
         host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${apps[i].id}/versionen/${versions[i].id}/datei?pfad=${file}`,
-        headers: { host: h.config.hubHost, cookie: [...B[i].jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': 500 * 1024, 'x-csrf-token': csrf },
+        headers: { host: h.config.hubHost, cookie: [...B[i].jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': bytes, 'x-csrf-token': csrf },
       });
       let status = null;
       req.on('response', (res) => { status = res.statusCode; res.resume(); });
@@ -442,6 +442,11 @@ test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine
     await new Promise((r) => setTimeout(r, 200));
     assert.equal((await put(4, 'gross.bin', 500 * 1024)).status, 200, 'the pool is free again');
     assert.equal((await put(0, 'a2.bin', 500 * 1024)).status, 200, 'and so is Anna\'s quarter');
+    // Small bodies on their way never count against anyone's quarter: with three small files (3 × 90 KB) of
+    // Anna's still arriving, her 300 KB file fits her quarter (512 KB).
+    for (const f of ['k1.js', 'k2.js', 'k3.js']) await hold(0, f, 90 * 1024);
+    assert.equal((await put(0, 'a3.bin', 300 * 1024)).status, 200, 'small files on their way take nothing from her quarter');
+    for (const r of held.splice(0)) r.destroy();
     // A ZIP is written to a temp file and never counts.
     const zip = require('./helpers').makeZip([{ name: 'index.html', data: '<h1>z</h1>' }, { name: 'gross.bin', data: Buffer.alloc(900 * 1024) }]);
     assert.equal((await B[4].send('POST', `/apps/${apps[4].id}/versionen/zip`, zip, 'application/zip')).status, 200);
@@ -629,6 +634,7 @@ test('Sicherung: bricht das Schreiben mittendrin ab, sieht der Download nicht vo
     h.hub.ctx.uploads.writeZip = writeZip;
     assert.equal(outcome, 'broken', 'the browser must see a failed download');
     assert.equal(require('../src/backup').lastBackupAt(h.db), null, 'and it is not "the last backup"');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'sicherung_heruntergeladen'").n, 0, 'nor a backup in the log („Letzte Sicherungen“)');
   } finally {
     await h.stop();
   }
@@ -733,25 +739,50 @@ test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist – nie o
     const inUse = place('userfiles', 'Tims Bild', 2);
     h1.db.run("INSERT INTO user_files (app_id, user_id, name, type, size, sha256, updated_at) VALUES (?, ?, 'bild', 'image/png', 9, ?, ?)", app.id, teacher.id, pathMod.basename(inUse), Date.now());
     const freshBlob = place('blobs', 'gerade geschrieben', 0);
+    const freshUserFile = place('userfiles', 'gerade gespeichert', 0);
     await h1.hub.stop();
-    // A copy of the folder WITHOUT its database: a start there must not touch a single file.
+    /** Every content file under a folder (blobs and userfiles). */
+    const filesIn = (root) => ['blobs', 'userfiles'].flatMap((sub) => {
+      const dir = pathMod.join(root, sub);
+      return fs.existsSync(dir) ? fs.readdirSync(dir, { recursive: true }).map((f) => pathMod.join(dir, String(f))).filter((f) => fs.statSync(f).isFile()) : [];
+    }).sort();
+    // A copy of the folder WITHOUT its database - every file in it older than an hour, so only the guards
+    // against a foreign database protect them: a start there must not touch a single file, and must say so.
     const bare = fs.mkdtempSync(pathMod.join(require('node:os').tmpdir(), 'schulhub-bare-'));
     copies.push(bare);
-    fs.cpSync(pathMod.join(dataDir, 'blobs'), pathMod.join(bare, 'blobs'), { recursive: true, preserveTimestamps: true });
-    const h0 = await startHub({ dataDir: bare });
-    await h0.hub.stop();
-    assert.ok(fs.existsSync(pathMod.join(bare, 'blobs', kept.slice(0, 2), kept)), 'no database of its own: every file stays');
+    for (const sub of ['blobs', 'userfiles']) fs.cpSync(pathMod.join(dataDir, sub), pathMod.join(bare, sub), { recursive: true });
+    const aged = new Date(Date.now() - 3 * 3_600_000);
+    for (const f of filesIn(bare)) fs.utimesSync(f, aged, aged);
+    const before = filesIn(bare);
+    assert.ok(before.some((f) => f.includes(`${pathMod.sep}blobs${pathMod.sep}`)) && before.some((f) => f.includes(`${pathMod.sep}userfiles${pathMod.sep}`)), 'precondition: app files and files from apps');
+    const said = [];
+    const log = console.error;
+    console.error = (...args) => said.push(args.join(' '));
+    try {
+      const h0 = await startHub({ dataDir: bare });
+      await h0.stop(); // removes the helper's own empty folder, not `bare`
+      assert.deepEqual(filesIn(bare), before, 'no database of its own: every file stays');
+      assert.equal(said.filter((s) => /neu angelegt.*hub\.sqlite/.test(s)).length, 2, `and whoever runs the Hub is told (app files, files from apps): ${said}`);
+      // It starts there again (a process manager restarting it): the database is not new any more, but it names
+      // none of these files - still not one of them is touched.
+      said.length = 0;
+      const h0b = await startHub({ dataDir: bare });
+      await h0b.stop();
+      assert.deepEqual(filesIn(bare), before, 'a database that names none of the files there touches none');
+    } finally {
+      console.error = log;
+    }
     // The real folder starts again: what nothing refers to and is older than an hour goes.
     const h2 = await startHub({ dataDir });
     try {
       assert.ok(!fs.existsSync(oldBlob) && !fs.existsSync(oldUserFile), 'old files nobody refers to are gone');
-      assert.ok(fs.existsSync(freshBlob), 'a file written just now stays (another process may be about to name it)');
+      assert.ok(fs.existsSync(freshBlob) && fs.existsSync(freshUserFile), 'a file written just now stays (another process may be about to name it)');
       assert.ok(fs.existsSync(h2.hub.ctx.uploads.blobPath(kept)) && fs.existsSync(inUse), 'files in use stay');
     } finally {
       await h2.stop();
     }
   } finally {
-    for (const c of copies) fs.rmSync(c, { recursive: true, force: true });
+    for (const c of [...copies, dataDir]) fs.rmSync(c, { recursive: true, force: true });
   }
 });
 
@@ -905,19 +936,35 @@ test('Dateien werden erst gelöscht, wenn die Änderung, die sie freigibt, auf d
       for (const n of [10, 20]) await T.raw('PUT', '/_hub/files/bild', { host: h.appHost(app), headers: { authorization: `Bearer ${tok.token}`, 'content-type': 'image/png' }, body: png(n) });
       await T.api(app, tok.token, 'files.remove', { name: 'bild' });
       // the editor: a file replaced, then deleted
-      await T.post(`/studio/${app.id}/entwurf`, { version: h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', app.id).v });
+      const published = h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', app.id).v;
+      await T.post(`/studio/${app.id}/entwurf`, { version: published });
       await T.page(`/studio/${app.id}`);
-      await T.send('PUT', `/studio/${app.id}/datei?pfad=neu.js`, Buffer.from('let a = 1;'), 'application/octet-stream');
-      await T.send('PUT', `/studio/${app.id}/datei?pfad=neu.js`, Buffer.from('let a = 2;'), 'application/octet-stream');
+      const editorSave = async (pfad, text) => assert.equal((await T.send('PUT', `/studio/${app.id}/datei?pfad=${pfad}`, Buffer.from(text), 'application/octet-stream')).status, 200);
+      await editorSave('neu.js', 'let a = 1;');
+      await editorSave('neu.js', 'let a = 2;');
+      assert.equal((await T.post(`/studio/${app.id}/datei/loeschen`, { pfad: 'neu.js' })).status, 200);
+      // the draft started again from a version: what only the old draft had goes
+      await editorSave('entwurf.js', 'let entwurf = 4;');
+      assert.equal((await T.post(`/studio/${app.id}/entwurf`, { version: published, ersetzen: '1' })).status, 303);
+      // the draft thrown away: the same
+      await T.page(`/studio/${app.id}`);
+      await editorSave('weg.js', 'let weg = 5;');
+      assert.equal((await T.post(`/studio/${app.id}/verwerfen`)).status, 303);
       // a version deleted, with a file only it has
       const v3 = await h.uploadFolder(T, app.id, { 'index.html': '<h1>drei</h1>', 'nur-hier.js': 'let nurHier = 3;' });
       h.hub.ctx.services.deleteVersion(t, app, h.db.get('SELECT * FROM app_versions WHERE id = ?', v3));
+      // Every one of these freed a file that nothing else uses: it is gone from the disk.
+      const sha = (data) => require('node:crypto').createHash('sha256').update(data).digest('hex');
+      for (const text of ['let a = 1;', 'let a = 2;', 'let entwurf = 4;', 'let weg = 5;', 'let nurHier = 3;']) {
+        assert.equal(fsReal.existsSync(h.hub.ctx.uploads.blobPath(sha(text))), false, `still on the disk: ${text}`);
+      }
+      for (const n of [10, 20]) assert.equal(fsReal.existsSync(h.hub.ctx.userFiles.blobPath(sha(png(n)))), false, `still on the disk: the ${n}-byte picture`);
     } finally {
       h.db.tx = tx;
       fsReal.rmSync = rmSync;
     }
     const removals = events.map((e, i) => [e, events.slice(0, i).reverse().find((x) => x !== 'file removed')]).filter(([e]) => e === 'file removed');
-    assert.ok(removals.length >= 4, `files removed: ${removals.length}`);
+    assert.ok(removals.length >= 7, `files removed: ${removals.length}`);
     for (const [, before] of removals) assert.equal(before, 'durable commit', `a file was removed after a commit that had not reached the disk: ${events.join(' > ')}`);
   } finally {
     await h.stop();
@@ -984,6 +1031,277 @@ test('Konto löschen durch die Verwaltung: nach der Pause zählt das Konto, wie 
     assert.doesNotMatch(h.db.get('SELECT data FROM sessions WHERE user_id = ?', other.id).data, /Neuer Name/);
   } finally {
     services.trimAppData = trim;
+    await h.stop();
+  }
+});
+
+/** Wait (a short while at most) until `ok()` holds - for requests that are paused on purpose. */
+async function until(ok, what) {
+  for (let i = 0; i < 300 && !ok(); i++) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(ok(), `timed out: ${what}`);
+}
+const pendingOf = (db) => JSON.parse(db.get("SELECT value FROM hub_settings WHERE key = 'accounts.deleting'")?.value || '[]');
+
+test('Start: eine beschlossene Löschung, die nicht gelingt, oder eine Aufbewahrung, die fehlschlägt, hält den Hub nicht an – das Konto bleibt gesperrt, die anderen Löschungen geschehen, der nächste Start holt es nach', async () => {
+  const h1 = await startHub();
+  const dataDir = h1.config.dataDir;
+  const log = console.error;
+  const said = [];
+  try {
+    const admin = h1.addUser('Ada Admin', 'admin');
+    const kid = h1.addUser('Kim Kind', 'student');
+    const other = h1.addUser('Ole Ander', 'student');
+    // Both deletions are decided (marked) - and the Hub stops before either is done.
+    h1.hub.ctx.services.markForDeletion(kid.id, admin.id);
+    h1.hub.ctx.services.markForDeletion(other.id, admin.id);
+    // At the next start Kim's deletion fails, and so does the retention (triggers stand in for a full disk).
+    h1.db.run(`CREATE TRIGGER test_no_delete BEFORE DELETE ON users WHEN OLD.id = '${kid.id}' BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END`);
+    h1.hub.ctx.services.audit(null, 'test_alt', 'alt');
+    h1.db.run("UPDATE audit_log SET at = 1 WHERE action = 'test_alt'");
+    h1.db.run("CREATE TRIGGER test_no_prune BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END");
+    await h1.hub.stop();
+    console.error = (...args) => said.push(args.map(String).join(' '));
+    const h2 = await startHub({ dataDir });
+    console.error = log;
+    try {
+      assert.equal((await h2.browser().get('/')).status, 200, 'the Hub started and answers');
+      assert.equal(h2.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, 1, 'Kim stays blocked');
+      assert.deepEqual(pendingOf(h2.db).map((p) => p.id), [kid.id], 'and her deletion stays decided');
+      assert.equal(h2.db.get('SELECT 1 AS x FROM users WHERE id = ?', other.id), undefined, 'the other decided deletion is done');
+      assert.ok(said.some((s) => /Kontolöschung ist nicht fertig/.test(s)) && said.some((s) => /Aufbewahrung/.test(s)), `both are in the log: ${said}`);
+      h2.db.run('DROP TRIGGER test_no_delete');
+      h2.db.run('DROP TRIGGER test_no_prune');
+    } finally {
+      await h2.stop();
+    }
+    const h3 = await startHub({ dataDir });
+    try {
+      assert.equal(h3.db.get('SELECT 1 AS x FROM users WHERE id = ?', kid.id), undefined, 'the next start finishes it');
+      assert.deepEqual(pendingOf(h3.db), []);
+      assert.equal(h3.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'test_alt'").n, 0, 'and the retention runs again');
+    } finally {
+      await h3.stop();
+    }
+  } finally {
+    console.error = log;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('Konto löschen: eine beschlossene Löschung, die nicht fertig wurde, holt auch die nächtliche Wartung nach – eine inzwischen zurückgegebene nicht', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    /** A teacher with an app that has 1,500 results: its deletion pauses between batches. */
+    async function teacherWithData(name) {
+      const t = h.addUser(name, 'teacher');
+      const app = await h.makeApp(await h.browser().login(t), `App von ${name}`);
+      for (let i = 0; i < 1500; i++) h.db.run("INSERT INTO results (app_id, user_id, title, created_at) VALUES (?, ?, 'R', ?)", app.id, t.id, Date.now());
+      return t;
+    }
+    // 1. Decided, not finished (it failed at the last start): the night finishes it.
+    const tom = await teacherWithData('Tom Weg');
+    services.markForDeletion(tom.id, admin.id);
+    await services.maintenanceInSteps();
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', tom.id), undefined, 'done at night');
+    assert.deepEqual(pendingOf(h.db), []);
+    assert.equal(h.db.get("SELECT detail FROM audit_log WHERE action = 'konto_geloescht' ORDER BY id DESC LIMIT 1").detail, 'durch Verwaltung');
+    // 2. A deletion that fails while the night pauses gives the account back - the night must not delete it then.
+    const tara = await teacherWithData('Tara Bleibt');
+    services.markForDeletion(tara.id, admin.id);
+    const night = services.maintenanceInSteps();
+    setImmediate(() => services.unmarkForDeletion(tara.id)); // runs in the night's first pause
+    await night;
+    assert.ok(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', tara.id), 'given back: still there');
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', tara.id).disabled, 0, 'and not blocked');
+    assert.deepEqual(pendingOf(h.db), []);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Zwei Admins löschen dasselbe Konto gleichzeitig: misslingen beide, ist es wie vorher; misslingt eine, entscheidet die andere', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const trim = services.trimAppData;
+  const deleteUser = services.deleteUser;
+  const quiet = console.error;
+  try {
+    const a1 = h.addUser('Ada Admin', 'admin');
+    const a2 = h.addUser('Bea Admin', 'admin');
+    const [A1, A2] = await Promise.all([a1, a2].map((u) => h.browser().login(u)));
+    const gates = [];
+    services.trimAppData = async (ids) => {
+      await trim(ids);
+      await new Promise((resolve) => gates.push(resolve)); // both requests wait here until the test lets them go
+    };
+    console.error = () => {};
+    /** Both admins delete `kid`; the first deletion fails, the second does what `second` says. */
+    async function both(kid, second) {
+      gates.length = 0;
+      let call = 0;
+      services.deleteUser = (...args) => {
+        call++;
+        if (call === 1 || second === 'fails') throw new Error('Platte voll');
+        return deleteUser(...args);
+      };
+      await Promise.all([A1, A2].map((B) => B.page(`/admin/konten/${kid.id}`)));
+      const r1 = A1.post(`/admin/nutzer/${kid.id}/loeschen`);
+      await until(() => gates.length === 1, 'first deletion paused');
+      const r2 = A2.post(`/admin/nutzer/${kid.id}/loeschen`);
+      await until(() => gates.length === 2, 'second deletion paused');
+      gates[0]();
+      assert.equal((await r1).status, 500, 'the first one failed');
+      const mid = { disabled: h.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, pending: pendingOf(h.db).map((p) => p.id) };
+      gates[1]();
+      return { mid, second: (await r2).status };
+    }
+    // Both fail: the account is as it was - not blocked, nothing pending.
+    const kim = h.addUser('Kim Kind', 'student');
+    const r = await both(kim, 'fails');
+    assert.deepEqual(r.mid, { disabled: 1, pending: [kim.id] }, 'while the second is on its way, the account stays blocked and its deletion decided');
+    assert.equal(r.second, 500);
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', kim.id).disabled, 0, 'both failed: not left blocked');
+    assert.deepEqual(pendingOf(h.db), []);
+    // The first fails, the second gets through: deleted.
+    const ole = h.addUser('Ole Ander', 'student');
+    const s = await both(ole, 'works');
+    assert.deepEqual(s.mid, { disabled: 1, pending: [ole.id] });
+    assert.equal(s.second, 303);
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', ole.id), undefined, 'deleted');
+    assert.deepEqual(pendingOf(h.db), []);
+  } finally {
+    console.error = quiet;
+    services.trimAppData = trim;
+    services.deleteUser = deleteUser;
+    await h.stop();
+  }
+});
+
+test('Konto löschen: ist das Konto des Admins selbst inzwischen gelöscht, nennt der Eintrag niemanden – und sagt trotzdem „durch Verwaltung“, nie „selbst“', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const trim = services.trimAppData;
+  try {
+    const ann = h.addUser('Ann Admin', 'admin');
+    const bob = h.addUser('Bob Admin', 'admin');
+    const kid = h.addUser('Kim Kind', 'student');
+    const A = await h.browser().login(ann);
+    services.trimAppData = async (ids) => {
+      await trim(ids);
+      // While Ann's deletion of Kim pauses, Bob deletes Ann's account.
+      const annNow = h.db.get('SELECT * FROM users WHERE id = ?', ann.id);
+      if (annNow) services.deleteUser(bob, annNow);
+    };
+    await A.page(`/admin/konten/${kid.id}`);
+    await A.post(`/admin/nutzer/${kid.id}/loeschen`);
+    assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', kid.id), undefined, 'Kim is deleted (decided before Ann went)');
+    const entry = h.db.get("SELECT * FROM audit_log WHERE action = 'konto_geloescht' AND target = 'Konto (Schüler/in)'");
+    assert.equal(entry.detail, 'durch Verwaltung', 'Kim did not delete herself');
+    assert.equal(entry.actor_id, null);
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE actor_id = ? OR actor_label LIKE '%Ann Admin%' OR target LIKE '%Ann Admin%' OR detail LIKE '%Ann Admin%'", ann.id).n, 0, 'Ann is named nowhere');
+  } finally {
+    services.trimAppData = trim;
+    await h.stop();
+  }
+});
+
+test('App löschen: ist das Konto des Admins inzwischen gelöscht, nennt der Eintrag ihn nicht mehr', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const trim = services.trimAppData;
+  try {
+    const ann = h.addUser('Ann Admin', 'admin');
+    const bob = h.addUser('Bob Admin', 'admin');
+    const t = h.addUser('Tilda Lehrerin', 'teacher');
+    const [A, T] = await Promise.all([ann, t].map((u) => h.browser().login(u)));
+    const app = await h.makeApp(T, 'Tildas Spiel');
+    services.trimAppData = async (ids) => {
+      await trim(ids);
+      const annNow = h.db.get('SELECT * FROM users WHERE id = ?', ann.id);
+      if (annNow) services.deleteUser(bob, annNow);
+    };
+    await A.page(`/apps/${app.id}`);
+    await A.post(`/apps/${app.id}/loeschen`);
+    assert.equal(h.db.get('SELECT 1 AS x FROM apps WHERE id = ?', app.id), undefined, 'the app is deleted (decided before Ann went)');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE actor_id = ? OR actor_label LIKE '%Ann Admin%' OR target LIKE '%Ann Admin%' OR detail LIKE '%Ann Admin%'", ann.id).n, 0, 'Ann is named nowhere');
+  } finally {
+    services.trimAppData = trim;
+    await h.stop();
+  }
+});
+
+test('Eigenes Konto löschen: bricht die Löschung nach dem ersten Schritt ab, ist das Konto wie vorher – man kann sich wieder anmelden', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const deleteUser = services.deleteUser;
+  const quiet = console.error;
+  try {
+    const kid = h.addUser('Kim Kind', 'student');
+    const K = await h.browser().login(kid);
+    await K.page('/meine-daten');
+    services.deleteUser = () => {
+      throw new Error('Platte voll');
+    };
+    console.error = () => {};
+    const res = await K.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' });
+    console.error = quiet;
+    services.deleteUser = deleteUser;
+    assert.equal(res.status, 500);
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, 0, 'not left blocked');
+    assert.deepEqual(pendingOf(h.db), [], 'nothing pending');
+    assert.ok(await h.browser().login(kid), 'she can sign in again');
+  } finally {
+    console.error = quiet;
+    services.deleteUser = deleteUser;
+    await h.stop();
+  }
+});
+
+test('Ein Download, der nach dem Kopf scheitert (Quelltext als ZIP, eine Datei fehlt auf der Platte), bricht ab – er endet nie wie ein vollständiger', async () => {
+  const h = await startHub();
+  const http = require('node:http');
+  const quiet = console.error;
+  try {
+    const t = h.addUser('Tilda Lehrerin', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Quelle', { 'index.html': '<h1>x</h1>', 'a.js': 'let a = 1;', 'z.js': 'let z = 26;' });
+    const v = h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', app.id).v;
+    fs.rmSync(h.hub.ctx.uploads.blobPath(h.db.get("SELECT sha256 FROM app_files WHERE version_id = ? AND path = 'z.js'", v).sha256)); // lost on the disk
+    console.error = () => {};
+    const outcome = await new Promise((resolve) => {
+      const req = http.request({
+        host: '127.0.0.1', port: h.config.publicPort, method: 'GET', path: `/apps/${app.id}/versionen/${v}/download`,
+        headers: { host: h.config.hubHost, cookie: [...T.jar].map(([k, x]) => `${k}=${x}`).join('; ') },
+      }, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve(`${res.statusCode} ended normally`));
+        res.on('aborted', () => resolve('broken'));
+        res.on('error', () => resolve('broken'));
+      });
+      req.on('error', () => resolve('broken'));
+      req.end();
+    });
+    assert.equal(outcome, 'broken', 'the browser must see a failed download, not a whole-looking ZIP');
+  } finally {
+    console.error = quiet;
+    await h.stop();
+  }
+});
+
+test('Datenbank: scheitert eine Transaktion, nachdem SQLite sie schon selbst zurückgerollt hat, kommt der eigentliche Fehler an – nicht „no transaction is active“', async () => {
+  const h = await startHub();
+  try {
+    assert.throws(() => h.db.tx(() => {
+      h.db.run("INSERT INTO hub_settings (key, value, updated_at) VALUES ('test.tx', 'x', 0)");
+      h.db.run('ROLLBACK'); // what SQLite does by itself on some errors (a full disk, out of memory)
+      throw new Error('der eigentliche Fehler');
+    }), /der eigentliche Fehler/);
+    assert.equal(h.db.get("SELECT 1 AS x FROM hub_settings WHERE key = 'test.tx'"), undefined);
+    h.db.tx(() => h.db.run("INSERT INTO hub_settings (key, value, updated_at) VALUES ('test.tx', 'y', 0)"));
+    assert.equal(h.db.get("SELECT value FROM hub_settings WHERE key = 'test.tx'").value, 'y', 'and the next transaction works');
+  } finally {
     await h.stop();
   }
 });
