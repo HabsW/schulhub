@@ -375,3 +375,48 @@ test('Abmelden, während in einem anderen Tab ein Formular unterwegs ist: die Si
   assert.ok(!String(late.headers['set-cookie'] || '').includes(`hub_sid=${oldCookie}`), 'and does not hand the browser its cookie back');
   assert.equal(h.db.get('SELECT pref_theme FROM users WHERE id = ?', student.id).pref_theme, 'dark', 'nothing was changed after the logout');
 });
+
+// ------------------------------------------------------------------ sign-in
+
+test('Anmeldung: wird eine Rolle durch ADMIN_EMAILS zurückgesetzt, steht das im Protokoll', async () => {
+  const { randomUUID } = require('node:crypto');
+  const hub = await startHub({ staffDomains: ['schule.example'], adminEmails: ['chefin@schule.example'] });
+  try {
+    const { auth } = hub.hub.ctx;
+    auth.loginUrl = async (session) => {
+      session.authFlow = { state: randomUUID(), verifier: 'v' };
+      return `https://login.microsoftonline.com/schule/oauth2/v2.0/authorize?state=${session.authFlow.state}`;
+    };
+    auth.handleCallback = async (session) => {
+      delete session.authFlow;
+      return { oid: 'oid-chefin', name: 'Frau Chefin', email: 'chefin@schule.example' };
+    };
+    const signIn = async () => {
+      const B = hub.browser();
+      await B.page('/');
+      const start = await B.get('/auth/login');
+      const done = await B.get(`/auth/callback?code=x&state=${new URL(start.headers.location).searchParams.get('state')}`);
+      assert.equal(done.status, 302);
+      return B;
+    };
+    await signIn();
+    const chefin = hub.db.get("SELECT * FROM users WHERE oid = 'oid-chefin'");
+    assert.equal(chefin.role, 'admin', 'admin by ADMIN_EMAILS');
+
+    // Another admin makes her a teacher - the audit log says so.
+    const other = hub.addUser('Anna Admin', 'admin');
+    const AA = await hub.browser().login(other);
+    await AA.page(`/admin/konten/${chefin.id}`);
+    assert.equal((await AA.post(`/admin/nutzer/${chefin.id}/rolle`, { rolle: 'teacher' })).status, 303);
+    assert.equal(hub.db.get('SELECT role FROM users WHERE id = ?', chefin.id).role, 'teacher');
+
+    // At her next sign-in ADMIN_EMAILS makes her admin again: the log must not end with "Admin → Lehrkraft".
+    await signIn();
+    assert.equal(hub.db.get('SELECT role FROM users WHERE id = ?', chefin.id).role, 'admin');
+    const last = hub.db.get("SELECT * FROM audit_log WHERE action = 'rolle_geaendert' AND subject_id = ? ORDER BY id DESC LIMIT 1", chefin.id);
+    assert.ok(last && /^Lehrkraft → Admin\b/.test(last.detail), `the role change back to admin is in the audit log (last entry: ${last && last.detail})`);
+    assert.equal(last.actor_label, 'System');
+  } finally {
+    await hub.stop();
+  }
+});

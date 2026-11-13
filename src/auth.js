@@ -4,6 +4,7 @@
 // The Hub never sees or stores a password, and keeps no Microsoft tokens.
 
 const { HttpError, newId } = require('./util');
+const { ROLE_LABEL } = require('./html');
 
 // Only the basic sign-in claims. No Graph permissions are requested.
 const SCOPES = ['openid', 'profile', 'email'];
@@ -88,6 +89,10 @@ function createAuth(ctx) {
       // The stored role stays (the admin may have changed it); ADMIN_EMAILS always wins.
       const role = initial === 'admin' ? 'admin' : user.role;
       db.run('UPDATE users SET name = ?, email = ?, role = ?, last_login_at = ?, flagged_inactive_at = NULL WHERE id = ?', cleanName, cleanEmail, role, Date.now(), user.id);
+      // An admin may have taken the role away: the audit log must not end with that change when it is undone here.
+      if (role !== user.role) {
+        ctx.services.audit(null, 'rolle_geaendert', cleanName, `${ROLE_LABEL[user.role]} → ${ROLE_LABEL[role]} (ADMIN_EMAILS, bei der Anmeldung)`, { subjectId: user.id });
+      }
       user = db.get('SELECT * FROM users WHERE id = ?', user.id);
     }
     return user;
