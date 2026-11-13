@@ -249,7 +249,8 @@ function createServices(ctx) {
   function deleteApp(actor, app) {
     const { code, files } = db.tx(() => {
       const found = { code: codeShas([app.id]), files: ctx.userFiles.shasOfApp(app.id) };
-      const assignments = db.all('SELECT id FROM assignments WHERE app_id = ?', app.id);
+      const assignments = db.all('SELECT id, title FROM assignments WHERE app_id = ?', app.id);
+      deleteFeedbackNotices([{ id: app.id, name: app.name }], assignments);
       db.run('DELETE FROM apps WHERE id = ?', app.id); // cascades: versions, files, drafts, saves, scores, results, progress, achievements, user files, comments, assignments …
       // Notices pointing at the app, its review or its assignments would lead nowhere and may quote its name.
       deleteAppNotices(app.id, assignments.map((x) => x.id));
@@ -306,6 +307,23 @@ function createServices(ctx) {
     for (const id of assignmentIds) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
   }
 
+  /**
+   * Feedback notices that quote an app or one of its assignments by name („…“), sent to the students
+   * who got feedback about it. Call while the app and its feedback links still exist.
+   */
+  function deleteFeedbackNotices(apps, assignments) {
+    if (!apps.length) return;
+    const quoted = [...apps.map((a) => a.name), ...assignments.map((x) => x.title)].map((n) => `„${n}“`);
+    const ids = apps.map((a) => a.id);
+    const marks = ids.map(() => '?').join(', ');
+    const told = db.all(
+      `SELECT DISTINCT student_id FROM feedback
+        WHERE app_id IN (${marks}) OR assignment_id IN (SELECT id FROM assignments WHERE app_id IN (${marks}))`,
+      ...ids, ...ids
+    );
+    for (const { student_id: sid } of told) for (const q of quoted) db.run("DELETE FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND instr(text, ?) > 0", sid, q);
+  }
+
   /** Delete an account and everything that belongs to it. */
   function deleteUser(actor, user) {
     const ownApps = db.all('SELECT id FROM apps WHERE owner_id = ?', user.id).map((r) => r.id);
@@ -360,14 +378,7 @@ function createServices(ctx) {
       // (deleteApp), so today's apps are all that is left - at most limits.maxAppsPerUser.
       for (const a of apps) deleteAppNotices(a.id, assignmentsOnApps.filter((x) => x.app_id === a.id).map((x) => x.id));
       // ... and feedback about such an app or assignment, which quoted its name to the student.
-      const quoted = [...apps.map((a) => a.name), ...assignmentsOnApps.map((x) => x.title)].map((n) => `„${n}“`);
-      const told = db.all(
-        `SELECT DISTINCT f.student_id FROM feedback f
-          WHERE f.app_id IN (SELECT id FROM apps WHERE owner_id = ?)
-             OR f.assignment_id IN (SELECT x.id FROM assignments x JOIN apps a ON a.id = x.app_id WHERE a.owner_id = ?)`,
-        user.id, user.id
-      );
-      for (const { student_id: sid } of told) for (const q of quoted) db.run("DELETE FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND instr(text, ?) > 0", sid, q);
+      deleteFeedbackNotices(apps, assignmentsOnApps);
 
       // A one-time message still waiting in someone else's session may name them or one of their apps.
       scrubSessions([user.name, user.email, user.id, ...apps.map((a) => a.name)]);

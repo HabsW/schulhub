@@ -586,3 +586,55 @@ test('App löschen: Mitteilungen anderer zu dieser App verschwinden mit ihr', as
     await h.stop();
   }
 });
+
+/** A class 7b with Herr Lehmann, Marlene and Ben; Marlene's app approved there through the real submission. */
+async function classWithApprovedPupilApp(h) {
+  const lehrer = h.addUser('Herr Lehmann', 'teacher');
+  const marlene = h.addUser('Marlene', 'student');
+  const ben = h.addUser('Ben', 'student');
+  const [L, M, B] = await Promise.all([lehrer, marlene, ben].map((u) => h.browser().login(u)));
+  await L.post('/klassen', { name: '7b' });
+  const cls = teacherClass(h, lehrer.id);
+  for (const P of [M, B]) await P.post(`/beitreten/${joinCode(h, cls)}`);
+  const app = await h.makeApp(M, 'Marlenes Spiel', { 'index.html': 'x' });
+  await M.page(`/apps/${app.id}`);
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+  const row = h.db.get('SELECT requested_version_id AS v FROM class_apps WHERE class_id = ? AND app_id = ?', cls, app.id);
+  h.hub.ctx.classApps.approve(lehrer, h.db.get('SELECT * FROM classes WHERE id = ?', cls), h.db.get('SELECT * FROM apps WHERE id = ?', app.id), row.v);
+  return { lehrer, marlene, ben, L, M, B, cls, app };
+}
+
+test('Konto löschen: Einträge anderer über ihre Apps heißen „Gelöschte App“ und behalten ihre Angaben – ihre eigenen verlieren sie, auch alte', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Adler', 'admin');
+    const { lehrer, marlene } = await classWithApprovedPupilApp(h);
+    // An entry written before entries carried their app (schema version < 4), by her.
+    h.db.run("INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail) VALUES (?, ?, 'Marlene (student)', 'app_erstellt', 'Marlenes altes Spiel', '')", Date.now(), marlene.id);
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', marlene.id));
+    const approval = h.db.get("SELECT target, detail FROM audit_log WHERE actor_id = ? AND action = 'app_freigegeben'", lehrer.id);
+    assert.equal(approval.target, 'Gelöschte App', "the teacher's approval no longer names her app");
+    assert.match(approval.detail, /7b/, '... but keeps where it happened');
+    const own = h.db.get("SELECT target, detail FROM audit_log WHERE action = 'app_eingereicht'");
+    assert.deepEqual([own.target, own.detail], ['Gelöschte App', ''], 'her own entry keeps neither the name nor the detail');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE target LIKE '%Marlene%' OR detail LIKE '%Marlene%'").n, 0, 'old entries included');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('App löschen: Rückmeldungen, die die App nennen, verschwinden aus den Mitteilungen der Mitschüler/innen', async () => {
+  const h = await startHub();
+  try {
+    const { ben, L, M, cls, app } = await classWithApprovedPupilApp(h);
+    await L.page(`/klassen/${cls}`);
+    assert.equal((await L.post(`/klassen/${cls}/rueckmeldungen`, { schueler: ben.id, text: 'Schau dir das Spiel an.', app: app.id })).status, 303);
+    const quoting = () => h.db.get("SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND text LIKE '%Marlenes Spiel%'", ben.id).n;
+    assert.equal(quoting(), 1, 'precondition: his notice quotes her app');
+    await M.page('/apps');
+    assert.equal((await M.post(`/apps/${app.id}/loeschen`)).status, 303);
+    assert.equal(quoting(), 0, 'the notice that quoted the deleted app is gone');
+  } finally {
+    await h.stop();
+  }
+});
