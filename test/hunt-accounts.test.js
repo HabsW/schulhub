@@ -61,3 +61,21 @@ test('Ankündigungen: die eigene Klasse und die ganze Schule stehen auf der Star
   assert.ok(start.includes('Wandertag der 6c'), 'the announcement of her own class is still shown');
   assert.ok(start.includes('Schulfest am Samstag'), 'the school-wide announcement is still shown');
 });
+
+// ----------------------------------------------------------------- accounts
+
+test('Rollen: ein gesperrtes Admin-Konto lässt sich herabstufen, das einzige aktive nie', async () => {
+  const blocked = h.addUser('Bernd Gesperrt', 'admin');
+  await A.page(`/admin/konten/${blocked.id}`);
+  assert.equal((await A.post(`/admin/nutzer/${blocked.id}/sperren`, { an: '1' })).status, 303);
+  // Anna is now the only ACTIVE admin. The page offers to change Bernd's role (he does not count) …
+  const page = (await A.page(`/admin/konten/${blocked.id}`)).text;
+  assert.ok(page.includes(`/admin/nutzer/${blocked.id}/rolle`), 'the page offers the role change');
+  // … and the route must allow it: Anna stays the active admin.
+  const res = await A.post(`/admin/nutzer/${blocked.id}/rolle`, { rolle: 'teacher' });
+  assert.equal(res.status, 303, 'demoting a blocked admin keeps an active admin');
+  assert.equal(h.db.get('SELECT role FROM users WHERE id = ?', blocked.id).role, 'teacher');
+  // The guard itself still holds for the only active admin.
+  assert.equal((await A.post(`/admin/nutzer/${admin.id}/rolle`, { rolle: 'teacher' })).status, 400);
+  assert.equal(h.db.get('SELECT role FROM users WHERE id = ?', admin.id).role, 'admin');
+});
