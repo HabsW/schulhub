@@ -54,6 +54,7 @@ Datenbank…*, *Beitrittscodes…*, *Schüler und fremde Lehrkräfte…*, *Wem e
 | App reads Hub cookies, pages or DOM | Each app has its own origin (`<random key>.<apps domain>`) on a registrable domain of its own – the Hub refuses to start when the apps domain shares a parent domain with the Hub (see below). No Hub cookie is ever sent there. The app runs in an `<iframe sandbox>` without top-navigation or popups; the same sandbox is repeated as a CSP header on the app's documents. *(browser: cookie empty, `parent.document` and `top.location` blocked)* |
 | App reads another app's data | Every data query is keyed by the app resolved from the request's host. The SDK token names one app and is rejected on any other app's origin. |
 | Stolen or replayed token | SDK tokens are HMAC-signed, expire after 10 minutes, and are bound to user, app and session: after logout or a block they stop working at once. File tokens are a different kind and cannot be used as SDK tokens. |
+| A call still arriving while things change (the account is deleted or blocked, the person is removed from the class, the class is archived, the app is deleted) | The SDK API checks the token when a call arrives – before its body is read, so strangers' bodies are never buffered – and again once the body is there (`appsHost.js`, `callerNow`; the same for `hub.files` uploads). What the call does is decided by the state at that moment: a deleted or blocked person gets 401, a deleted app 404 – never a 500, and nothing is stored for a person who no longer exists (no row, no `hub.files` content on disk). A result whose body arrives after a removal from the class or after archiving is filed without the class; class data of an archived class cannot be written. Uploads to the Hub (folder file, editor save, ZIP) check after reading the body that their version, draft or app still exists (404 otherwise, nothing written to disk). Tests: *Konto löschen, während der Inhalt eines Aufrufs noch unterwegs ist…*, *Konto löschen, während eine App hochgeladen wird…*, *Aus der Klasse entfernt, während gespeichert wird…*, *Klasse archivieren während gespielt wird…* (`test/races.test.js`) |
 | App sends data out | App CSP allows network access only to the app's own origin. The Hub's `frame-src` blocks the app from navigating its frame elsewhere. *(browser: `fetch` to the internet and to the Hub blocked, self-navigation blocked, popup blocked)* |
 | Forged messages between app and Hub | The Hub page accepts messages only from the app's origin **and** its own frame, and replies only to that origin. The SDK accepts messages only from the Hub origin and its parent window. |
 | App opened outside the Hub | Top-level requests (`Sec-Fetch-Dest: document`) are refused; `frame-ancestors` allows only the Hub. |
@@ -241,10 +242,27 @@ Tests (`test/school.test.js`): *Darstellung: nur die eigenen Einstellungen, nur 
 | Favourites | Only for apps the person can open (`resolvePlay`); the return path is checked against local Hub paths. |
 | In-Hub messages | Written only by the server (`services.notify`), shown escaped, links must be local paths. Each person sees and marks only their own; marking read is a POST. |
 | Announcements | Shown and dismissable only if `access.canSeeAnnouncement` (school-wide, or a class the person can see); others answer 404. |
-| A stale class in a player link | `?klasse=` that does not fit falls back only for school-wide apps (open to everyone anyway), and then without a class context. A class app, a removed app or an archived class stays closed (404); previews never fall back. |
+| A stale class in a player link | `?klasse=` that does not fit falls back only for school-wide apps (open to everyone anyway), and then without a class context – also when the person is in another class that has the app: that class never stands in for the one in the link, so no result is filed into a class the app was not opened from (`routes/player.js`, `decide`). A class app, a removed app or an archived class stays closed (404); previews never fall back. Test: *Matrix: …* (`test/matrix.test.js`, row `schulweitFremdeKlasse`) |
 | The owner's editor draft in the player | `?entwurf=1` and draft tokens only for `canManageApp` and only if a draft exists; the token is always a preview (`p: 1`, `v: 'draft'`), so nothing is stored and nothing counts as a play. |
 
 Tests: `test/shell.test.js`
+
+### Every kind of user, every action; races
+
+`test/matrix.test.js` runs every action of the Hub (pages, joining and leaving, the player and the SDK,
+review and teaching, own data, administration) for every kind of user: a student in no class, in one
+class, in three classes (the app approved in only one), blocked (still signed in, and signing in again),
+deleted (old cookie and SDK token), a role changed during the session (student → teacher, teacher →
+student, admin → teacher), a teacher without a class, the class's teacher, a co-teacher, a student and a
+teacher of an archived class, the admin. A table states the outcome of each cell, derived from the rules
+in `src/access.js`; each cell also checks what it changed in the database and that the response shows
+nothing of other classes and other people (another class of the same teacher, a foreign class, a
+classmate's results, saved state and private feedback, any other person's e-mail address).
+
+`test/races.test.js` interleaves requests through HTTP: two tabs of one app, approving and returning at
+the same moment, joining while the code is renewed, deleting an account while its app runs or an app is
+uploaded, removing a student from a class or archiving the class during play, publishing a new version
+while the teacher reviews the old one – also with a call whose body is still on its way.
 
 ### Example apps and demo data
 

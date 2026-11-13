@@ -36,8 +36,13 @@ module.exports = (app, ctx) => {
     const play = access.resolvePlay(user, a, { classId: klasse, versionId: version });
     // A school-wide app opened with a class it is not in (e.g. linked from a class page) opens
     // school-wide instead of a dead end. Only for school-wide apps: a link into an archived class
-    // or to a removed app must stay closed. Previews never fall back.
-    if (!play && klasse && !version && a.schoolwide_version_id) return access.resolvePlay(user, a);
+    // or to a removed app must stay closed. Previews never fall back. The fallback has no class
+    // context: the link named a class the app is not in, so no other class of the person may stand in
+    // for it (results would be filed into a class the person did not open the app from).
+    if (!play && klasse && !version && a.schoolwide_version_id) {
+      const open = access.resolvePlay(user, a);
+      return open && { ...open, classId: null };
+    }
     return play;
   }
 

@@ -761,6 +761,11 @@ module.exports = (app, ctx) => {
     }
     const note = cleanText(str(req.query.notiz), 500, { multiline: true });
     const file = await uploads.receiveToTemp(req, L.maxZipBytes);
+    // Receiving took a while: the app (with its owner's account) may be gone by now.
+    if (!db.get('SELECT 1 AS ok FROM apps WHERE id = ?', a.id)) {
+      fs.rm(file, { force: true }, () => {});
+      throw deny();
+    }
     let v = null;
     let report;
     try {
