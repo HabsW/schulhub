@@ -21,6 +21,23 @@ let admin, A;
 
 const teacherClass = (userId, name) => h.db.get("SELECT c.id FROM classes c JOIN class_members m ON m.class_id = c.id AND m.user_id = ? AND m.role = 'teacher' WHERE c.name = ?", userId, name).id;
 const joinCode = (classId) => h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", classId).code;
+/** The entry names of a zip. */
+function zipNames(buffer) {
+  const yauzl = require('yauzl');
+  return new Promise((resolve, reject) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, (err, zip) => {
+      if (err) return reject(err);
+      const names = [];
+      zip.on('error', reject);
+      zip.on('entry', (e) => {
+        names.push(e.fileName);
+        zip.readEntry();
+      });
+      zip.on('end', () => resolve(names));
+      zip.readEntry();
+    });
+  });
+}
 /** Raw request to an app's own origin (files API of the SDK). */
 const appRequest = (b, app, method, url, { token, body = null, type } = {}) =>
   b.raw(method, url, { host: h.appHost(app), headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(type ? { 'content-type': type } : {}) }, body });
@@ -131,6 +148,8 @@ test('Sicherung während einer Kontolöschung: die Dateien der gelöschten Perso
   }
   assert.equal(h.db.get('SELECT 1 AS ok FROM users WHERE id = ?', student.id), undefined, 'the account is gone');
   assert.ok(!fs.existsSync(h.hub.ctx.userFiles.blobPath(sha)), 'and so is her file in the running Hub');
+  // The backup's database knows nothing of Sina: her drawing is no part of the backup either.
+  assert.ok(!(await zipNames(zip)).includes(`userfiles/${sha.slice(0, 2)}/${sha}`), 'the deleted drawing is not in the archive');
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-hunt-restore-'));
   try {
@@ -419,4 +438,24 @@ test('Anmeldung: wird eine Rolle durch ADMIN_EMAILS zurückgesetzt, steht das im
   } finally {
     await hub.stop();
   }
+});
+
+test('Mitteilungen: eine Klasse, die mit dem Konto ihrer einzigen Lehrkraft verschwindet, nimmt ihre Mitteilungen mit', async () => {
+  const teacher = h.addUser('Herr Abschied', 'teacher');
+  const student = h.addUser('Jana Abschied', 'student');
+  const [T, S] = await Promise.all([teacher, student].map((u) => h.browser().login(u)));
+  await T.post('/klassen', { name: 'Schach-AG' });
+  const cls = teacherClass(teacher.id, 'Schach-AG');
+  await S.post(`/beitreten/${joinCode(cls)}`);
+  const app = await h.makeApp(S, 'Janas Schachuhr');
+  await S.page(`/apps/${app.id}`);
+  await S.post(`/apps/${app.id}/einreichen`, { klasse: cls }); // a review request to the teacher
+  await T.page('/ankuendigungen');
+  await T.post('/ankuendigungen', { ziel: cls, titel: 'Turnier am Montag' });
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND text LIKE ?', student.id, '%Turnier am Montag%').n, 1);
+
+  await T.page('/meine-daten');
+  assert.equal((await T.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' })).status, 303);
+  assert.equal(h.db.get('SELECT 1 AS ok FROM classes WHERE id = ?', cls), undefined, 'the class went with its only teacher');
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND text LIKE ?', student.id, '%Turnier am Montag%').n, 0, 'its announcement notice too');
 });
