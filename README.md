@@ -67,6 +67,9 @@ npm test
 - **Suchen** (Lupe oben): Apps und Klassen; Lehrkräfte finden auch die Schüler/innen ihrer Klassen.
 - **Darstellung** (Menü am Profilbild): dunkel (Standard), hell oder wie das Gerät, Schriftgröße,
   weniger Bewegung, hoher Kontrast; „In Bestenlisten anonym“. Gilt auf allen Geräten.
+- **Was Lehrkräfte sehen** steht auf der Beitrittsseite und unter „Datenschutz“: in den Apps ihrer Klasse
+  Namen, Ergebnisse aus der Klasse, Spielstände, Bestwerte, Fortschritt und Erfolge (auch von zu Hause oder
+  aus anderen Klassen) und wann/wie oft eine App geöffnet wurde – nie die E-Mail-Adresse.
 - **Meine Daten**: alles, was der Hub über dich speichert – ansehen, als JSON herunterladen, die Daten
   einer App oder das ganze Konto löschen. Dateien aus Apps (z. B. Bilder) lädst du bei der App herunter.
 
@@ -94,6 +97,8 @@ npm test
   löscht nur die Ergebnisse aus dieser Klasse; Spielstände, Fortschritt und Erfolge gehören der Schülerin
   oder dem Schüler (löschbar unter „Meine Daten“).
 - **Rückmeldungen**: privat an eine Person, bei den Ergebnissen oder bei einer Aufgabe.
+- **Geplante Aufgaben**: Eine Aufgabe mit späterem Start sehen Schüler/innen erst ab dem Start (dann auf
+  ihrer Startseite, ohne Mitteilung). Rückmeldungen zu einer geplanten Aufgabe sind erst ab dem Start möglich.
 - **Einstellungen einer App pro Klasse**: Wenn eine App in `schulhub.json` Einstellungen erklärt
   (z. B. eine Wortliste), zeigt der Hub dafür ein Formular. Die App liest die Werte mit `hub.settings`.
 - **Archiv** am Schuljahresende: schreibgeschützt, für Schüler/innen unsichtbar, nach der
@@ -182,7 +187,7 @@ Als Lehrkraft lokal testen: `index.html?lehrkraft`.
 |---|---|
 | `hub.user`, `hub.class`, `hub.mode`, `hub.theme`, `hub.app` | wer (Name und eine pro App andere `id`, keine E-Mail), aus welcher Klasse, `'live'` / `'preview'` (nichts wird dauerhaft gespeichert) / `'local'`, Darstellung, Version |
 | `hub.save.get / set / remove / keys` | Spielstand **pro Konto** in dieser App |
-| `hub.classData.*`, `hub.shared.*` | Daten für eine Klasse (die Lehrkraft schreibt) und für alle Nutzer der App (die Besitzerin schreibt) |
+| `hub.classData.*`, `hub.shared.*` | Daten für eine Klasse (die Lehrkraft schreibt) und für alle Nutzer der App (schreiben kann nur, wem die App gehört, und nur in Apps von Lehrkräften – in Apps von Schüler/innen sind sie nur lesbar) |
 | `hub.leaderboard.submit / top` | Bestenliste der Klasse; Namen sehen nur Personen aus derselben Klasse, alle anderen „Anonym“ |
 | `hub.results.add / mine` | Ergebnisse – erscheinen in der Auswertung der Lehrkraft |
 | `hub.progress.set(0…1, { label }) / get` | Fortschritt – auf der Startseite und im Klassen-Überblick |
@@ -213,6 +218,21 @@ Als Lehrkraft lokal testen: `index.html?lehrkraft`.
 - Grenzen: 2000 Dateien, 25 MB pro Datei, 100 MB pro Version, 20 Versionen pro App, 500 MB pro
   Konto; pro Person 2 MB Spielstand und 10 MB Dateien je App.
 - Versteckte Dateien (`.git`, `.DS_Store`), `node_modules` und `__MACOSX` werden übersprungen.
+- **Keine unsichtbaren Zeichen in Dateinamen.** Namen mit Steuerzeichen für die Schreibrichtung,
+  unsichtbaren Verbindern oder ähnlichen Zeichen werden abgelehnt (die Meldung zeigt sie als ⟨U+202E⟩).
+  Im Code meldet der Prüfbericht Steuerzeichen für die Schreibrichtung als Fehler; Quelltext-Ansicht
+  und Änderungen zeigen sie als rote Platzhalter, damit Code nicht anders aussieht, als er läuft.
+- Pro Person werden höchstens 4 Dateien gleichzeitig hochgeladen (der Hub schickt selbst 3 auf
+  einmal). „Meine Daten → Alles herunterladen“ läuft pro Person einmal zur Zeit.
+- **Browser-Speicher gehört der Person, die die App gerade benutzt.** Was deine App selbst im Browser
+  speichert (`localStorage`, IndexedDB …), löscht der Hub, bevor sie für jemand anderen startet. Dafür
+  merkt er sich in `localStorage` den Eintrag `schulhub:person` – lösch ihn nicht (`localStorage.clear()`
+  löscht ihn mit), sonst räumt der Hub beim nächsten Start alles auf. Was sicher bleiben soll, gehört in
+  `hub.save`.
+- **Name und Beschreibung von Schüler-Apps** lassen sich nicht ändern, solange die App in einer Klasse
+  freigegeben ist, dort auf die Prüfung wartet oder für die ganze Schule freigegeben ist. Zum Ändern die
+  Einreichung zurückziehen bzw. die App aus der Klasse nehmen, ändern, wieder einreichen – die Lehrkraft
+  prüft dann den neuen Namen mit. Symbol, Farbe, Fach und Klassenstufen bleiben jederzeit änderbar.
 
 ### Die Beispiel-Apps
 
@@ -244,11 +264,20 @@ npm start
    keine Graph-Berechtigungen, keine Admin-Zustimmung nötig.
 2. **`.env` ausfüllen**: Mandant, Client-ID und -Secret, die E-Mail-Domains für Schüler/innen und
    Personal, `ADMIN_EMAILS`, `BASE_URL`, `APPS_DOMAIN`, `SESSION_SECRET`.
-3. **Zwei Adressen, HTTPS davor**: der Hub (z. B. `hub.schule.de`) und eine Wildcard-Domain für die
-   Apps (z. B. `*.apps.schule.de`, mit Wildcard-Zertifikat). Beide zeigen über einen Reverse-Proxy
-   (Caddy, nginx …) auf denselben Node-Prozess; der Proxy muss den `Host`-Header unverändert
-   durchreichen. `TRUST_PROXY=1` setzen.
-4. Ohne vollständige Konfiguration startet der Hub nicht und sagt, was fehlt.
+3. **Zwei Domains, HTTPS davor**: der Hub (z. B. `hub.meine-schule.de`) und eine **eigene Domain** für
+   die Apps (z. B. `meine-schule-apps.de`, mit Wildcard-DNS `*.meine-schule-apps.de` und
+   Wildcard-Zertifikat). Die App-Domain darf nicht unter der Domain des Hubs liegen – also nicht
+   `apps.meine-schule.de`: Dann könnte jede App Cookies setzen, die der Hub bekommt, und Browser
+   aussperren. Mit so einer Adresse startet der Hub nicht. `BASE_URL` beginnt immer mit `https://`.
+   Beide zeigen über einen Reverse-Proxy (Caddy, nginx …) auf denselben Node-Prozess; der Proxy muss den
+   `Host`-Header unverändert durchreichen und beim Hochladen die Größenangabe (`Content-Length`) – nginx
+   und Caddy tun das von sich aus. `TRUST_PROXY=1` setzen. Der Proxy soll außerdem Anfrage-Fluten begrenzen.
+4. Ohne vollständige und sichere Konfiguration startet der Hub nicht und sagt, was zu ändern ist.
+
+Gemeinsam genutzte PCs: Bevor eine App für eine andere Person startet, löscht der Hub, was die App im
+Browser für die vorige Person gespeichert hat (Spielstände, Einstellungen, Cookies). Für dieselbe Person
+bleibt alles erhalten. Wo sich viele einen PC teilen, nutzt trotzdem den Gastmodus des Browsers oder lasst
+die Browserdaten beim Schließen löschen.
 
 Rollen: Wer sich zum ersten Mal anmeldet, bekommt die Rolle aus der E-Mail-Domain. Adressen anderer
 Domains werden abgewiesen. Der Admin kann Rollen in der Verwaltung ändern.
