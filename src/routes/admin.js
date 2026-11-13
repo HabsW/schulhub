@@ -368,10 +368,13 @@ module.exports = (app, ctx) => {
     res.redirect(303, back(req, `/admin/konten/${u.id}`));
   });
 
-  app.post('/admin/nutzer/:uid/loeschen', (req, res) => {
+  app.post('/admin/nutzer/:uid/loeschen', async (req, res) => {
     const u = target(req);
     if (u.id === req.user.id) throw bad('Dein eigenes Konto löschst du unter „Meine Daten“.');
-    services.deleteUser(req.user, u);
+    // The data of the person's apps first, in small steps (the Hub keeps answering), then the account.
+    await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', u.id).map((r) => r.id));
+    const now = db.get('SELECT * FROM users WHERE id = ?', u.id);
+    if (now) services.deleteUser(req.user, now);
     flash(req, `Das Konto von ${u.name} wurde gelöscht.`);
     res.redirect(303, back(req, '/admin/konten'));
   });

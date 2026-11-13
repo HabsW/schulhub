@@ -674,9 +674,13 @@ module.exports = (app, ctx) => {
     res.redirect(303, `/apps/${a.id}#einstellungen`);
   });
 
-  app.post('/apps/:id/loeschen', (req, res) => {
+  app.post('/apps/:id/loeschen', async (req, res) => {
     const a = manageApp(req);
-    services.deleteApp(req.user, a);
+    // Its many data rows first, in small steps (the Hub keeps answering), then the app itself -
+    // as it is now (it may have changed or gone meanwhile, e.g. with its owner's account).
+    await services.trimAppData([a.id]);
+    const now = db.get('SELECT * FROM apps WHERE id = ?', a.id);
+    if (now) services.deleteApp(req.user, now);
     flash(req, `„${a.name}“ wurde gelöscht.`);
     res.redirect(303, '/apps');
   });

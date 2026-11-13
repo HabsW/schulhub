@@ -264,6 +264,25 @@ function createServices(ctx) {
     ctx.userFiles.collectGarbage(files);
   }
 
+  /**
+   * The rows of these apps that can be many - results above all: a popular app collects tens of
+   * thousands - deleted in batches, with a pause between them in which the Hub answers other
+   * requests. Deleted together with the app in ONE transaction they would stop every request of the
+   * school while SQLite works (0.6 s for 34,000 results on a fast server, see CAPACITY.md). Call it
+   * before deleteApp / deleteUser, which then delete what is left (and what arrived meanwhile)
+   * atomically. Files of people (user_files) stay for deleteApp: it collects their content.
+   */
+  async function trimAppData(appIds, batch = 1000) {
+    for (const id of appIds) {
+      // fixed table names, never user input
+      for (const table of ['results', 'saves', 'achievements', 'progress', 'scores', 'plays']) {
+        while (db.run(`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE app_id = ? LIMIT ?)`, id, batch).changes > 0) {
+          await new Promise((resolve) => setImmediate(resolve));
+        }
+      }
+    }
+  }
+
   // ---------- personal data ----------
   /** Remove everything one user stored in one app. */
   function deleteAppData(appId, userId) {
@@ -404,7 +423,7 @@ function createServices(ctx) {
 
   return {
     audit, pruneAudit, notify, recordPlay, maintenance,
-    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser,
+    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData,
   };
 }
 

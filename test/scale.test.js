@@ -150,3 +150,103 @@ test('Sicherung: solange die Datenbank kopiert wird, löscht der Hub keine Inhal
     await h.stop();
   }
 });
+
+/** An app as popular apps get after a few months: 30,000 results and saves of 300 students. */
+function popularApp(h, appId) {
+  const students = Array.from({ length: 300 }, (_, i) => h.addUser(`Schüler ${i}`, 'student'));
+  h.db.tx(() => {
+    for (let i = 0; i < 30000; i++) {
+      h.db.run('INSERT INTO results (app_id, user_id, title, score, max_score, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', appId, students[i % 300].id, 'Runde', i % 10, 10, '{"a":1}', Date.now() - i);
+    }
+    for (const s of students) h.db.run("INSERT INTO saves (app_id, user_id, key, value, size, updated_at) VALUES (?, ?, 'stand', '{}', 2, ?)", appId, s.id, Date.now());
+  });
+}
+
+/**
+ * How many rows of the app were still there when the app row (or its owner's account) was deleted:
+ * whatever is left then goes in that ONE statement (ON DELETE CASCADE), with the Hub standing still.
+ */
+function leftForTheLastStep(h, appId) {
+  const seen = { results: null, saves: null };
+  const run = h.db.run;
+  h.db.run = (sql, ...params) => {
+    if (/^DELETE FROM (apps|users) WHERE id = \?/.test(sql) && seen.results === null) {
+      seen.results = h.db.get('SELECT COUNT(*) AS n FROM results WHERE app_id = ?', appId).n;
+      seen.saves = h.db.get('SELECT COUNT(*) AS n FROM saves WHERE app_id = ?', appId).n;
+    }
+    return run(sql, ...params);
+  };
+  return { seen, restore: () => (h.db.run = run) };
+}
+
+/** How long the Hub's thread stood still at most while fn ran (ms). */
+async function longestStall(fn) {
+  const { monitorEventLoopDelay } = require('node:perf_hooks');
+  const d = monitorEventLoopDelay({ resolution: 5 });
+  d.enable();
+  try {
+    await fn();
+  } finally {
+    d.disable();
+  }
+  return d.max / 1e6;
+}
+
+test('Eine viel genutzte App löschen hält den Hub nicht an: ihre vielen Daten gehen in kleinen Schritten', async () => {
+  const h = await startHub();
+  try {
+    const teacher = h.addUser('Tilda Lehrerin', 'teacher');
+    const T = await h.browser().login(teacher);
+    const app = await h.makeApp(T, 'Beliebt');
+    popularApp(h, app.id);
+    await T.page(`/apps/${app.id}`);
+    let res;
+    const watch = leftForTheLastStep(h, app.id);
+    const stall = await longestStall(async () => {
+      res = await T.post(`/apps/${app.id}/loeschen`);
+    });
+    watch.restore();
+    assert.equal(res.status, 303);
+    assert.ok(watch.seen.results !== null, 'the app row was deleted');
+    assert.ok(watch.seen.results <= 1000 && watch.seen.saves <= 1000, `left for the one last statement: ${watch.seen.results} results, ${watch.seen.saves} saves`);
+    assert.equal(h.db.get('SELECT 1 AS x FROM apps WHERE id = ?', app.id), undefined);
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM results WHERE app_id = ?', app.id).n, 0);
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM saves WHERE app_id = ?', app.id).n, 0);
+    assert.ok(stall < 150, `the Hub stood still for ${Math.round(stall)} ms while the app was deleted`);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Ein Konto mit einer viel genutzten App löschen (selbst oder durch die Verwaltung) hält den Hub nicht an', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const A = await h.browser().login(admin);
+    for (const how of ['selbst', 'verwaltung']) {
+      const teacher = h.addUser(`Tilda ${how}`, 'teacher');
+      const T = await h.browser().login(teacher);
+      const app = await h.makeApp(T, `Beliebt ${how}`);
+      popularApp(h, app.id);
+      let res;
+      const watch = leftForTheLastStep(h, app.id);
+      const stall = await longestStall(async () => {
+        if (how === 'selbst') {
+          await T.page('/meine-daten');
+          res = await T.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' });
+        } else {
+          await A.page(`/admin/konten/${teacher.id}`);
+          res = await A.post(`/admin/nutzer/${teacher.id}/loeschen`);
+        }
+      });
+      watch.restore();
+      assert.equal(res.status, 303, how);
+      assert.ok(watch.seen.results !== null && watch.seen.results <= 1000, `${how}: left for the one last statement: ${watch.seen.results} results`);
+      assert.equal(h.db.get('SELECT 1 AS x FROM users WHERE id = ?', teacher.id), undefined, how);
+      assert.equal(h.db.get('SELECT COUNT(*) AS n FROM results WHERE app_id = ?', app.id).n, 0, how);
+      assert.ok(stall < 150, `${how}: the Hub stood still for ${Math.round(stall)} ms while the account was deleted`);
+    }
+  } finally {
+    await h.stop();
+  }
+});

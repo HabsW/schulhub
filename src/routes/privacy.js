@@ -526,11 +526,16 @@ module.exports = (app, ctx) => {
 
   // ------------------------------------------------- delete account
 
-  app.post('/meine-daten/konto-loeschen', (req, res) => {
+  app.post('/meine-daten/konto-loeschen', async (req, res) => {
     // Exactly the word, in capitals (only surrounding spaces and Unicode form are forgiven).
     if (cleanText(req.body.bestaetigung, 40) !== 'LÖSCHEN') throw bad('Bitte tippe zur Bestätigung genau das Wort LÖSCHEN in Großbuchstaben.');
     if (isLastAdmin(req.user)) throw bad('Der einzige Admin kann sein Konto nicht löschen. Ernenne zuerst jemand anderen zum Admin.');
-    services.deleteUser(req.user, req.user);
+    // The data of the person's apps first, in small steps (the Hub keeps answering), then the account.
+    await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', req.user.id).map((r) => r.id));
+    // Decided again as things are now: meanwhile the account may be gone, or the other admin too.
+    const now = db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+    if (now && isLastAdmin(now)) throw bad('Der einzige Admin kann sein Konto nicht löschen. Ernenne zuerst jemand anderen zum Admin.');
+    if (now) services.deleteUser(now, now);
     req.session.destroy(() => {
       res.clearCookie(config.https ? '__Host-hub_sid' : 'hub_sid', { path: '/', secure: config.https, httpOnly: true, sameSite: 'lax' });
       res.redirect(303, '/?geloescht=1');
