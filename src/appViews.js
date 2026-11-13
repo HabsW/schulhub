@@ -7,6 +7,37 @@
 
 const { html, raw, icon, badge, list, row, timeline, csrfField, postButton, field } = require('./html');
 const { plural, formatAgo, formatBytes } = require('./util');
+const invisible = require('./invisible');
+
+// ------------------------------------------------------- invisible characters
+
+/**
+ * Text with every invisible character of `re` (src/invisible.js) shown as a
+ * marked placeholder, e.g. ⟨U+202E⟩ - the raw character is never output.
+ * Returns html fragments: the text pieces are escaped by html``, only the
+ * placeholder markup is ours (escape first, then mark - never the other way).
+ */
+function visible(text, re = invisible.IN_CODE) {
+  const s = String(text ?? '');
+  if (!invisible.has(s, re)) return s;
+  const out = [];
+  let last = 0;
+  re.lastIndex = 0; // matchAll starts where a shared /g pattern was left
+  for (const m of s.matchAll(re)) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    const c = m[0];
+    out.push(html`<span class="review-ctl${invisible.kind(c) === 'mark' ? ' review-ctl-mark' : ''}" title="${invisible.describe(c)}">${invisible.label(c)}</span>`);
+    last = m.index + c.length;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out;
+}
+/** A line of code: bidi controls, direction marks and line separators as placeholders. */
+const codeText = (text) => visible(text, invisible.IN_CODE);
+/** A file or folder name: every format character as a placeholder (names stored before that rule). */
+const nameText = (name) => visible(name, invisible.IN_NAME);
+/** A file name for an attribute (aria-label, title): placeholders as plain text. */
+const nameAttr = (name) => invisible.plain(name, invisible.IN_NAME);
 
 // ------------------------------------------------------------- check report
 
@@ -56,10 +87,11 @@ function reportList(report, { href = null } = {}) {
   if (!report.items.length) return html`<p class="apps-report-ok">${icon('checkCircle')}<span>Keine Auffälligkeiten: keine Dateien aus dem Internet, keine absoluten Pfade, alles Nötige ist da.</span></p>`;
   return html`<ul class="apps-report" role="list">${report.items.map((it) => {
     const level = Object.hasOwn(LEVELS, it.level) ? it.level : 'note';
-    const where = it.file ? `${it.file}${it.line ? `, Zeile ${it.line}` : ''}` : '';
+    // Findings quote code (URLs) and name files: invisible characters in them are shown as placeholders.
+    const where = it.file ? html`${nameText(it.file)}${it.line ? `, Zeile ${it.line}` : ''}` : '';
     const link = href && it.file ? href(it) : '';
     return html`<li class="apps-report-item"><span class="apps-level apps-level-${level}">${icon(LEVELS[level].icon)}</span>
-      <div class="apps-report-text"><span><span class="visually-hidden">${LEVELS[level].label}: </span>${it.text}</span>${where ? html`<span class="meta">${link ? html`<a class="apps-loclink" href="${link}">${where}</a>` : where}</span>` : ''}</div></li>`;
+      <div class="apps-report-text"><span><span class="visually-hidden">${LEVELS[level].label}: </span>${codeText(it.text)}</span>${where ? html`<span class="meta">${link ? html`<a class="apps-loclink" href="${link}">${where}</a>` : where}</span>` : ''}</div></li>`;
   })}</ul>`;
 }
 
@@ -171,9 +203,10 @@ function hunkView(h, showHead) {
     const text = l.slice(1);
     if (t === '\\') continue; // "\ No newline at end of file"
     // Line numbers and the +/- marks are CSS content: they are shown, but not copied with the code.
-    if (t === '+') lines.push(html`<span class="review-line review-add"><span class="review-ln"></span><span class="review-ln" data-n="${n++}"></span><span class="review-tx review-tx-add">${text}</span></span>`);
-    else if (t === '-') lines.push(html`<span class="review-line review-del"><span class="review-ln" data-n="${o++}"></span><span class="review-ln"></span><span class="review-tx review-tx-del">${text}</span></span>`);
-    else lines.push(html`<span class="review-line"><span class="review-ln" data-n="${o++}"></span><span class="review-ln" data-n="${n++}"></span><span class="review-tx">${text}</span></span>`);
+    // Invisible characters (bidi controls ...) appear as marked placeholders, never raw.
+    if (t === '+') lines.push(html`<span class="review-line review-add"><span class="review-ln"></span><span class="review-ln" data-n="${n++}"></span><span class="review-tx review-tx-add">${codeText(text)}</span></span>`);
+    else if (t === '-') lines.push(html`<span class="review-line review-del"><span class="review-ln" data-n="${o++}"></span><span class="review-ln"></span><span class="review-tx review-tx-del">${codeText(text)}</span></span>`);
+    else lines.push(html`<span class="review-line"><span class="review-ln" data-n="${o++}"></span><span class="review-ln" data-n="${n++}"></span><span class="review-tx">${codeText(text)}</span></span>`);
   }
   return html`${showHead ? html`<div class="review-hunk-head">ab Zeile ${h.newStart}</div>` : ''}<pre class="review-code"><code>${lines}</code></pre>`;
 }
@@ -203,12 +236,12 @@ function diffView(diff, { sourceHref = () => '', budget = 3000 } = {}) {
         size = 0;
       } else {
         left -= size;
-        body = html`<div class="review-diff" tabindex="0" role="region" aria-label="Änderungen in ${f.path}">${f.hunks.map((h) => hunkView(h, f.status === 'changed'))}</div>`;
+        body = html`<div class="review-diff" tabindex="0" role="region" aria-label="Änderungen in ${nameAttr(f.path)}">${f.hunks.map((h) => hunkView(h, f.status === 'changed'))}</div>`;
       }
     }
     const open = f.status !== 'removed' && size > 0 && size <= 120;
     const link = f.status !== 'removed' && sourceHref(f.path);
-    return html`<details class="review-file"${open ? raw(' open') : ''}><summary>${badge(label, tone)}<code class="review-path">${f.path}</code>${counts}</summary>
+    return html`<details class="review-file"${open ? raw(' open') : ''}><summary>${badge(label, tone)}<code class="review-path">${nameText(f.path)}</code>${counts}</summary>
       ${body}${link && f.kind === 'text' ? html`<p class="review-filelink"><a href="${link}">${icon('fileCode', { cls: 'sm' })}Ganze Datei ansehen</a></p>` : ''}</details>`;
   })}</div>`;
 }
@@ -217,7 +250,7 @@ function diffView(diff, { sourceHref = () => '', budget = 3000 } = {}) {
 function fileListView(files, { sourceHref = () => '', isText = () => false, limit = 200 } = {}) {
   const shown = files.slice(0, limit);
   return html`${list(shown.map((f) => row({
-    title: html`<code class="review-path">${f.path}</code>`,
+    title: html`<code class="review-path">${nameText(f.path)}</code>`,
     sub: formatBytes(f.size),
     href: isText(f.path) ? sourceHref(f.path) : '',
     chevron: false,
@@ -227,4 +260,5 @@ function fileListView(files, { sourceHref = () => '', isText = () => false, limi
 module.exports = {
   parseReport, reportCounts, reportBadges, reportTone, reportList,
   historyRows, historyTimeline, commentForm, declaredView, diffView, fileListView, USE_LABELS,
+  codeText, nameText, nameAttr,
 };

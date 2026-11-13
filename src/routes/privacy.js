@@ -8,10 +8,11 @@ const {
   html, page, flash, csrfField, postButton, linkButton, appIcon, appClass, jsonView, ROLE_LABEL, icon,
   pageHead, sectionHead, list, row, stat, stats, empty, notice, meter, dataTable, badge, field,
 } = require('../html');
-const { deny, bad, cleanText, formatDate, formatAgo, formatBytes, plural, isLocalPath } = require('../util');
+const { deny, bad, cleanText, formatDate, formatAgo, formatBytes, plural, isLocalPath, HttpError } = require('../util');
 const { manifestOf, KEY } = require('../manifest');
 const { auditLabel } = require('../auditLabels');
 const { displaySummary } = require('../formKit');
+const { writeJson, lazy } = require('../jsonStream');
 
 /** Types a hub.files file can have (src/userFiles.js) -> label and file extension for downloads. */
 const FILE_KINDS = {
@@ -36,6 +37,7 @@ const parseJson = (text) => {
 
 module.exports = (app, ctx) => {
   const { db, config, services, access, userFiles } = ctx;
+  const L = config.limits;
 
   // ------------------------------------------------------------ queries
 
@@ -382,11 +384,59 @@ module.exports = (app, ctx) => {
   });
 
   // ---------------------------------------------------------- export
+  // The download is written piece by piece (src/jsonStream.js), with the same
+  // content and format as one JSON.stringify(…, null, 2): the lists that can be
+  // long - results, saves, comments, feedback, the apps - are read a page at a
+  // time while the file is sent, so it is never in memory as a whole. One
+  // person runs at most L.parallelExports downloads at a time.
 
-  app.get('/meine-daten/export', (req, res) => {
-    const u = req.user;
+  const exporting = new Map(); // user id -> downloads being written
+
+  /**
+   * Rows of a long list, a page at a time: first the ordered row ids (small),
+   * then `size` rows per query. rowSql takes the ids (JSON) as its first
+   * parameter, then `params` again - so every page checks the owner again.
+   */
+  function* paged(idSql, rowSql, params, size) {
+    const ids = db.all(idSql, ...params).map((r) => r.id);
+    for (let i = 0; i < ids.length; i += size) yield* db.all(rowSql, JSON.stringify(ids.slice(i, i + size)), ...params);
+  }
+  function* mapped(rows, fn) {
+    for (const r of rows) yield fn(r);
+  }
+
+  /** One app in the download: what it stores for this person. Saves and results are lazy. */
+  function appExport(a, u, fileUrl) {
+    const { achievements } = vocabulary(a, u.id);
+    const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, u.id);
+    const play = db.get('SELECT first_at, last_at, count FROM plays WHERE app_id = ? AND user_id = ?', a.id, u.id);
+    return {
+      app: a.name,
+      spielstaende: lazy(() => mapped(
+        paged('SELECT rowid AS id FROM saves WHERE app_id = ? AND user_id = ? ORDER BY key',
+          'SELECT key, value, updated_at FROM saves WHERE rowid IN (SELECT value FROM json_each(?)) AND app_id = ? AND user_id = ? ORDER BY key', [a.id, u.id], 20),
+        (s) => ({ schluessel: s.key, wert: parseJson(s.value), geaendert: iso(s.updated_at) })
+      )),
+      ergebnisse: lazy(() => mapped(
+        paged('SELECT id FROM results WHERE app_id = ? AND user_id = ? ORDER BY id',
+          'SELECT title, score, max_score, details, created_at FROM results WHERE id IN (SELECT value FROM json_each(?)) AND app_id = ? AND user_id = ? ORDER BY id', [a.id, u.id], 20),
+        (r) => ({ titel: r.title, punkte: r.score, maximal: r.max_score, einzelheiten: r.details ? parseJson(r.details) : null, zeitpunkt: iso(r.created_at) })
+      )),
+      bestwerte: db.all('SELECT board, score, updated_at FROM scores WHERE app_id = ? AND user_id = ? ORDER BY board', a.id, u.id).map((s) => ({ liste: s.board, wert: s.score, erreicht: iso(s.updated_at) })),
+      fortschritt: progress ? { wert: progress.value, text: progress.label, geaendert: iso(progress.updated_at) } : null,
+      erfolge: db.all('SELECT achievement, unlocked_at FROM achievements WHERE app_id = ? AND user_id = ? ORDER BY unlocked_at', a.id, u.id).map((x) => {
+        const def = achievements.get(x.achievement);
+        return { id: x.achievement, titel: def ? def.title : x.achievement, erreicht: iso(x.unlocked_at) };
+      }),
+      dateien: userFiles.list(a.id, u.id).map((f) => ({ name: f.name, art: f.type, groesse: f.size, gespeichert: iso(f.updated_at), herunterladen: fileUrl(a.id, f.name) })),
+      nutzung: play ? { zuerst: iso(play.first_at), zuletzt: iso(play.last_at), anzahl: play.count } : null,
+    };
+  }
+
+  /** Everything about one person, as the download lists it. Short lists are read now, long ones while writing. */
+  function exportDoc(u) {
     const fileUrl = (appId, name) => `${config.hubOrigin}/meine-daten/app/${appId}/datei/${encodeURIComponent(name)}`;
-    const out = {
+    return {
       erstellt: iso(Date.now()),
       hinweis: `Alles, was ${config.hubName} über dich speichert. Andere Personen erscheinen höchstens mit ihrem Namen. Dateien aus Apps sind mit Namen, Art und Größe aufgeführt; herunterladen kannst du sie über den Link.`,
       konto: {
@@ -400,17 +450,22 @@ module.exports = (app, ctx) => {
                                  (SELECT COUNT(*) FROM app_versions v WHERE v.app_id = a.id AND v.status = 'ready') AS versions
                             FROM apps a WHERE a.owner_id = ? ORDER BY a.name`, u.id)
         .map((a) => ({ name: a.name, beschreibung: a.description, angelegt: iso(a.created_at), veroeffentlicht: Boolean(a.published_version_id), versionen: a.versions })),
-      kommentare: db.all('SELECT a.name AS app, c.body, c.kind, c.created_at FROM comments c JOIN apps a ON a.id = c.app_id WHERE c.author_id = ? ORDER BY c.created_at', u.id)
-        .map((c) => ({ app: c.app, text: c.body, art: c.kind, zeitpunkt: iso(c.created_at) })),
+      kommentare: lazy(() => mapped(
+        paged('SELECT c.rowid AS id FROM comments c JOIN apps a ON a.id = c.app_id WHERE c.author_id = ? ORDER BY c.created_at, c.rowid',
+          'SELECT a.name AS app, c.body, c.kind, c.created_at FROM comments c JOIN apps a ON a.id = c.app_id WHERE c.rowid IN (SELECT value FROM json_each(?)) AND c.author_id = ? ORDER BY c.created_at, c.rowid', [u.id], 200),
+        (c) => ({ app: c.app, text: c.body, art: c.kind, zeitpunkt: iso(c.created_at) })
+      )),
       favoriten: db.all('SELECT a.name, f.created_at FROM favorites f JOIN apps a ON a.id = f.app_id WHERE f.user_id = ? ORDER BY f.created_at', u.id)
         .map((f) => ({ app: f.name, seit: iso(f.created_at) })),
       // Feedback names its author by name only - never an e-mail address.
-      rueckmeldungen: db.all(
-        `SELECT f.body, f.created_at, f.read_at, c.name AS class_name, a.name AS app_name, x.title AS assignment, w.name AS author
-           FROM feedback f JOIN classes c ON c.id = f.class_id LEFT JOIN apps a ON a.id = f.app_id
-           LEFT JOIN assignments x ON x.id = f.assignment_id LEFT JOIN users w ON w.id = f.author_id
-          WHERE f.student_id = ? ORDER BY f.created_at`, u.id
-      ).map((f) => ({ text: f.body, von: f.author || 'Gelöschtes Konto', klasse: f.class_name, app: f.app_name, aufgabe: f.assignment, zeitpunkt: iso(f.created_at), gelesen: iso(f.read_at) })),
+      rueckmeldungen: lazy(() => mapped(
+        paged('SELECT f.rowid AS id FROM feedback f JOIN classes c ON c.id = f.class_id WHERE f.student_id = ? ORDER BY f.created_at, f.rowid',
+          `SELECT f.body, f.created_at, f.read_at, c.name AS class_name, a.name AS app_name, x.title AS assignment, w.name AS author
+             FROM feedback f JOIN classes c ON c.id = f.class_id LEFT JOIN apps a ON a.id = f.app_id
+             LEFT JOIN assignments x ON x.id = f.assignment_id LEFT JOIN users w ON w.id = f.author_id
+            WHERE f.rowid IN (SELECT value FROM json_each(?)) AND f.student_id = ? ORDER BY f.created_at, f.rowid`, [u.id], 200),
+        (f) => ({ text: f.body, von: f.author || 'Gelöschtes Konto', klasse: f.class_name, app: f.app_name, aufgabe: f.assignment, zeitpunkt: iso(f.created_at), gelesen: iso(f.read_at) })
+      )),
       erledigteAufgaben: db.all(
         `SELECT x.title, c.name AS class_name, a.name AS app_name, d.done_at FROM assignment_done d
            JOIN assignments x ON x.id = d.assignment_id JOIN classes c ON c.id = x.class_id JOIN apps a ON a.id = x.app_id
@@ -425,33 +480,48 @@ module.exports = (app, ctx) => {
         .map((x) => ({ titel: x.title, notiz: x.note, klasse: x.class_name, app: x.app_name, faellig: iso(x.due_at), angelegt: iso(x.created_at) })),
       // Only what happened and when: the details may name other people.
       protokoll: db.all('SELECT action, at FROM audit_log WHERE actor_id = ? ORDER BY id DESC LIMIT 1000', u.id).map((r) => ({ vorgang: auditLabel(r.action), zeitpunkt: iso(r.at) })),
-      appDaten: myAppData(u.id).map((a) => {
-        const full = db.get('SELECT * FROM apps WHERE id = ?', a.id);
-        const { achievements } = vocabulary(full, u.id);
-        const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, u.id);
-        return {
-          app: a.name,
-          spielstaende: db.all('SELECT key, value, updated_at FROM saves WHERE app_id = ? AND user_id = ? ORDER BY key', a.id, u.id).map((s) => ({ schluessel: s.key, wert: parseJson(s.value), geaendert: iso(s.updated_at) })),
-          ergebnisse: db.all('SELECT title, score, max_score, details, created_at FROM results WHERE app_id = ? AND user_id = ? ORDER BY id', a.id, u.id)
-            .map((r) => ({ titel: r.title, punkte: r.score, maximal: r.max_score, einzelheiten: r.details ? parseJson(r.details) : null, zeitpunkt: iso(r.created_at) })),
-          bestwerte: db.all('SELECT board, score, updated_at FROM scores WHERE app_id = ? AND user_id = ? ORDER BY board', a.id, u.id).map((s) => ({ liste: s.board, wert: s.score, erreicht: iso(s.updated_at) })),
-          fortschritt: progress ? { wert: progress.value, text: progress.label, geaendert: iso(progress.updated_at) } : null,
-          erfolge: db.all('SELECT achievement, unlocked_at FROM achievements WHERE app_id = ? AND user_id = ? ORDER BY unlocked_at', a.id, u.id).map((x) => {
-            const def = achievements.get(x.achievement);
-            return { id: x.achievement, titel: def ? def.title : x.achievement, erreicht: iso(x.unlocked_at) };
-          }),
-          dateien: userFiles.list(a.id, u.id).map((f) => ({ name: f.name, art: f.type, groesse: f.size, gespeichert: iso(f.updated_at), herunterladen: fileUrl(a.id, f.name) })),
-          nutzung: (() => {
-            const p = db.get('SELECT first_at, last_at, count FROM plays WHERE app_id = ? AND user_id = ?', a.id, u.id);
-            return p ? { zuerst: iso(p.first_at), zuletzt: iso(p.last_at), anzahl: p.count } : null;
-          })(),
-        };
+      appDaten: lazy(function* () {
+        for (const row of myAppData(u.id)) {
+          const a = db.get('SELECT * FROM apps WHERE id = ?', row.id);
+          if (a) yield appExport(a, u, fileUrl); // an app deleted while the file is written is left out
+        }
       }),
     };
+  }
+
+  app.get('/meine-daten/export', async (req, res) => {
+    const u = req.user;
+    const running = exporting.get(u.id) || 0;
+    if (running >= L.parallelExports) throw new HttpError(429, 'Dein Download wird gerade schon erstellt. Warte, bis er fertig ist – dann kannst du ihn noch einmal starten.');
+    exporting.set(u.id, running + 1);
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      const n = (exporting.get(u.id) || 1) - 1;
+      if (n > 0) exporting.set(u.id, n);
+      else exporting.delete(u.id);
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    const doc = exportDoc(u); // an error here is answered with the usual error page
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="meine-daten.json"');
     res.setHeader('Cache-Control', 'private, no-store');
-    res.send(JSON.stringify(out, null, 2));
+    if (req.method === 'HEAD') return res.end();
+    try {
+      await writeJson(res, doc);
+    } catch (err) {
+      if (!res.headersSent) {
+        // Nothing sent yet: the usual error page instead of the download.
+        res.removeHeader('Content-Disposition');
+        res.removeHeader('Content-Type');
+        throw err;
+      }
+      // Half a file must never look like a whole one: break the connection instead of ending the response.
+      console.error(err);
+      res.destroy();
+    }
   });
 
   // ------------------------------------------------- delete account
