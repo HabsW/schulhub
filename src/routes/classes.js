@@ -936,11 +936,15 @@ module.exports = (app, ctx) => {
     return { row: found, cls: getClass(found.class_id) };
   }
 
+  /** A teacher invitation for a staff member who once joined this class with its code: it makes them its teacher. */
+  const upgrades = (current, role) => current === 'student' && role === 'teacher';
+
   app.get('/beitreten/:code', (req, res) => {
     const { row: code, cls } = findCode(req);
     delete req.session.returnTo;
-    if (access.classRole(req.user, cls.id)) return res.redirect(`/klassen/${cls.id}`);
     const role = access.joinRoleFor(req.user, code);
+    const current = access.classRole(req.user, cls.id);
+    if (current && !upgrades(current, role)) return res.redirect(`/klassen/${cls.id}`);
     const invite = code.role === 'teacher';
     if (!role) {
       // Someone this code is not for (a teacher invitation, a student account): no class, no names.
@@ -975,7 +979,12 @@ module.exports = (app, ctx) => {
     const { row: code, cls } = findCode(req);
     const role = access.joinRoleFor(req.user, code);
     if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
-    const added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
+    let added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
+    // Already a student of the class (a colleague who tried its QR code first): the invitation makes them its teacher.
+    // joinRoleFor gave 'teacher', so this is a staff account with a valid invitation; a class code never changes a role.
+    if (!added.changes && upgrades(access.classRole(req.user, cls.id), role)) {
+      added = db.run("UPDATE class_members SET role = 'teacher' WHERE class_id = ? AND user_id = ? AND role = 'student'", cls.id, req.user.id);
+    }
     if (added.changes) {
       services.audit(req.user, 'klasse_beigetreten', cls.name, role === 'teacher' ? 'als Lehrkraft' : 'als Schüler/in');
       flash(req, role === 'teacher' ? `Du führst „${cls.name}“ jetzt mit.` : `Willkommen in „${cls.name}“!`);
