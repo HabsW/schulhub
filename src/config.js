@@ -145,6 +145,8 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       achievementsPerApp: 50,
       noticesPerUser: 200, // older in-Hub messages are dropped
       feedbackChars: 2000,
+      parallelUploads: 4, // file bodies (folder upload, editor) one person sends at the same time; the Hub's uploader sends 3
+      parallelExports: 1, // "Meine Daten" downloads one person runs at the same time
     },
     // [max events, per milliseconds]
     rate: {

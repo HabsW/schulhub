@@ -696,8 +696,11 @@ module.exports = (app, ctx) => {
   /**
    * Before a file's body is read: this user manages the app, the version belongs
    * to it and is still being uploaded, the format is right and the rate limit
-   * holds. Only then express.raw reads the body (at most one file's size), so a
-   * stranger's large upload is refused without being buffered. A refused upload
+   * holds. Then uploads.admitVersionFile: name and type, the declared size
+   * (Content-Length required) against the file limit, what is left of the
+   * version and of the account, and at most a few bodies per person at once.
+   * Only then express.raw reads the body (at most one file's size), so an upload
+   * that cannot be stored is refused without being buffered. A refused upload
    * closes the connection instead of receiving the rest.
    */
   function uploadTarget(req, res, next) {
@@ -706,6 +709,7 @@ module.exports = (app, ctx) => {
       limiter.guard('uploadFiles', req.user.id);
       const v = getVersion(a, req.params.vid, 'uploading');
       if (!req.is('application/octet-stream')) throw new HttpError(415, 'Falsches Format.');
+      uploads.admitVersionFile(req, res, v, a.owner_id, req.user.id, req.query.pfad);
       req.uploadTarget = { a, v };
       next();
     } catch (err) {
@@ -895,27 +899,28 @@ module.exports = (app, ctx) => {
     const openAll = files.length <= 40;
 
     const treeView = (node, depth = 0) => html`<ul class="apps-tree${depth ? ' apps-subtree' : ''}" role="list">${[...node.dirs.values()].map((d) => html`<li><details${openAll || (file && file.path.startsWith(`${d.path}/`)) ? raw(' open') : ''}>
-        <summary class="apps-folder">${icon('folder', { cls: 'sm' })}<span>${d.name}</span></summary>${treeView(d, depth + 1)}</details></li>`)}${node.files.map((f) => {
+        <summary class="apps-folder">${icon('folder', { cls: 'sm' })}<span>${V.nameText(d.name)}</span></summary>${treeView(d, depth + 1)}</details></li>`)}${node.files.map((f) => {
         const hub = isHubFile(f.path);
         const text = uploads.isTextFile(f.path);
         const current = file && f.path === file.path;
         return html`<li>${text || hub
-          ? html`<a class="apps-file" href="${fileLink(f.path)}"${current ? raw(' aria-current="page"') : ''}>${icon('fileCode', { cls: 'sm' })}<span class="apps-fname">${f.name}</span>${hub ? badge('Hub') : html`<small>${formatBytes(f.size)}</small>`}</a>`
-          : html`<span class="apps-file apps-file-bin">${icon('file', { cls: 'sm' })}<span class="apps-fname">${f.name}</span><small>${formatBytes(f.size)}</small></span>`}</li>`;
+          ? html`<a class="apps-file" href="${fileLink(f.path)}"${current ? raw(' aria-current="page"') : ''}>${icon('fileCode', { cls: 'sm' })}<span class="apps-fname">${V.nameText(f.name)}</span>${hub ? badge('Hub') : html`<small>${formatBytes(f.size)}</small>`}</a>`
+          : html`<span class="apps-file apps-file-bin">${icon('file', { cls: 'sm' })}<span class="apps-fname">${V.nameText(f.name)}</span><small>${formatBytes(f.size)}</small></span>`}</li>`;
       })}</ul>`;
 
     let view;
     let lines = 0;
-    if (!file) view = notice({ icon: 'search', text: `Die Datei „${wanted.slice(0, 200)}“ gibt es in Version ${v.number} nicht. Wähle eine Datei aus der Liste.` });
+    if (!file) view = notice({ icon: 'search', text: html`Die Datei „${V.nameText(wanted.slice(0, 200))}“ gibt es in Version ${v.number} nicht. Wähle eine Datei aus der Liste.` });
     else if (isHubFile(file.path)) view = notice({ icon: 'lock', title: 'Standard-Datei des Hubs', text: 'Diese Datei stellt der Hub selbst bereit, in seiner aktuellen Fassung. Was unter diesem Namen hochgeladen wurde, wird nie ausgeliefert – deshalb wird es hier auch nicht gezeigt.' });
     else if (!uploads.isTextFile(file.path)) view = notice({ icon: 'file', text: `Diese Datei ist keine Textdatei (${formatBytes(file.size)}). Lade die Version herunter, um sie anzusehen.` });
     else if (file.size > VIEW_MAX) view = notice({ icon: 'file', text: `Diese Datei ist zu groß für die Ansicht (${formatBytes(file.size)}). Lade die Version herunter, um sie zu lesen.` });
     else {
       // Shown as escaped plain text inside <pre>. It is never rendered or run. Line numbers are CSS counters.
+      // Invisible characters that change how code reads (bidi controls ...) appear as marked placeholders, never raw.
       const text = uploads.readBlob(file.sha256).toString('utf8').split('\n');
       if (text.length > 1 && text[text.length - 1] === '') text.pop();
       lines = text.length;
-      view = html`<pre class="apps-code" tabindex="0" aria-label="Inhalt von ${file.path}"><code>${text.map((l, i) => html`<span class="apps-line" id="L${i + 1}">${l.endsWith('\r') ? l.slice(0, -1) : l}</span>`)}</code></pre>`;
+      view = html`<pre class="apps-code" tabindex="0" aria-label="Inhalt von ${V.nameAttr(file.path)}"><code>${text.map((l, i) => html`<span class="apps-line" id="L${i + 1}">${V.codeText(l.endsWith('\r') ? l.slice(0, -1) : l)}</span>`)}</code></pre>`;
     }
     const back = manage ? (a.owner_id === user.id ? ['/apps', 'Meine Apps'] : ['/admin/apps', 'Alle Apps']) : ['/pruefen', 'Prüfen'];
     const body = html`${pageHead({
@@ -930,14 +935,14 @@ module.exports = (app, ctx) => {
       <summary><strong>Prüfbericht</strong>${V.reportBadges(report)}</summary>
       <div class="disclosure-body">${V.reportList(report, { href: (it) => `${fileHref(it.file)}${it.line ? `#L${it.line}` : '#datei'}` })}</div></details>
     <div class="apps-src">
-      <details class="apps-srcfiles"><summary class="apps-srcsum">${icon('folder', { cls: 'sm' })}<span>Dateien</span><span class="apps-srccur">${files.length}${file ? ` · ${file.path}` : ''}</span></summary>
+      <details class="apps-srcfiles"><summary class="apps-srcsum">${icon('folder', { cls: 'sm' })}<span>Dateien</span><span class="apps-srccur">${files.length}${file ? html` · ${V.nameText(file.path)}` : ''}</span></summary>
         <nav aria-label="Dateien von Version ${v.number}">${treeView(fileTree(files))}</nav></details>
       <div class="apps-srcview" id="datei">
-        ${file ? html`<div class="apps-filehead"><code>${file.path}</code><span class="meta">${formatBytes(file.size)}${lines ? ` · ${plural(lines, 'Zeile', 'Zeilen')}` : ''}</span></div>` : ''}
+        ${file ? html`<div class="apps-filehead"><code>${V.nameText(file.path)}</code><span class="meta">${formatBytes(file.size)}${lines ? ` · ${plural(lines, 'Zeile', 'Zeilen')}` : ''}</span></div>` : ''}
         ${view}
       </div>
     </div>`;
-    res.send(page(req, { title: `Quelltext ${a.name}`, body, active: manage ? (a.owner_id === user.id ? 'bauen' : 'admin') : 'klassen', styles: ['css/apps.css'] }));
+    res.send(page(req, { title: `Quelltext ${a.name}`, body, active: manage ? (a.owner_id === user.id ? 'bauen' : 'admin') : 'klassen', styles: ['css/apps.css', 'css/review.css'] }));
   });
 
   app.get('/apps/:id/versionen/:vid/download', (req, res) => {

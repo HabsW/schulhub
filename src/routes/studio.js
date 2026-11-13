@@ -345,16 +345,37 @@ module.exports = (app, ctx) => {
     next();
   };
 
-  /** Create or replace one draft file (editor saves and uploads). ?neu=1 refuses to replace. */
-  app.put('/studio/:appId/datei', draftOwner, express.raw({ type: 'application/octet-stream', limit: L.maxFileBytes }), (req, res) => {
-    const a = req.studioApp;
-    if (!req.is('application/octet-stream')) throw new HttpError(415, 'Falsches Format.');
-    const wanted = pathParam(req.query.pfad);
-    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-    if (req.query.neu === '1' && db.get('SELECT 1 AS x FROM draft_files WHERE app_id = ? AND path_lower = ?', a.id, normalizePath(wanted).toLowerCase())) {
-      throw new HttpError(409, 'Eine Datei mit diesem Namen gibt es schon.');
+  /** ?neu=1 never replaces: is there a file with this name (any case) already? */
+  const taken = (req, a) => req.query.neu === '1' && Boolean(db.get('SELECT 1 AS x FROM draft_files WHERE app_id = ? AND path_lower = ?', a.id, normalizePath(pathParam(req.query.pfad)).toLowerCase()));
+
+  /**
+   * Before a file body is read: permission, rate limit, format, name, "neu", then
+   * uploads.admitDraftFile (declared size against the file limit, the draft and
+   * the account; at most a few bodies per person at once). A refusal is answered
+   * without reading the body and closes the connection.
+   */
+  function draftUpload(req, res, next) {
+    try {
+      const a = draftApp(req);
+      limiter.guard('draftWrites', req.user.id);
+      if (!req.is('application/octet-stream')) throw new HttpError(415, 'Falsches Format.');
+      const wanted = pathParam(req.query.pfad);
+      if (taken(req, a)) throw new HttpError(409, 'Eine Datei mit diesem Namen gibt es schon.');
+      uploads.admitDraftFile(req, res, a, req.user.id, wanted);
+      req.studioApp = a;
+      next();
+    } catch (err) {
+      res.set('Connection', 'close');
+      next(err);
     }
-    const p = uploads.putDraftFile(a, wanted, data); // all path, type, size and quota checks
+  }
+
+  /** Create or replace one draft file (editor saves and uploads). ?neu=1 refuses to replace. */
+  app.put('/studio/:appId/datei', draftUpload, express.raw({ type: 'application/octet-stream', limit: L.maxFileBytes }), (req, res) => {
+    const a = req.studioApp;
+    const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (taken(req, a)) throw new HttpError(409, 'Eine Datei mit diesem Namen gibt es schon.'); // again: another save may have come first
+    const p = uploads.putDraftFile(a, req.query.pfad, data); // all path, type, size and quota checks - again, after reading
     res.json({ ok: true, path: p, files: fileList(a) });
   });
 

@@ -24,7 +24,8 @@
 //    it is used up, the check stops and the report says so.
 
 const { parseManifest } = require('./manifest');
-const { formatBytes } = require('./util');
+const { formatBytes, plural } = require('./util');
+const invisible = require('./invisible');
 
 const MAX_SCAN_BYTES = 512 * 1024; // per file: larger files are not read
 const MAX_SCAN_FILES = 400; // per version
@@ -42,6 +43,8 @@ const STYLE = new Set(['css']);
 const MEDIA = new Set(['img', 'audio', 'video', 'source', 'track', 'iframe', 'embed', 'object', 'input']);
 // The Hub serves its own copy of these, whatever was uploaded under the name (see appsHost.js).
 const HUB_FILES = new Set(['hub-sdk.js', 'hub-ui.css']);
+/** "⟨U+202E⟩ ⟨U+2066⟩" */
+const labels = (chars) => chars.map(invisible.label).join(' ');
 
 const extOf = (p) => {
   const base = p.slice(p.lastIndexOf('/') + 1);
@@ -63,6 +66,15 @@ const TEXTS = {
   'ext-fetch': (u) => `fetch() an „${u}“ wird im Hub blockiert: Apps dürfen keine Daten ins Internet schicken oder von dort laden.`,
   'ext-esimport': (u) => `import von „${u}“ wird im Hub blockiert. Lege die Datei in deinen App-Ordner und importiere sie mit einem relativen Pfad.`,
   absolute: (p) => `Absoluter Pfad „${p}“: Im Hub funktionieren nur relative Pfade. Schreib „${p.replace(/^\/+/, '') || 'index.html'}“ (ohne / am Anfang).`,
+  // Invisible characters (src/invisible.js), all found in one line. The text names them as the code views show them.
+  control: (cs) => (cs.length === 1
+    ? `Unsichtbares Steuerzeichen ${labels(cs)}: Es ändert die Schreibrichtung. So kann Code anders aussehen, als er ausgeführt wird. Lösche es.`
+    : `Unsichtbare Steuerzeichen ${labels(cs)}: Sie ändern die Schreibrichtung. So kann Code anders aussehen, als er ausgeführt wird. Lösche sie.`),
+  mark: (cs) => `${cs.length === 1 ? 'Unsichtbares' : 'Unsichtbare'} Richtungszeichen ${labels(cs)}. In Text von rechts nach links (zum Beispiel Arabisch oder Hebräisch) ist das normal – sonst lösche ${cs.length === 1 ? 'es' : 'sie'}.`,
+  line: (cs) => (cs.length === 1
+    ? `Unsichtbarer Zeilenumbruch ${labels(cs)}: Für JavaScript beginnt hier eine neue Zeile, zu sehen ist aber keine. Ersetze ihn durch einen normalen Zeilenumbruch.`
+    : `Unsichtbare Zeilenumbrüche ${labels(cs)}: Für JavaScript beginnen hier neue Zeilen, zu sehen sind aber keine. Ersetze sie durch normale Zeilenumbrüche.`),
+  name: (p) => `Der Dateiname „${invisible.plain(p, invisible.IN_NAME)}“ enthält unsichtbare Zeichen und kann anders aussehen, als er ist. Benenne die Datei um.`,
 };
 
 // ------------------------------------------------------------- helpers
@@ -269,6 +281,39 @@ function styleChecks(css, offset, report) {
   }
 }
 
+// ------------------------------------------------- invisible characters
+const HIDDEN = new RegExp(invisible.IN_CODE.source, 'g'); // an own instance: lastIndex belongs to this scan
+
+const HIDDEN_RULES = { control: ['bidi', 'error'], mark: ['bidi-mark', 'warning'], line: ['line-sep', 'warning'] };
+
+/**
+ * Invisible characters in any text file (src/invisible.js): bidi controls are
+ * errors - they can make code look different from what runs ("Trojan Source");
+ * direction marks and line separators are warnings. One finding per kind and
+ * line, naming the characters. One linear pass; messages are only built for
+ * the findings that are listed.
+ */
+function hiddenChecks(text, report) {
+  let line = 0;
+  let found = new Map(); // kind -> { at, chars } in the current line
+  const flush = () => {
+    for (const [kind, f] of found) report(HIDDEN_RULES[kind][0], HIDDEN_RULES[kind][1], () => TEXTS[kind]([...f.chars]), f.at);
+    found = new Map();
+  };
+  HIDDEN.lastIndex = 0;
+  for (let m = HIDDEN.exec(text); m; m = HIDDEN.exec(text)) {
+    const at = report.line(m.index);
+    if (at !== line) {
+      flush();
+      line = at;
+    }
+    const kind = invisible.kind(m[0]);
+    if (!found.has(kind)) found.set(kind, { at: m.index, chars: new Set() });
+    found.get(kind).chars.add(m[0]);
+  }
+  flush();
+}
+
 // ------------------------------------------------------------------ main
 
 function analyzeVersion(ctx, version, { budgetMs = BUDGET_MS } = {}) {
@@ -296,42 +341,64 @@ function analyzeVersion(ctx, version, { budgetMs = BUDGET_MS } = {}) {
     if (f.size > BIG_FILE) add('note', `„${f.path}“ ist ${formatBytes(f.size)} groß. Große Dateien laden im Schul-WLAN lange – vielleicht geht es kleiner.`, { file: f.path });
   }
 
-  // ----- the code itself, read as text -----
+  // ----- file names: refused at upload (uploads.js); a name stored before that rule is reported -----
+  let badNames = 0;
+  for (const f of files) {
+    if (invisible.has(f.path, invisible.IN_NAME) && ++badNames <= PER_RULE_AND_FILE) add('error', TEXTS.name(f.path), { file: f.path });
+  }
+  if (badNames > PER_RULE_AND_FILE) add('note', `… und ${plural(badNames - PER_RULE_AND_FILE, 'weiterer Dateiname', 'weitere Dateinamen')} dieser Art.`);
+
+  // ----- the code and every other text file, read as text -----
+  // Code first, with the budget it always had. Then the other text files (JSON,
+  // SVG, TXT … - everything the source viewer shows as text), which are only
+  // searched for invisible characters, with a budget of their own; one too big
+  // for the source viewer and the diff is not read.
   const seen = { uses: new Set(), connect: null, localStorage: null };
   let loadsSdk = false;
-  let scanned = 0;
-  let scannedBytes = 0;
   let skipped = 0;
-  let stopped = false;
-
+  let stopped = false; // the time budget ran out ...
+  let codeStopped = false; // ... while code was still unread
+  const budget = { code: { files: 0, bytes: 0 }, text: { files: 0, bytes: 0 } };
+  const queue = [];
   for (const f of files) {
+    if (isHubFile(f.path)) continue; // the Hub's own files are never used (and never shown)
     const ext = extOf(f.path);
-    const kind = HTML.has(ext) ? 'html' : SCRIPT.has(ext) ? 'script' : STYLE.has(ext) ? 'style' : null;
-    if (!kind || isHubFile(f.path)) continue; // binary or not code; the Hub's own files are never used anyway
+    const kind = HTML.has(ext) ? 'html' : SCRIPT.has(ext) ? 'script' : STYLE.has(ext) ? 'style' : uploads.isTextFile(f.path) ? 'text' : null;
+    if (kind && !(kind === 'text' && f.size > MAX_SCAN_BYTES)) queue.push({ f, kind });
+  }
+  queue.sort((x, y) => (x.kind === 'text') - (y.kind === 'text')); // stable: path order within each group
+
+  for (const { f, kind } of queue) {
     if (Date.now() > deadline) {
       stopped = true;
+      codeStopped = kind !== 'text';
       break;
     }
-    if (f.size > MAX_SCAN_BYTES || scanned >= MAX_SCAN_FILES || scannedBytes + f.size > MAX_SCAN_TOTAL) {
+    const b = budget[kind === 'text' ? 'text' : 'code'];
+    if (f.size > MAX_SCAN_BYTES || b.files >= MAX_SCAN_FILES || b.bytes + f.size > MAX_SCAN_TOTAL) {
       skipped++;
       continue;
     }
     const text = uploads.readBlob(f.sha256).toString('utf8');
-    scanned++;
-    scannedBytes += f.size;
-    if (text.includes('\u0000')) continue; // not really text
+    b.files++;
+    b.bytes += f.size;
     let starts = null;
     const line = (index) => lineOf(starts || (starts = lineStarts(text)), index);
     const counts = new Map();
+    // message: a text, or a function that makes it (only called for findings that are listed)
     const report = (rule, level, message, index) => {
       const count = (counts.get(rule) || 0) + 1;
       counts.set(rule, count);
-      if (count <= PER_RULE_AND_FILE) add(level, message, { file: f.path, line: line(index) });
+      if (count <= PER_RULE_AND_FILE) add(level, typeof message === 'function' ? message() : message, { file: f.path, line: line(index) });
     };
     report.line = line;
     report.file = f.path;
 
-    if (kind === 'html') {
+    // Every text file - also one with NUL bytes: a NUL in a comment must not hide a bidi control.
+    hiddenChecks(text, report);
+    let cut = false;
+    const code = kind !== 'text' && !text.includes('\u0000'); // other text files and NUL bytes: no code checks
+    if (code && kind === 'html') {
       const flags = { viewport: false, title: false };
       const ok = scanHtml(
         text,
@@ -361,21 +428,23 @@ function analyzeVersion(ctx, version, { budgetMs = BUDGET_MS } = {}) {
         },
         deadline
       );
-      if (!ok) {
-        stopped = true;
-        break;
-      }
-      if (f.path === 'index.html') {
+      if (!ok) cut = true;
+      else if (f.path === 'index.html') {
         if (!flags.viewport) add('warning', 'In index.html fehlt <meta name="viewport" content="width=device-width, initial-scale=1">. Ohne diese Zeile ist die App auf Handys winzig.', { file: f.path });
         if (!flags.title) add('note', 'index.html hat keinen <title>. Ein Titel hilft, die App im Browser wiederzufinden.', { file: f.path });
       }
-    } else if (kind === 'script') {
+    } else if (code && kind === 'script') {
       scriptChecks(text, 0, report, seen);
-    } else {
+    } else if (code) {
       styleChecks(text, 0, report);
     }
     for (const n of counts.values()) {
-      if (n > PER_RULE_AND_FILE) add('note', `… und ${n - PER_RULE_AND_FILE} weitere Stellen dieser Art in „${f.path}“.`, { file: f.path });
+      if (n > PER_RULE_AND_FILE) add('note', `… und ${plural(n - PER_RULE_AND_FILE, 'weitere Stelle', 'weitere Stellen')} dieser Art in „${invisible.plain(f.path, invisible.IN_NAME)}“.`, { file: f.path });
+    }
+    if (cut) {
+      stopped = true;
+      codeStopped = true;
+      break;
     }
   }
 
@@ -383,7 +452,7 @@ function analyzeVersion(ctx, version, { budgetMs = BUDGET_MS } = {}) {
   if (seen.localStorage) {
     add('note', 'localStorage funktioniert, speichert aber nur auf diesem einen Gerät. hub.save speichert im Konto – auf jedem Gerät, an dem sich die Person anmeldet.', where(seen.localStorage));
   }
-  if (seen.connect && !loadsSdk && !stopped) {
+  if (seen.connect && !loadsSdk && !codeStopped) {
     add('warning', 'Hub.connect() wird benutzt, aber keine Seite lädt hub-sdk.js. Füge <script src="hub-sdk.js"></script> vor deinem eigenen Skript ein.', where(seen.connect));
   }
   if (stopped) add('note', 'Prüfung abgebrochen – zu große Dateien: Die Prüfung hat ihre Zeit aufgebraucht, nicht alle Dateien wurden geprüft.');

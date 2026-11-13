@@ -12,6 +12,7 @@ const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const yauzl = require('yauzl');
 const { HttpError } = require('./util');
+const invisible = require('./invisible');
 
 // Allowed file types -> the Content-Type they are served with.
 const TYPES = {
@@ -45,14 +46,25 @@ const extOf = (p) => {
 };
 const fail = (message) => new HttpError(400, message);
 
-/** Validate a relative file path. Returns the normalised path or throws. */
-function normalizePath(input) {
+/**
+ * Validate a relative file path. Returns the normalised path or throws.
+ * lookup: the name only finds a row that is already stored - then invisible
+ * characters are not refused (a name stored before that rule existed can still
+ * be deleted). Every name that is STORED goes through the full rule.
+ */
+function normalizePath(input, { lookup = false } = {}) {
   if (typeof input !== 'string') throw fail('Ungültiger Dateiname.');
   const p = input.normalize('NFC');
-  const shown = JSON.stringify(p.slice(0, 80));
+  // Messages show invisible characters as ⟨U+202E⟩, never raw (JSON.stringify leaves them as they are).
+  const shown = JSON.stringify(invisible.plain(p.slice(0, 80), invisible.IN_NAME));
   if (p.length === 0 || p.length > 240) throw fail('Ein Dateipfad ist leer oder zu lang (maximal 240 Zeichen).');
   // no control characters, no backslashes, nothing Windows cannot store
   if (/[\u0000-\u001f\u007f\\:*?"<>|]/.test(p)) throw fail(`Der Dateiname ${shown} enthält unerlaubte Zeichen.`);
+  // No invisible format characters (Unicode Cf, e.g. U+202E, which reverses the text after it:
+  // "bild\u202Egnp.js" is shown as "bildsj.png") and no line or paragraph separators.
+  if (!lookup && invisible.has(p, invisible.IN_NAME)) {
+    throw fail(`Der Dateiname ${shown} enthält ein unsichtbares Zeichen (hier als ⟨U+…⟩ zu sehen). Solche Zeichen können einen Namen anders aussehen lassen, als er ist. Benenne die Datei um.`);
+  }
   if (p.startsWith('/')) throw fail(`Der Dateipfad ${shown} darf nicht mit / beginnen.`);
   const segments = p.split('/');
   if (segments.length > 12) throw fail(`Der Dateipfad ${shown} hat zu viele Unterordner.`);
@@ -116,16 +128,22 @@ function createUploads(ctx) {
       ownerId, ownerId
     ).n;
 
+  /** The name of a file for a version: normalised and of an allowed type - or junk, which is skipped silently. */
+  function versionFileName(rawPath) {
+    const p = normalizePath(rawPath);
+    if (isJunk(p)) return { p, junk: true };
+    if (!types[extOf(p)]) throw fail(`Der Dateityp von "${p.slice(0, 80)}" ist nicht erlaubt. Erlaubt sind Web-Dateien wie HTML, CSS, JS, Bilder, Töne, Schriften und WASM.`);
+    return { p, junk: false };
+  }
+
   /**
    * Add one file to a version that is still being uploaded.
    * Checks name, type, size, file count, version size and the owner's quota.
    * Returns false if the file was skipped as junk.
    */
   function addFile(version, ownerId, rawPath, buffer) {
-    const p = normalizePath(rawPath);
-    if (isJunk(p)) return false;
-    const ext = extOf(p);
-    if (!types[ext]) throw fail(`Der Dateityp von "${p.slice(0, 80)}" ist nicht erlaubt. Erlaubt sind Web-Dateien wie HTML, CSS, JS, Bilder, Töne, Schriften und WASM.`);
+    const { p, junk } = versionFileName(rawPath);
+    if (junk) return false;
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
 
     const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id);
@@ -297,11 +315,17 @@ function createUploads(ctx) {
     db.run('INSERT OR IGNORE INTO app_drafts (app_id, based_on_version_id, created_at, updated_at) VALUES (?, ?, ?, ?)', app.id, basedOnVersionId, Date.now(), Date.now());
   }
 
-  /** Create or replace one draft file. Returns the normalised path. */
-  function putDraftFile(app, rawPath, buffer) {
+  /** The name of a draft file: normalised, not hidden, of an allowed type. */
+  function draftFileName(rawPath) {
     const p = normalizePath(rawPath);
     if (isJunk(p)) throw fail(`Versteckte Dateien und Ordner wie "${p.slice(0, 80)}" sind im Editor nicht möglich.`);
     if (!types[extOf(p)]) throw fail(`Der Dateityp von "${p.slice(0, 80)}" ist nicht erlaubt.`);
+    return p;
+  }
+
+  /** Create or replace one draft file. Returns the normalised path. */
+  function putDraftFile(app, rawPath, buffer) {
+    const p = draftFileName(rawPath);
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
     return db.tx(() => {
       ensureDraft(app);
@@ -322,7 +346,7 @@ function createUploads(ctx) {
   }
 
   function deleteDraftFile(app, rawPath) {
-    const p = normalizePath(rawPath);
+    const p = normalizePath(rawPath, { lookup: true }); // finds a stored name, even one from before a naming rule
     const old = db.get('SELECT sha256 FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
     if (!old) return false;
     db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
@@ -352,6 +376,81 @@ function createUploads(ctx) {
 
   const listDraftFiles = (appId) => db.all('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? ORDER BY path_lower', appId);
   const findDraftFile = (appId, p) => db.get('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? AND path = ?', appId, p);
+
+  // ---------- before a file body is read ----------
+  // A folder upload (one PUT per file) and an editor save read the body into
+  // memory; only then can addFile or putDraftFile check it. So BEFORE it is
+  // read: the body must declare its size (Content-Length; chunked bodies are
+  // refused), and that size must fit the file limit, what is left of the
+  // version or draft and of the owner's account - counting the bodies that are
+  // being read at this moment - and one person reads at most
+  // L.parallelUploads bodies at a time. The routes answer a refusal without
+  // reading and close the connection. The checks after reading stay in force.
+
+  const reading = new Map(); // 'person:<id>' | 'owner:<id>' | 'into:<version or draft>' -> { n, bytes } being read now
+  const inFlight = (key) => reading.get(key) || { n: 0, bytes: 0 };
+  function track(keys, n, bytes) {
+    for (const key of keys) {
+      const r = inFlight(key);
+      if (r.n + n > 0) reading.set(key, { n: r.n + n, bytes: r.bytes + bytes });
+      else reading.delete(key);
+    }
+  }
+  const mb = (n) => Math.round(n / 1048576);
+
+  /**
+   * Admit one body before it is read, or throw (400, 411, 413, 429).
+   * into: { key, files, bytes } - what the version or draft holds now; null for
+   * a file that is skipped anyway (junk). old: the stored file this body
+   * replaces, or null. The admission ends when the response is finished or the
+   * connection closes.
+   */
+  function admitBody(req, res, { person, owner, name, into, old = null }) {
+    const length = req.headers['content-length'];
+    if (req.headers['transfer-encoding'] !== undefined || typeof length !== 'string' || !/^\d{1,15}$/.test(length)) {
+      throw new HttpError(411, 'Beim Hochladen fehlt die Größe der Datei. Lade die Seite neu und versuche es noch einmal.');
+    }
+    const size = Number(length);
+    if (size > L.maxFileBytes) throw new HttpError(413, `"${name.slice(0, 80)}" ist zu groß (maximal ${mb(L.maxFileBytes)} MB pro Datei).`);
+    if (into) {
+      const busy = inFlight(`into:${into.key}`);
+      const freed = old ? old.size : 0;
+      if (!old && into.files + busy.n + 1 > L.maxFiles) throw fail(`Zu viele Dateien (maximal ${L.maxFiles}).`);
+      if (into.bytes - freed + busy.bytes + size > L.maxVersionBytes) throw new HttpError(413, `Die App ist zu groß (maximal ${mb(L.maxVersionBytes)} MB).`);
+      if (userBytes(owner) - freed + inFlight(`owner:${owner}`).bytes + size > L.maxUserBytes) {
+        throw new HttpError(413, 'Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
+      }
+    }
+    if (inFlight(`person:${person}`).n >= L.parallelUploads) {
+      throw new HttpError(429, `Du lädst gerade schon ${L.parallelUploads} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
+    }
+    const keys = into ? [`person:${person}`, `owner:${owner}`, `into:${into.key}`] : [`person:${person}`];
+    track(keys, 1, size);
+    let held = true;
+    const release = () => {
+      if (!held) return;
+      held = false;
+      track(keys, -1, -size);
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    req.once('error', release);
+  }
+
+  /** Before the body of one file for a version that is being uploaded is read (see admitBody). */
+  function admitVersionFile(req, res, version, ownerId, personId, rawPath) {
+    const { p, junk } = versionFileName(rawPath);
+    const into = junk ? null : { key: `version:${version.id}`, ...db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id) };
+    admitBody(req, res, { person: personId, owner: ownerId, name: p, into });
+  }
+
+  /** Before the body of one editor draft file is read (see admitBody). */
+  function admitDraftFile(req, res, app, personId, rawPath) {
+    const p = draftFileName(rawPath);
+    const old = db.get('SELECT size FROM draft_files WHERE app_id = ? AND path_lower = ?', app.id, p.toLowerCase());
+    const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM draft_files WHERE app_id = ?', app.id);
+    admitBody(req, res, { person: personId, owner: app.owner_id, name: p, into: { key: `draft:${app.id}`, files: now.files, bytes: now.bytes }, old });
+  }
 
   // ---------- reading ----------
 
@@ -427,6 +526,7 @@ function createUploads(ctx) {
   return {
     addFile, addZip, addDirectory, receiveToTemp, collectGarbage, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes,
     putDraftFile, deleteDraftFile, draftFromVersion, deleteDraft, listDraftFiles, findDraftFile, isAllowedPath: (p) => Boolean(types[extOf(p)]),
+    admitVersionFile, admitDraftFile,
   };
 }
 
