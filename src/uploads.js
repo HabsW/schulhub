@@ -109,7 +109,7 @@ function createUploads(ctx) {
       // but must never leave it pointing at a file whose content was still only in memory.
       const fd = fs.openSync(tmp, 'w', 0o640);
       try {
-        fs.writeSync(fd, buffer);
+        fs.writeFileSync(fd, buffer); // writes all of it (writeSync may write less, e.g. on a full disk)
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);
@@ -434,7 +434,7 @@ function createUploads(ctx) {
    * replaces, or null. The admission ends when the response is finished or the
    * connection closes.
    */
-  function admitBody(req, res, { person, owner, name, into, old = null, maxBytes = L.maxFileBytes, tooLarge = null, bucket = 'person', limit = L.parallelUploads, busy = null, memory = true }) {
+  function admitBody(req, res, { person, owner, name, into, old = null, maxBytes = L.maxFileBytes, tooLarge = null, bucket = 'person', limit = L.parallelUploads, busy = null, pooled = false }) {
     const length = req.headers['content-length'];
     if (req.headers['transfer-encoding'] !== undefined || typeof length !== 'string' || !/^\d{1,15}$/.test(length)) {
       throw new HttpError(411, 'Beim Hochladen fehlt die Größe der Datei. Lade die Seite neu und versuche es noch einmal.');
@@ -455,13 +455,22 @@ function createUploads(ctx) {
     if (inFlight(`${bucket}:${person}`).n >= limit) {
       throw new HttpError(429, busy || `Du lädst gerade schon ${limit} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
     }
-    // All bodies read into memory at this moment, across the whole school (L.uploadMemoryBytes): a class
-    // uploading big files at once must not take the server's memory. A ZIP goes to a temp file: memory false.
-    if (memory && inFlight('memory').bytes + size > L.uploadMemoryBytes) {
-      throw new HttpError(429, 'Gerade werden sehr viele Dateien hochgeladen. Bitte versuche es in einem Moment noch einmal.');
+    // Big file bodies (version and editor files, up to 25 MB each: pooled) held in memory right now, by
+    // everybody together, are capped (L.uploadMemoryBytes) so that a class uploading big files at once cannot
+    // take the server's memory - and ONE person gets at most a quarter of it, so a few people can never take it
+    // all. Small bodies (SDK calls, hub.files) never count: a save is never refused because others upload.
+    // A ZIP goes to a temp file. The Hub's uploader waits and tries a refused file again.
+    if (pooled) {
+      if (inFlight(`pool:${person}`).bytes + size > L.uploadMemoryBytes / 4) {
+        throw new HttpError(429, 'Du lädst gerade viele große Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist.');
+      }
+      if (inFlight('pool').bytes + size > L.uploadMemoryBytes) {
+        throw new HttpError(429, 'Gerade werden sehr viele Dateien hochgeladen. Bitte versuche es in einem Moment noch einmal.');
+      }
     }
-    const keys = [...(into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`]), ...(memory ? ['memory'] : [])];
+    const keys = [...(into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`]), ...(pooled ? ['pool', `pool:${person}`] : [])];
     track(keys, 1, size);
+    if (pooled) watchRate(req, res, size);
     let held = true;
     const release = () => {
       if (!held) return;
@@ -473,11 +482,37 @@ function createUploads(ctx) {
     req.once('error', release);
   }
 
+  /**
+   * A pooled body that crawls in would hold its place for up to the request timeout (10 minutes): after
+   * 20 seconds it must have come at L.minUploadRate on average (the slowest school Wi-Fi manages that),
+   * otherwise the connection is cut and the place freed. Counts the socket's bytes - never reads the body.
+   */
+  function watchRate(req, res, size) {
+    const socket = req.socket;
+    if (!socket) return;
+    const startedAt = Date.now();
+    const startBytes = socket.bytesRead;
+    const timer = setInterval(() => {
+      const seconds = (Date.now() - startedAt) / 1000;
+      const got = socket.bytesRead - startBytes;
+      if (got >= size) return clearInterval(timer);
+      if (seconds >= 20 && got < seconds * L.minUploadRate) {
+        clearInterval(timer);
+        req.destroy();
+      }
+    }, 5000);
+    timer.unref();
+    const stop = () => clearInterval(timer);
+    req.once('end', stop);
+    res.once('finish', stop);
+    res.once('close', stop);
+  }
+
   /** Before the body of one file for a version that is being uploaded is read (see admitBody). */
   function admitVersionFile(req, res, version, ownerId, personId, rawPath) {
     const { p, junk } = versionFileName(rawPath);
     const into = junk ? null : { key: `version:${version.id}`, ...db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id) };
-    admitBody(req, res, { person: personId, owner: ownerId, name: p, into });
+    admitBody(req, res, { person: personId, owner: ownerId, name: p, into, pooled: true });
   }
 
   /** Before the body of one editor draft file is read (see admitBody). */
@@ -485,7 +520,7 @@ function createUploads(ctx) {
     const p = draftFileName(rawPath);
     const old = db.get('SELECT size FROM draft_files WHERE app_id = ? AND path_lower = ?', app.id, p.toLowerCase());
     const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM draft_files WHERE app_id = ?', app.id);
-    admitBody(req, res, { person: personId, owner: app.owner_id, name: p, into: { key: `draft:${app.id}`, files: now.files, bytes: now.bytes }, old });
+    admitBody(req, res, { person: personId, owner: app.owner_id, name: p, into: { key: `draft:${app.id}`, files: now.files, bytes: now.bytes }, old, pooled: true });
   }
 
   // ---------- reading ----------

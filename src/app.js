@@ -142,7 +142,9 @@ function createHubApp(ctx) {
     } else {
       console.error(err);
     }
-    if (res.headersSent) return res.end();
+    // Headers (and part of the body) are out: break the connection - ending it normally would make a
+    // cut-off download look complete.
+    if (res.headersSent) return res.destroy();
     // A form that failed validation goes back to the page it came from, with
     // the message and what the person typed - instead of a dead-end error page.
     // Only for plain validation problems; never for 401/403/404/429 or JSON. Only for signed-in people

@@ -11,6 +11,7 @@ const { deny, bad, isLocalPath, formatDate, formatDay, formatFullDate, formatAgo
 const { auditLabel, actorLabel } = require('../auditLabels');
 const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, joinDe } = require('../formKit');
 const backup = require('../backup');
+const { sidHash } = require('../sessions');
 const dbJobs = require('../dbJobs');
 
 const DAY = 86_400_000;
@@ -401,7 +402,11 @@ module.exports = (app, ctx) => {
   app.post('/admin/nutzer/:uid/loeschen', async (req, res) => {
     const u = target(req);
     if (u.id === req.user.id) throw bad('Dein eigenes Konto löschst du unter „Meine Daten“.');
-    // The data of the person's apps first, in small steps (the Hub keeps answering), then the account.
+    // Decided now, in the same step as the checks above (the acting admin was loaded again after the form
+    // arrived): the account is blocked and signed out at once. Two admins deleting each other: whichever
+    // comes first wins, the other one's request finds its own session gone.
+    services.markForDeletion(u.id);
+    // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
     await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', u.id).map((r) => r.id));
     const now = db.get('SELECT * FROM users WHERE id = ?', u.id);
     if (now) services.deleteUser(req.user, now);
@@ -765,6 +770,13 @@ module.exports = (app, ctx) => {
   /** The backup itself: POST (with the CSRF token) so no link or image can start it. */
   app.post('/admin/sicherung', async (req, res) => {
     const b = await backup.createBackup(ctx);
+    // The copy took a while: still an active admin with a live session? (Blocking someone removes their sessions.)
+    const still = db.get("SELECT 1 AS ok FROM users WHERE id = ? AND role = 'admin' AND disabled = 0", req.user.id) &&
+      db.get('SELECT 1 AS ok FROM sessions WHERE sid_hash = ?', sidHash(req.sessionID));
+    if (!still) {
+      b.cleanup();
+      throw deny();
+    }
     res.once('close', () => {
       b.cleanup(); // also when the download is cancelled
       // writeZip waits for 'drain' when the client is slow; after a cancelled
@@ -778,6 +790,11 @@ module.exports = (app, ctx) => {
       res.setHeader('Content-Disposition', `attachment; filename="${backupName()}"`);
       res.setHeader('Cache-Control', 'no-store');
       await uploads.writeZip(res, b.entries);
+    } catch (err) {
+      // Half a zip must never look like a whole one: the connection breaks instead of ending normally,
+      // so the browser reports a failed download - and 'finish' never comes: it is not "the last backup".
+      console.error(err);
+      res.destroy();
     } finally {
       b.cleanup();
     }

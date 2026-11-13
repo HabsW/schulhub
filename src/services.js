@@ -398,6 +398,19 @@ function createServices(ctx) {
     );
   }
 
+  /**
+   * The first, quick step of deleting an account - from here on it is decided: the account is blocked and
+   * signed out everywhere, in one transaction that reaches the disk. Whatever happens while the batched
+   * second step runs (trimAppData) cannot change the decision any more: a blocked account acts no more (its
+   * own deletion of another admin included), and a blocked admin no longer counts as the admin who stays.
+   */
+  function markForDeletion(userId) {
+    db.tx(() => {
+      db.run('UPDATE users SET disabled = 1 WHERE id = ?', userId);
+      db.run('DELETE FROM sessions WHERE user_id = ?', userId);
+    }, { durable: true });
+  }
+
   /** Delete an account and everything that belongs to it. */
   function deleteUser(actor, user) {
     const ownApps = db.all('SELECT id FROM apps WHERE owner_id = ?', user.id).map((r) => r.id);
@@ -469,7 +482,7 @@ function createServices(ctx) {
   return {
     announcementLink, feedbackLink,
     audit, pruneAudit, notify, recordPlay, maintenance, maintenanceInSteps,
-    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData,
+    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData, markForDeletion,
   };
 }
 

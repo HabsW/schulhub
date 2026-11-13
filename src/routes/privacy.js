@@ -538,11 +538,13 @@ module.exports = (app, ctx) => {
     // Exactly the word, in capitals (only surrounding spaces and Unicode form are forgiven).
     if (cleanText(req.body.bestaetigung, 40) !== 'LÖSCHEN') throw bad('Bitte tippe zur Bestätigung genau das Wort LÖSCHEN in Großbuchstaben.');
     if (isLastAdmin(req.user)) throw bad('Der einzige Admin kann sein Konto nicht löschen. Ernenne zuerst jemand anderen zum Admin.');
-    // The data of the person's apps first, in small steps (the Hub keeps answering), then the account.
+    // Decided now, in the same step as the check above: the account is blocked and signed out at once, so it
+    // no longer counts as an admin who stays - nobody else can now step down as "the last admin" - and
+    // nothing that happens during the batched deletion can turn the decision around.
+    services.markForDeletion(req.user.id);
+    // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
     await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', req.user.id).map((r) => r.id));
-    // Decided again as things are now: meanwhile the account may be gone, or the other admin too.
     const now = db.get('SELECT * FROM users WHERE id = ?', req.user.id);
-    if (now && isLastAdmin(now)) throw bad('Der einzige Admin kann sein Konto nicht löschen. Ernenne zuerst jemand anderen zum Admin.');
     if (now) services.deleteUser(now, now);
     req.session.destroy(() => {
       res.clearCookie(config.https ? '__Host-hub_sid' : 'hub_sid', { path: '/', secure: config.https, httpOnly: true, sameSite: 'lax' });

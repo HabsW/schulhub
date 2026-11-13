@@ -66,7 +66,7 @@ function createUserFiles(ctx) {
       // On the disk before the database names it (see uploads.writeBlob).
       const fd = fs.openSync(t, 'w', 0o640);
       try {
-        fs.writeSync(fd, buffer);
+        fs.writeFileSync(fd, buffer); // writes all of it (writeSync may write less, e.g. on a full disk)
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);

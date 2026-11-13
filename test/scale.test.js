@@ -374,33 +374,88 @@ test('Aufbewahrung: viele alte Protokolleinträge gehen in Schritten – der Hub
   }
 });
 
-test('Uploads: was alle zusammen gerade im Speicher halten, ist begrenzt – ein ZIP (auf die Platte) zählt nicht', async () => {
-  const h = await startHub({ limits: { uploadMemoryBytes: 1024 * 1024 } });
+test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine Person bekommt höchstens ein Viertel – Speichern aus Apps wird dadurch nie abgewiesen', async () => {
+  const h = await startHub({ limits: { uploadMemoryBytes: 2 * 1024 * 1024 } });
+  const http = require('node:http');
+  const held = [];
   try {
-    const http = require('node:http');
-    const people = [h.addUser('Anna Bau', 'teacher'), h.addUser('Ben Bau', 'teacher')];
-    const [A, B] = await Promise.all(people.map((u) => h.browser().login(u)));
-    const appA = await h.makeApp(A, 'App A');
-    const appB = await h.makeApp(B, 'App B');
-    const vA = (await A.send('POST', `/apps/${appA.id}/versionen`)).json();
-    const vB = (await B.send('POST', `/apps/${appB.id}/versionen`)).json();
-    // Anna's 700 KB body is on its way (held open) …
-    const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await A.page('/apps')).text)[1];
-    const held = http.request({
-      host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${appA.id}/versionen/${vA.id}/datei?pfad=gross.bin`,
-      headers: { host: h.config.hubHost, cookie: [...A.jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': 700 * 1024, 'x-csrf-token': csrf },
-    });
-    held.on('error', () => {});
-    held.write(Buffer.alloc(10));
-    await new Promise((r) => setTimeout(r, 100));
-    // … so Ben's 700 KB do not fit into the 1 MB the whole Hub may hold: 429, unread.
-    const refused = await B.send('PUT', `/apps/${appB.id}/versionen/${vB.id}/datei?pfad=gross.bin`, Buffer.alloc(700 * 1024), 'application/octet-stream');
-    assert.equal(refused.status, 429);
-    // A small file still fits, and a ZIP is not held in memory at all.
-    assert.equal((await B.send('PUT', `/apps/${appB.id}/versionen/${vB.id}/datei?pfad=index.html`, Buffer.from('<h1>b</h1>'), 'application/octet-stream')).status, 200);
-    const zip = require('./helpers').makeZip([{ name: 'index.html', data: '<h1>z</h1>' }, { name: 'gross.bin', data: Buffer.alloc(700 * 1024) }]);
-    assert.equal((await B.send('POST', `/apps/${appB.id}/versionen/zip`, zip, 'application/zip')).status, 200);
-    held.destroy();
+    const names = ['Anna', 'Ben', 'Carl', 'Dora', 'Eve'];
+    const people = names.map((n) => h.addUser(`${n} Bau`, 'teacher'));
+    const B = await Promise.all(people.map((u) => h.browser().login(u)));
+    const apps = [];
+    for (let i = 0; i < names.length; i++) apps.push(await h.makeApp(B[i], `App ${names[i]}`));
+    const versions = [];
+    for (let i = 0; i < names.length; i++) versions.push((await B[i].send('POST', `/apps/${apps[i].id}/versionen`)).json());
+    /** A 500 KB file body that is sent slowly: the request is admitted, its body stays on its way. */
+    async function hold(i, file) {
+      const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await B[i].page('/apps')).text)[1];
+      const req = http.request({
+        host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${apps[i].id}/versionen/${versions[i].id}/datei?pfad=${file}`,
+        headers: { host: h.config.hubHost, cookie: [...B[i].jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': 500 * 1024, 'x-csrf-token': csrf },
+      });
+      let status = null;
+      req.on('response', (res) => { status = res.statusCode; res.resume(); });
+      req.on('error', () => {});
+      req.write(Buffer.alloc(10));
+      held.push(req);
+      await new Promise((r) => setTimeout(r, 80));
+      return { req, status: () => status };
+    }
+    const put = (i, file, bytes) => B[i].send('PUT', `/apps/${apps[i].id}/versionen/${versions[i].id}/datei?pfad=${file}`, Buffer.alloc(bytes), 'application/octet-stream');
+    // One person: at most a quarter of the 2 MB (512 KB) - Anna's second big file waits.
+    const first = await hold(0, 'a1.bin');
+    assert.equal((await put(0, 'a2.bin', 500 * 1024)).status, 429, 'one person gets at most a quarter');
+    assert.equal(first.status(), null, 'her first file is still on its way');
+    // Everybody together: Ben, Carl and Dora fill the 2 MB with Anna; Eve's big file has to wait.
+    for (const i of [1, 2, 3]) await hold(i, 'gross.bin');
+    assert.equal((await put(4, 'gross.bin', 500 * 1024)).status, 429, 'the pool is full');
+    // A save, a file of an app and a small upload still go through: they are never part of the pool.
+    const t = await h.token(B[4], apps[4]);
+    assert.equal((await B[4].api(apps[4], t.token, 'save.set', { key: 'stand', value: { x: 1 } })).json().ok, true);
+    // Once the bodies are done (here: cut off), the places are free again.
+    for (const r of held.splice(0)) r.destroy();
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal((await put(4, 'gross.bin', 500 * 1024)).status, 200, 'the pool is free again');
+    assert.equal((await put(0, 'a2.bin', 500 * 1024)).status, 200, 'and so is Anna\'s quarter');
+    // A ZIP is written to a temp file and never counts.
+    const zip = require('./helpers').makeZip([{ name: 'index.html', data: '<h1>z</h1>' }, { name: 'gross.bin', data: Buffer.alloc(900 * 1024) }]);
+    assert.equal((await B[4].send('POST', `/apps/${apps[4].id}/versionen/zip`, zip, 'application/zip')).status, 200);
+  } finally {
+    for (const r of held) r.destroy();
+    await h.stop();
+  }
+});
+
+test('Uploads: ein Dateiinhalt, der nur kriecht, verliert nach 20 Sekunden seinen Platz', async () => {
+  const h = await startHub({ limits: { minUploadRate: 16 * 1024 } });
+  const http = require('node:http');
+  try {
+    const t = h.addUser('Tim Langsam', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Langsam');
+    const v = (await T.send('POST', `/apps/${app.id}/versionen`)).json();
+    const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await T.page('/apps')).text)[1];
+    const realNow = Date.now;
+    let shift = 0;
+    Date.now = () => realNow() + shift;
+    try {
+      const closed = new Promise((resolve) => {
+        const req = http.request({
+          host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${app.id}/versionen/${v.id}/datei?pfad=kriecht.bin`,
+          headers: { host: h.config.hubHost, cookie: [...T.jar].map(([k, val]) => `${k}=${val}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': 2 * 1024 * 1024, 'x-csrf-token': csrf },
+        });
+        req.on('error', () => resolve('cut'));
+        req.on('close', () => resolve('cut'));
+        req.write(Buffer.alloc(100));
+      });
+      // 25 seconds later (the clock is moved on), only 100 bytes have arrived: the watcher cuts the connection.
+      await new Promise((r) => setTimeout(r, 100));
+      shift = 25_000;
+      const outcome = await Promise.race([closed, new Promise((r) => setTimeout(() => r('still open'), 7000))]);
+      assert.equal(outcome, 'cut');
+    } finally {
+      Date.now = realNow;
+    }
   } finally {
     await h.stop();
   }
@@ -440,6 +495,138 @@ test('Datenbank: die WAL-Datei schrumpft nach großen Löschungen wieder (journa
   try {
     assert.equal(h.db.get('PRAGMA journal_size_limit').journal_size_limit, 64 * 1024 * 1024);
   } finally {
+    await h.stop();
+  }
+});
+
+/** An app of `owner` with some results, so that deleting it pauses between batches (as a real one does). */
+function appWithData(h, owner, name) {
+  const id = require('../src/util').newId();
+  h.db.run("INSERT INTO apps (id, owner_id, name, emoji, origin_key, created_at, updated_at) VALUES (?, ?, ?, '🎮', ?, ?, ?)", id, owner.id, name, `a${require('node:crypto').randomBytes(10).toString('hex')}`, Date.now(), Date.now());
+  h.db.tx(() => {
+    for (let i = 0; i < 2500; i++) h.db.run("INSERT INTO results (app_id, user_id, title, created_at) VALUES (?, ?, 'R', ?)", id, owner.id, Date.now());
+  });
+  return id;
+}
+
+test('Zwei Admins löschen sich gleichzeitig gegenseitig: genau eine Löschung geschieht, ein Admin bleibt', async () => {
+  const h = await startHub();
+  try {
+    const a = h.addUser('Ada Admin', 'admin');
+    const b = h.addUser('Bob Admin', 'admin');
+    appWithData(h, a, 'Adas App');
+    appWithData(h, b, 'Bobs App');
+    const [A, B] = await Promise.all([a, b].map((u) => h.browser().login(u)));
+    await A.page(`/admin/konten/${b.id}`);
+    await B.page(`/admin/konten/${a.id}`);
+    await Promise.all([A.post(`/admin/nutzer/${b.id}/loeschen`), B.post(`/admin/nutzer/${a.id}/loeschen`)]);
+    const left = h.db.all("SELECT name, disabled FROM users WHERE role = 'admin'");
+    assert.equal(left.length, 1, `admins left: ${JSON.stringify(left)}`);
+    assert.equal(left[0].disabled, 0, 'and that admin can still sign in');
+    const gone = left[0].name === 'Ada Admin' ? 'Bob Admin' : 'Ada Admin';
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM audit_log WHERE actor_label LIKE ?', `${gone}%`).n, 0, 'no audit entry names the deleted admin');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Ein Admin löscht sein Konto, während der andere Admin zurücktritt: nie ohne Admin, nie Daten weg und Konto noch da', async () => {
+  const h = await startHub();
+  try {
+    const a = h.addUser('Ada Admin', 'admin');
+    const b = h.addUser('Bob Admin', 'admin');
+    const app = appWithData(h, a, 'Adas App');
+    const [A, B] = await Promise.all([a, b].map((u) => h.browser().login(u)));
+    await A.page('/meine-daten');
+    await B.page(`/admin/konten/${b.id}`);
+    await Promise.all([A.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' }), B.post(`/admin/nutzer/${b.id}/rolle`, { rolle: 'teacher' })]);
+    assert.ok(h.db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0").n >= 1, 'an active admin remains');
+    const adaStays = Boolean(h.db.get('SELECT 1 AS ok FROM users WHERE id = ?', a.id));
+    if (adaStays) assert.equal(h.db.get('SELECT COUNT(*) AS n FROM results WHERE app_id = ?', app).n, 2500, 'refused - and her app data is untouched');
+    else assert.equal(h.db.get('SELECT role FROM users WHERE id = ?', b.id).role, 'admin', 'deleted - and Bob stayed admin');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Sicherung: wer gesperrt wird, während die Kopie entsteht, bekommt sie nicht', async () => {
+  const h = await startHub();
+  const dbJobs = require('../src/dbJobs');
+  const snapshot = dbJobs.snapshot;
+  try {
+    const a = h.addUser('Ada Admin', 'admin');
+    const b = h.addUser('Bob Admin', 'admin');
+    const A = await h.browser().login(a);
+    await A.page('/admin/sicherung');
+    // While the database is copied, the other admin blocks Ada (which signs her out everywhere).
+    dbJobs.snapshot = async (...args) => {
+      await snapshot(...args);
+      h.db.run('UPDATE users SET disabled = 1 WHERE id = ?', a.id);
+      h.db.run('DELETE FROM sessions WHERE user_id = ?', a.id);
+    };
+    const res = await A.post('/admin/sicherung');
+    assert.notEqual(res.status, 200, 'no archive with everybody\'s data');
+    assert.notEqual(res.headers['content-type'], 'application/zip');
+    assert.ok(b);
+  } finally {
+    dbJobs.snapshot = snapshot;
+    await h.stop();
+  }
+});
+
+test('Sicherung: bricht das Schreiben mittendrin ab, sieht der Download nicht vollständig aus und zählt nicht als letzte Sicherung', async () => {
+  const h = await startHub();
+  try {
+    const a = h.addUser('Ada Admin', 'admin');
+    const A = await h.browser().login(a);
+    await A.page('/admin/sicherung');
+    const writeZip = h.hub.ctx.uploads.writeZip;
+    h.hub.ctx.uploads.writeZip = async (res) => {
+      res.write(Buffer.from('PK\u0003\u0004 halb'));
+      throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+    };
+    const http = require('node:http');
+    const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await A.page('/admin/sicherung')).text)[1];
+    const outcome = await new Promise((resolve) => {
+      const req = http.request({
+        host: '127.0.0.1', port: h.config.publicPort, method: 'POST', path: '/admin/sicherung',
+        headers: { host: h.config.hubHost, cookie: [...A.jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrf },
+      }, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve('ended normally'));
+        res.on('aborted', () => resolve('broken'));
+        res.on('error', () => resolve('broken'));
+      });
+      req.on('error', () => resolve('broken'));
+      req.end(`_csrf=${encodeURIComponent(csrf)}`);
+    });
+    h.hub.ctx.uploads.writeZip = writeZip;
+    assert.equal(outcome, 'broken', 'the browser must see a failed download');
+    assert.equal(require('../src/backup').lastBackupAt(h.db), null, 'and it is not "the last backup"');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Dateien kommen ganz auf die Platte – auch wenn ein einzelner Schreibaufruf weniger schreibt', async () => {
+  const h = await startHub();
+  const fsReal = require('node:fs');
+  const writeSync = fsReal.writeSync;
+  try {
+    const t = h.addUser('Tim Teil', 'teacher');
+    const T = await h.browser().login(t);
+    fsReal.writeSync = (fd, buf, off, len, ...rest) => (typeof off === 'number' && typeof len === 'number'
+      ? writeSync(fd, buf, off, Math.min(len, 1000), ...rest)
+      : writeSync(fd, Buffer.isBuffer(buf) ? buf.subarray(0, 1000) : buf));
+    const content = require('node:crypto').randomBytes(50_000);
+    const app = await h.makeApp(T, 'Ganz', { 'index.html': '<h1>x</h1>', 'gross.bin': content });
+    fsReal.writeSync = writeSync;
+    const row = h.db.get("SELECT f.sha256, f.size FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ? AND f.path = 'gross.bin'", app.id);
+    const onDisk = fsReal.readFileSync(h.hub.ctx.uploads.blobPath(row.sha256));
+    assert.equal(onDisk.length, content.length, 'the whole file is on the disk');
+    assert.equal(require('node:crypto').createHash('sha256').update(onDisk).digest('hex'), row.sha256);
+  } finally {
+    fsReal.writeSync = writeSync;
     await h.stop();
   }
 });

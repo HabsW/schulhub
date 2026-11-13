@@ -152,11 +152,19 @@
     request('POST', base, null, null, signal)
       .then(function (version) {
         state.versionId = version.id;
+        // A file the server cannot take right now (429: many uploads at once) is sent again a moment later.
+        function put(item, tries) {
+          return request('PUT', base + '/' + encodeURIComponent(version.id) + '/datei?pfad=' + encodeURIComponent(item.path), item.file, 'application/octet-stream', signal)
+            .catch(function (err) {
+              if (err.status !== 429 || tries >= 40 || state.aborted) throw err;
+              return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(function () { return put(item, tries + 1); });
+            });
+        }
         function worker() {
           if (state.aborted) return Promise.reject(stopped());
           if (next >= files.length) return Promise.resolve();
           var item = files[next++];
-          return request('PUT', base + '/' + encodeURIComponent(version.id) + '/datei?pfad=' + encodeURIComponent(item.path), item.file, 'application/octet-stream', signal).then(function () {
+          return put(item, 0).then(function () {
             sent++;
             bytes += item.file.size;
             show('Lade hoch: ' + sent + ' von ' + plural(files.length, 'Datei', 'Dateien'), '', total ? bytes / total : sent / files.length);
