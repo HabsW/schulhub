@@ -279,3 +279,18 @@ test('Aufbewahrung: eine längere Frist für inaktive Konten gilt auch für scho
     await save(settings.DEFS['retention.inactiveFlagDays'].def());
   }
 });
+
+// -------------------------------------------------------------- Meine Daten
+
+test('Meine Daten: der Export enthält jeden Protokolleintrag, den die Seite zählt', async () => {
+  const busy = h.addUser('Herr Fleißig', 'teacher');
+  const T = await h.browser().login(busy);
+  const insert = h.db.run.bind(null, 'INSERT INTO audit_log (at, actor_id, actor_label, action) VALUES (?, ?, ?, ?)');
+  const start = Date.now() - 300 * DAY;
+  for (let i = 0; i < 1100; i++) insert(start + i * 60_000, busy.id, 'Herr Fleißig (teacher)', i % 2 ? 'version_hochgeladen' : 'anmeldung');
+  const total = h.db.get('SELECT COUNT(*) AS n FROM audit_log WHERE actor_id = ?', busy.id).n;
+  assert.ok((await T.get('/meine-daten')).text.includes(`${total} Einträge`), 'the page counts them all');
+  const ex = (await T.get('/meine-daten/export')).json();
+  assert.equal(ex.protokoll.length, total, 'the download has every entry the page counts');
+  assert.ok(ex.protokoll.every((p) => Object.keys(p).join() === 'vorgang,zeitpunkt'), 'still only what and when');
+});

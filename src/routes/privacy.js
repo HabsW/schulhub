@@ -480,8 +480,13 @@ module.exports = (app, ctx) => {
       ausgeblendeteAnkuendigungen: db.all('SELECT an.title FROM announcement_dismissed d JOIN announcements an ON an.id = d.announcement_id WHERE d.user_id = ?', u.id).map((r) => r.title),
       angelegteAufgaben: db.all('SELECT x.title, x.note, x.due_at, x.created_at, c.name AS class_name, a.name AS app_name FROM assignments x JOIN classes c ON c.id = x.class_id JOIN apps a ON a.id = x.app_id WHERE x.created_by = ? ORDER BY x.created_at', u.id)
         .map((x) => ({ titel: x.title, notiz: x.note, klasse: x.class_name, app: x.app_name, faellig: iso(x.due_at), angelegt: iso(x.created_at) })),
-      // Only what happened and when: the details may name other people.
-      protokoll: db.all('SELECT action, at FROM audit_log WHERE actor_id = ? ORDER BY id DESC LIMIT 1000', u.id).map((r) => ({ vorgang: auditLabel(r.action), zeitpunkt: iso(r.at) })),
+      // Only what happened and when: the details may name other people. Every entry the page counts
+      // (a busy teacher has thousands within the retention period), read a page at a time.
+      protokoll: lazy(() => mapped(
+        paged('SELECT id FROM audit_log WHERE actor_id = ? ORDER BY id DESC',
+          'SELECT action, at FROM audit_log WHERE id IN (SELECT value FROM json_each(?)) AND actor_id = ? ORDER BY id DESC', [u.id], 500),
+        (r) => ({ vorgang: auditLabel(r.action), zeitpunkt: iso(r.at) })
+      )),
       appDaten: lazy(function* () {
         for (const row of myAppData(u.id)) {
           const a = db.get('SELECT * FROM apps WHERE id = ?', row.id);
