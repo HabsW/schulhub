@@ -285,6 +285,12 @@ Domains werden abgewiesen. Der Admin kann Rollen in der Verwaltung ändern.
 Eine bestehende Datenbank wird beim Start automatisch auf das aktuelle Schema gehoben
 (`PRAGMA user_version`, ohne Datenverlust).
 
+**Server und Kapazität:** Getestet mit einer Schule aus 1.000 Schüler/innen, 100 Lehrkräften, 48 Klassen
+und 90 Tagen Nutzung – beim Dreifachen der erwarteten Spitze ohne Fehler und ohne verlorene Daten. Was
+gemessen wurde, wo die Grenze liegt und was der Server braucht (2 vCPU, 1–2 GB RAM, lokale SSD – kein
+Netzlaufwerk für `data/`, ein Reverse-Proxy ohne Anfragegrenzen pro Adresse, ein Dienst, der den Hub
+neu startet): [CAPACITY.md](CAPACITY.md). Die Messwerkzeuge liegen in `scripts/scale/`.
+
 ### Sicherung
 
 **Verwaltung → Sicherung → „Sicherung herunterladen“** erzeugt eine ZIP-Datei mit allem, was der Hub
