@@ -311,7 +311,7 @@ test('Erledigt bleibt erledigt: sinkt der volle Fortschritt danach wieder, ist d
   assert.equal(h.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done', '"sobald voller Fortschritt erreicht ist" (README)');
 });
 
-test('Erledigt bleibt erledigt: viele neue Ergebnisse (auch aus einer anderen Klasse) machen eine alte Aufgabe nicht wieder offen', { todo: 'Vorschlag: Zeitpunkt des Erledigens speichern (siehe Bericht)' }, async () => {
+test('Erledigt bleibt erledigt: viele neue Ergebnisse (auch aus einer anderen Klasse) machen eine alte Aufgabe nicht wieder offen', async () => {
   // limits.resultsPerUser keeps the newest results per person and app - across all classes.
   const small = await startHub({ limits: { resultsPerUser: 3 } });
   try {

@@ -346,7 +346,7 @@ test('SDK: nach einem gescheiterten Laden der Klasseneinstellungen fragt hub.set
 // The limit "20 leaderboards per app" counts every board anybody ever used in the app, and nobody can
 // remove a board (no SDK call, no Hub page). A fix changes that documented limit (e.g. 20 boards per
 // person and app): a product decision - so this test is a todo until it is taken.
-test('Bestenlisten: eine einzelne Person kann die Bestenlisten einer App nicht für alle anderen aufbrauchen', { todo: 'Grenze „Bestenlisten pro App“ – Entscheidung offen (Vorschlag: pro Person und App)' }, async () => {
+test('Bestenlisten: eine einzelne Person kann die Bestenlisten einer App nicht für alle anderen aufbrauchen', async () => {
   const app = await h.makeApp(T, uniq('Rennen'), { 'index.html': '<h1>Rennen</h1>' });
   assert.equal((await T.post(`/klassen/${c1}/apps`, { app: app.id })).status, 303);
   // Quinn holds her own SDK token (developer tools) and fills every board the app may have.
@@ -364,7 +364,7 @@ test('Bestenlisten: eine einzelne Person kann die Bestenlisten einer App nicht f
 // class: practice elsewhere deletes the results a class's teacher sees (and the assignment's "done").
 // A fix changes that documented limit (e.g. the newest 500 per person, app and class): a product
 // decision - so this test is a todo until it is taken.
-test('Ergebnisse: was in einer anderen Klasse oder ohne Klasse entsteht, verdrängt nie die Ergebnisse dieser Klasse', { todo: 'Grenze „Ergebnisse pro Person und App“ – Entscheidung offen (Vorschlag: pro Person, App und Klasse)' }, async () => {
+test('Ergebnisse: was in einer anderen Klasse oder ohne Klasse entsteht, verdrängt nie die Ergebnisse dieser Klasse', async () => {
   const keep = h.config.limits.resultsPerUser;
   h.config.limits.resultsPerUser = 5;
   try {

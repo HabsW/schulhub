@@ -381,7 +381,8 @@ function createAppsHost(ctx) {
         const score = number(p.score);
         if (score === null) throw new ApiError('bad_value', 'Die Punktzahl muss eine Zahl sein.');
         const old = store.scoreGet(board);
-        if (old === null && !store.boardExists(board) && store.boardCount() >= L.boardsPerApp) throw new ApiError('quota', 'Diese App hat zu viele Bestenlisten.');
+        // Per person: a new board counts only for whoever posts on it, so nobody can use up the boards of others.
+        if (old === null && store.boardCount() >= L.boardsPerApp) throw new ApiError('quota', 'Du stehst in dieser App schon auf zu vielen Bestenlisten.');
         const improved = old === null || (p.lowerIsBetter === true ? score < old : score > old);
         if (improved) store.scorePut(board, score);
         return { best: improved ? score : old, improved };

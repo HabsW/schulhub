@@ -895,8 +895,12 @@ module.exports = (app, ctx) => {
     const student = db.get("SELECT u.id, u.name FROM class_members m JOIN users u ON u.id = m.user_id WHERE m.class_id = ? AND m.user_id = ? AND m.role = 'student'", cls.id, String(req.params.uid));
     // Only students can be removed here; teachers are never touched by this route.
     if (!student) throw deny();
-    db.run("DELETE FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", cls.id, student.id);
-    services.audit(req.user, 'mitglied_entfernt', cls.name);
+    db.tx(() => {
+      db.run("DELETE FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", cls.id, student.id);
+      // Back only with a code made after this moment - the code on the board stays closed to them.
+      db.run('INSERT INTO class_removals (class_id, user_id, removed_at) VALUES (?, ?, ?) ON CONFLICT (class_id, user_id) DO UPDATE SET removed_at = excluded.removed_at', cls.id, student.id, Date.now());
+      services.audit(req.user, 'mitglied_entfernt', cls.name);
+    });
     flash(req, `${student.name} ist nicht mehr in „${cls.name}“.`);
     res.redirect(303, `/klassen/${cls.id}/mitglieder`);
   });
@@ -921,6 +925,26 @@ module.exports = (app, ctx) => {
   // The code is the only thing that matters here. A class code can only ever
   // create a 'student' membership; a teacher invitation only works for staff
   // accounts (access.joinRoleFor). Nothing in the request can change that.
+  // A wrong code counts once per person and code within the limit's window: a stale join page whose
+  // "Ja, beitreten" fails is shown again by the form-error redirect, and that must not count twice -
+  // four clicks would otherwise close the teacher's new, valid code for this student for ten minutes.
+  const counted = new Map(); // `${person}:${code}` -> until
+  function countWrongCode(key, sent) {
+    const id = `${key}:${sent.slice(0, 64)}`;
+    const now = Date.now();
+    if ((counted.get(id) || 0) > now) return;
+    if (counted.size > 10_000) for (const [k, until] of counted) if (until <= now) counted.delete(k);
+    counted.set(id, now + config.rate.joinFail[1]);
+    limiter.hit('joinFail', key);
+  }
+
+  /** An expired (still stored) code of a class the person is in and may see: their way back to it. */
+  function ownClassOfStaleCode(req) {
+    const sent = String(req.params.code || '');
+    const row = /^[A-Za-z0-9_-]{32}$/.test(sent) ? db.get('SELECT class_id, code FROM join_codes WHERE code = ? AND expires_at <= ?', sent, Date.now()) : null;
+    return row && safeEqual(row.code, sent) && access.classRole(req.user, row.class_id) && access.canViewClass(req.user, row.class_id) ? row.class_id : null;
+  }
+
   function findCode(req) {
     const key = req.user.id;
     // Wrong codes are limited per person only. Codes are 192-bit, so guessing is hopeless anyway, and a
@@ -933,7 +957,7 @@ module.exports = (app, ctx) => {
     // A code of an archived class is refused exactly like a wrong one: whoever holds
     // an old code learns nothing about the class (no name, no teachers).
     if (!found || !safeEqual(found.code, sent) || access.isArchived(found.class_id)) {
-      limiter.hit('joinFail', key);
+      countWrongCode(key, sent);
       throw bad('Dieser Beitrittscode ist ungültig oder abgelaufen. Bitte frag deine Lehrkraft nach einem neuen Code.');
     }
     return { row: found, cls: getClass(found.class_id) };
@@ -943,6 +967,12 @@ module.exports = (app, ctx) => {
   const upgrades = (current, role) => current === 'student' && role === 'teacher';
 
   app.get('/beitreten/:code', (req, res) => {
+    // An old link to one's own class (from the class chat) leads to the class - no failed attempt.
+    const own = ownClassOfStaleCode(req);
+    if (own) {
+      delete req.session.returnTo;
+      return res.redirect(`/klassen/${own}`);
+    }
     const { row: code, cls } = findCode(req);
     delete req.session.returnTo;
     const role = access.joinRoleFor(req.user, code);
@@ -979,9 +1009,16 @@ module.exports = (app, ctx) => {
   });
 
   app.post('/beitreten/:code', (req, res) => {
+    const own = ownClassOfStaleCode(req);
+    if (own) return res.redirect(303, `/klassen/${own}`);
     const { row: code, cls } = findCode(req);
     const role = access.joinRoleFor(req.user, code);
     if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
+    // Removed by a teacher: back only with a code made after the removal (what the teacher was told).
+    const removed = db.get('SELECT removed_at FROM class_removals WHERE class_id = ? AND user_id = ?', cls.id, req.user.id);
+    if (removed && role === 'student' && code.created_at <= removed.removed_at) {
+      throw bad('Deine Lehrkraft hat dich aus dieser Klasse genommen. Mit diesem Code kannst du nicht wieder beitreten – frag deine Lehrkraft nach einem neuen.');
+    }
     let added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
     // Already a student of the class (a colleague who tried its QR code first): the invitation makes them its teacher.
     // joinRoleFor gave 'teacher', so this is a staff account with a valid invitation; a class code never changes a role.
@@ -989,6 +1026,7 @@ module.exports = (app, ctx) => {
       added = db.run("UPDATE class_members SET role = 'teacher' WHERE class_id = ? AND user_id = ? AND role = 'student'", cls.id, req.user.id);
     }
     if (added.changes) {
+      db.run('DELETE FROM class_removals WHERE class_id = ? AND user_id = ?', cls.id, req.user.id);
       services.audit(req.user, 'klasse_beigetreten', cls.name, role === 'teacher' ? 'als Lehrkraft' : 'als Schüler/in');
       flash(req, role === 'teacher' ? `Du führst „${cls.name}“ jetzt mit.` : `Willkommen in „${cls.name}“!`);
     } else flash(req, `Du bist schon in „${cls.name}“.`);

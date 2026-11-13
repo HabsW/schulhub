@@ -59,7 +59,8 @@ function liveStore(db, appRow, user, { userFiles } = {}) {
     // ----- leaderboards -----
     scoreGet: (board) => db.get('SELECT score FROM scores WHERE app_id = ? AND board = ? AND user_id = ?', A, board, U)?.score ?? null,
     boardExists: (board) => Boolean(db.get('SELECT 1 AS x FROM scores WHERE app_id = ? AND board = ? LIMIT 1', A, board)),
-    boardCount: () => db.get('SELECT COUNT(DISTINCT board) AS n FROM scores WHERE app_id = ?', A).n,
+    /** Boards this person has a score on (the limit is per person: one person never uses them up for others). */
+    boardCount: () => db.get('SELECT COUNT(*) AS n FROM scores WHERE app_id = ? AND user_id = ?', A, U).n,
     scorePut: (board, score) =>
       db.run(
         `INSERT INTO scores (app_id, board, user_id, score, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -88,10 +89,12 @@ function liveStore(db, appRow, user, { userFiles } = {}) {
     // ----- results (the class the app was opened from is recorded with each one) -----
     resultAdd: ({ title, score, maxScore, details, classId }, keepNewest) => {
       db.run('INSERT INTO results (app_id, user_id, title, score, max_score, details, class_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', A, U, title, score, maxScore, details, classId || null, Date.now());
+      // The newest keepNewest per person, app AND class (or without a class): practising at home or in
+      // another class never pushes out the results a class's teacher sees (or an assignment counts on).
       db.run(
-        `DELETE FROM results WHERE app_id = ? AND user_id = ? AND id NOT IN
-           (SELECT id FROM results WHERE app_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?)`,
-        A, U, A, U, keepNewest
+        `DELETE FROM results WHERE app_id = ? AND user_id = ? AND class_id IS ? AND id NOT IN
+           (SELECT id FROM results WHERE app_id = ? AND user_id = ? AND class_id IS ? ORDER BY id DESC LIMIT ?)`,
+        A, U, classId || null, A, U, classId || null, keepNewest
       );
     },
     resultsMine: (limit) =>

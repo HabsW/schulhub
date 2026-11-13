@@ -235,7 +235,7 @@ test('Formulare der Klassen ohne Inhalt (nur das CSRF-Token im Kopf): eine Antwo
 
 // ------------------------------------------------------------- confirmed, fix proposed
 
-test('Mitglied entfernen: wer entfernt wurde, kommt erst mit einem neuen Code zurück – wie die Bestätigung es sagt', { todo: 'Produktentscheidung: Rückkehr mit dem alten Code sperren (Entfernen merken) oder den Bestätigungstext ändern' }, async () => {
+test('Mitglied entfernen: wer entfernt wurde, kommt erst mit einem neuen Code zurück – wie die Bestätigung es sagt', async () => {
   const c = await newClass(T);
   const kid = await person('Kai Fremd', 'student');
   const code = joinCode(c.id);
@@ -249,7 +249,7 @@ test('Mitglied entfernen: wer entfernt wurde, kommt erst mit einem neuen Code zu
   assert.equal(classRole(kid.user.id, c.id), null, `the old code let him back in (${back.status})`);
 });
 
-test('Beitreten: ein veralteter Link zählt pro Klick einmal – vier Klicks sperren den neuen, gültigen Code nicht', { todo: 'Vorschlag: denselben falschen Code nur einmal zählen (oder nur das Absenden zählen)' }, async () => {
+test('Beitreten: ein veralteter Link zählt pro Klick einmal – vier Klicks sperren den neuen, gültigen Code nicht', async () => {
   const c = await newClass(T);
   const kid = await person('Lia Eilig', 'student');
   const stale = joinCode(c.id);
@@ -269,7 +269,7 @@ test('Beitreten: ein veralteter Link zählt pro Klick einmal – vier Klicks spe
   assert.equal(fresh.status, 200, `the new code is refused with ${fresh.status}`);
 });
 
-test('Beitreten: wer schon in der Klasse ist und den alten Link aus dem Chat öffnet, landet in der Klasse – nicht bei „frag nach einem neuen Code“', { todo: 'Vorschlag: abgelaufener Code einer Klasse, in der die Person ist (und die sie sehen darf) -> zur Klasse, ohne Fehlversuch' }, async () => {
+test('Beitreten: wer schon in der Klasse ist und den alten Link aus dem Chat öffnet, landet in der Klasse – nicht bei „frag nach einem neuen Code“', async () => {
   const c = await newClass(T);
   const kid = await person('Ole Dabei', 'student');
   const code = joinCode(c.id);
@@ -283,7 +283,7 @@ test('Beitreten: wer schon in der Klasse ist und den alten Link aus dem Chat öf
 });
 
 // Outside the classes area (start page of a student in several classes), found on the way.
-test('Startseite einer Schülerin in mehreren Klassen: „Aufgaben“ zählt alle offenen – nicht nur die sechs gezeigten', { todo: 'Vorschlag: Gesamtzahl zählen und unter der Liste auf die Klassenseiten verweisen' }, async () => {
+test('Startseite einer Schülerin in mehreren Klassen: „Aufgaben“ zählt alle offenen – nicht nur die sechs gezeigten', async () => {
   const kid = await person('Pia Viele', 'student');
   const quiz = await h.makeApp(T, uniq('Quiz'), { 'index.html': '<h1>Quiz</h1>' });
   for (let i = 0; i < 4; i++) {

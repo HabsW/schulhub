@@ -1519,15 +1519,18 @@ async function httpWorld(seed, tally) {
       const valid = Boolean(code) && code.expires_at > Date.now() && !access.isArchived(code.class_id);
       const before = code && access.classRole(u, code.class_id);
       const role = valid ? access.joinRoleFor(u, code) : null;
+      // An expired link to one's own class leads to it; a teacher invitation turns a student member who is staff into a teacher.
+      const backToOwn = Boolean(code) && code.expires_at <= Date.now() && Boolean(before) && access.canViewClass(u, code.class_id);
+      const upgrade = before === 'student' && role === 'teacher';
       const view = await as(u).get(`/beitreten/${k}`);
-      note(`${who(u)} GET /beitreten/${k}`, view.status, !valid ? 400 : before ? 302 : 200);
+      note(`${who(u)} GET /beitreten/${k}`, view.status, backToOwn ? 302 : !valid ? 400 : before && !upgrade ? 302 : 200);
       if (view.status === 200 && valid && !before) {
         // Someone a code is not for learns nothing about the class.
         note(`${who(u)} GET /beitreten/${k} names the class`, view.text.includes(row.cls(code.class_id).name), Boolean(role));
       }
       if (i % 2) continue;
-      note(`${who(u)} POST /beitreten/${k}`, (await as(u).post(`/beitreten/${k}`)).status, valid && role ? 303 : 400);
-      if (code) note(`${who(u)} role in ${code.class_id} after joining`, access.classRole(u, code.class_id), before || role || null);
+      note(`${who(u)} POST /beitreten/${k}`, (await as(u).post(`/beitreten/${k}`)).status, backToOwn || (valid && role) ? 303 : 400);
+      if (code) note(`${who(u)} role in ${code.class_id} after joining`, access.classRole(u, code.class_id), upgrade ? 'teacher' : before || role || null);
     }
     for (let i = 0; i < 40; i++) {
       const u = r.pick(people);

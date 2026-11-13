@@ -34,6 +34,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const RUN = Date.now().toString(36);
+const RESULTS_KEPT = 500; // src/config.js limits.resultsPerUser
 const checks = [];
 function check(name, ok, detail = '') {
   checks.push({ name, ok, detail });
@@ -233,11 +234,13 @@ function verify(round) {
     // The value is the last confirmed one - or a later one whose answer the kill cut off.
     if (!v || v.seq < e.acked || (v.seq !== e.acked && !e.unknown.includes(v.seq))) bad.push(`save ${key.slice(0, 13)}: confirmed ${e.acked}, found ${v && v.seq}`);
   }
+  // The Hub keeps the newest RESULTS_KEPT results per person, app and class (limits.resultsPerUser):
+  // beyond that, older ones go by design - so at least min(confirmed, RESULTS_KEPT) must be there.
   const results = db.prepare('SELECT COUNT(*) AS n FROM results WHERE user_id = ? AND app_id = ? AND title = ?');
   for (const [key, e] of ledger.results) {
     const [uid, aid] = key.split(':');
     const n = results.get(uid, aid, `Crashtest ${RUN}`).n;
-    if (n < e.acked || n > e.acked + e.unknown) bad.push(`results ${key.slice(0, 13)}: confirmed ${e.acked} (+${e.unknown} unknown), found ${n}`);
+    if (n < Math.min(e.acked, RESULTS_KEPT) || n > e.acked + e.unknown) bad.push(`results ${key.slice(0, 13)}: confirmed ${e.acked} (+${e.unknown} unknown), found ${n}`);
   }
   for (const oid of ledger.deletedUsers) if (db.prepare('SELECT 1 AS x FROM users WHERE oid = ?').get(oid)) bad.push(`deleted account ${oid} is back`);
   for (const id of ledger.deletedApps) if (db.prepare('SELECT 1 AS x FROM apps WHERE id = ?').get(id)) bad.push(`deleted app ${id} is back`);

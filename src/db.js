@@ -433,6 +433,18 @@ const MIGRATIONS = [
   -- The audit log by kind of entry (its filter, and the last backups on the backup page).
   CREATE INDEX audit_action ON audit_log(action, id);
   `,
+  // ---------------------------------------------------------------- 5 -> 6
+  `
+  -- A student a teacher removed from a class comes back only with a code made after the removal
+  -- (the removal dialog says so). Gone with the class and with the account.
+  CREATE TABLE class_removals (
+    class_id TEXT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    removed_at INTEGER NOT NULL,
+    PRIMARY KEY (class_id, user_id)
+  );
+  CREATE INDEX class_removals_user ON class_removals(user_id);
+  `,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;

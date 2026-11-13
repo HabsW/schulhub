@@ -134,8 +134,8 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       saveKeys: 200,
       sharedTotalBytes: 2 * MB, // shared data per app / per class
       resultBytes: 32 * KB,
-      resultsPerUser: 500, // per app; oldest are dropped
-      boardsPerApp: 20,
+      resultsPerUser: 500, // per person, app and class (or without a class); the oldest are dropped
+      boardsPerApp: 20, // leaderboards one person posts on in one app
       commentsPerApp: 500,
       classesPerTeacher: 60,
       fileBytes: 1 * MB, // hub.files: one file
