@@ -293,7 +293,7 @@ test('Speicherplatz pro Konto (maxUserBytes) gilt für Uploads – Datei für Da
     const v = (await T.send('POST', `/apps/${two}/versionen`)).json();
     const put = (p, size) => T.send('PUT', `/apps/${two}/versionen/${v.id}/datei?pfad=${p}`, Buffer.from('b'.repeat(size)), 'application/octet-stream');
     const over = await put('index.html', 500);
-    assert.equal(over.status, 400, 'a second app cannot go past the account cap');
+    assert.equal(over.status, 413, 'a second app cannot go past the account cap (refused before the body is read)');
     assert.match(over.text, /Speicherplatz dieses Kontos ist voll/);
     assert.equal((await put('index.html', 300)).status, 200, 'below the cap the upload works'); // 900 used
     const zip = await T.send('POST', `/apps/${two}/versionen/zip`, makeZip([{ name: 'index.html', data: 'c'.repeat(200) }]), 'application/zip');
