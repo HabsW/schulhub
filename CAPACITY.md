@@ -116,14 +116,14 @@ table says so). "Server busy" is the event-loop utilisation of the Hub's thread 
 | *Before:* peak 3× | 75,160 | 0 | 1.4 ms | 9 ms | 36 ms | 787 ms | 41 % | 202 MB |
 
 - **Sign-in as a person waits for it** (Hub page, Microsoft stand-in with 150 ms ± 50 % simulated network
-  time, back, first page): p95 223 ms at 1×, 224 ms at 3×. The Hub's own share is a few milliseconds; the
+  time, back, first page): p95 223 ms at 1×, 222 ms at 3×. The Hub's own share is a few milliseconds; the
   rest is the simulated round trip to Microsoft.
 - **QR join as a student waits for it** (open the link, half of them sign in first, confirm, class page):
   p95 193 ms at 1×, 293 ms at 3× (longest 325 ms) – before: 1,168 ms at 3×. All 30 / 90 students were members exactly once
-  afterwards; the projector's join counter answered within 73 ms during the burst (before: 856 ms).
-- **During peak 3×** (selected requests, p95): save 1 ms, leaderboard 0.6 ms, the teacher's live results
-  page 8.6 ms, the class page 29 ms, CSV export of the 93-student class 7.8 ms (before 17 ms), one uploaded
-  file 2.6 ms (before 14 ms), a 10 MB ZIP 40 ms (before 787 ms).
+  afterwards; the projector's join counter answered within 81 ms during the burst (before: 856 ms).
+- **During peak 3×** (selected requests, p95): save 0.9 ms, leaderboard 0.6 ms, the teacher's live results
+  page 5.7 ms, the class page 19 ms, CSV export of the 93-student class 7.6 ms (before 17 ms), one uploaded
+  file 6.8 ms (before 14 ms), a 10 MB ZIP 75 ms (before 787 ms).
 - **Data checked after the 3× run:** 56,178 confirmed saves and results of 713 players – each person's last
   save, best score, every result with the class it was made in, progress and achievements – all present,
   none holding another person's data; 54 uploaded versions identical byte for byte.
