@@ -116,13 +116,19 @@ module.exports = (app, ctx) => {
     return parts.join(' · ');
   }
 
-  /** One app in a list: the whole row opens it; buttons at the end stay separate. */
+  /**
+   * One app in a list: the whole row opens it; buttons at the end stay separate. A row comes from
+   * access.visibleApps, which says how the person may open it: a colleague's shared app that is
+   * not theirs, in one of their classes or school-wide opens as a preview of its published version
+   * (access.canSeeVersion) - nothing is stored, and the colleague can try it before adding it.
+   */
   function appListRow(a, info, end = '') {
     const desc = String(a.description || '').split('\n')[0].slice(0, 160);
     const fav = info.favorites.has(a.id) ? html`<span class="school-fav" title="Favorit">${icon('heart', { cls: 'sm filled', label: 'Favorit' })}</span>` : '';
+    const previewOnly = a.shared_staff && !a.mine && !a.in_class && !a.schoolwide;
     // Only a row with buttons wraps on phones; otherwise the chevron stays beside the text.
     return html`<li class="row school-app-row${end ? ' wrap' : ''}">${appIcon(a)}<div class="row-main">
-      <a class="row-link row-title" href="/apps/${a.id}/spielen">${a.name}</a>
+      <a class="row-link row-title" href="/apps/${a.id}/spielen${previewOnly ? `?version=${a.published_version_id}` : ''}">${a.name}</a>
       ${desc ? html`<span class="row-sub clamp">${desc}</span>` : ''}
       <span class="school-meta">${appMeta(a, info)}</span></div>
       <div class="row-end${end ? ' school-app-end' : ''}">${fav}${end}${icon('chevronRight', { cls: 'chev' })}</div></li>`;

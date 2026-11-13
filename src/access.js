@@ -4,6 +4,8 @@
 // on their own, and nothing the browser sends (role, owner, ids) is trusted.
 
 function createAccess(db) {
+  /** Two ids name the same person or row only if they are real ids: a missing id (undefined, null, '') is nobody's. */
+  const sameId = (a, b) => typeof a === 'string' && a !== '' && a === b;
   const isAdmin = (user) => Boolean(user) && user.role === 'admin';
   /** Staff: may create classes, use colleagues' shared apps, accept co-teacher invitations. */
   const isStaff = (user) => Boolean(user) && (user.role === 'teacher' || user.role === 'admin');
@@ -48,7 +50,7 @@ function createAccess(db) {
 
   // ----- apps -----
   /** Owner (or admin): edit, upload, use the editor, publish, delete, see usage numbers. */
-  const canManageApp = (user, app) => Boolean(user && app) && (app.owner_id === user.id || isAdmin(user));
+  const canManageApp = (user, app) => Boolean(user && app) && (sameId(app.owner_id, user.id) || isAdmin(user));
   const ownerIsStaff = (app) => Boolean(app) && isStaff(db.get('SELECT role FROM users WHERE id = ?', app.owner_id));
   /** Only staff may share their own apps with colleagues (students' apps go through review). */
   const canShareApp = (user, app) => canManageApp(user, app) && ownerIsStaff(app);
@@ -75,9 +77,11 @@ function createAccess(db) {
    * Preview, source code, diff and download of ONE version. The owner sees all
    * of their versions. A teacher sees versions that were submitted to, returned
    * in or approved in one of their classes - never the owner's private drafts -
-   * and the published version of an app a colleague shared.
+   * and the published version of an app a colleague shared. Anything that is not a version of
+   * this app (null, another app's version) is seen by nobody.
    */
   function canSeeVersion(user, app, versionId) {
+    if (!app || typeof versionId !== 'string' || !db.get('SELECT 1 AS ok FROM app_versions WHERE id = ? AND app_id = ?', versionId, app.id)) return false;
     if (canManageApp(user, app)) return true;
     if (reviewClasses(user, app).some((c) => c.version_id === versionId || c.requested_version_id === versionId)) return true;
     return isSharedWith(user, app) && app.published_version_id === versionId;
@@ -92,7 +96,7 @@ function createAccess(db) {
    */
   function addToClassMode(user, app, classId) {
     if (!user || !app || !app.published_version_id || !canViewClass(user, classId) || isArchived(classId)) return null;
-    const own = app.owner_id === user.id;
+    const own = sameId(app.owner_id, user.id);
     if (canChangeClass(user, classId) && (own || isSharedWith(user, app) || app.schoolwide_version_id)) return 'approve';
     return own ? 'submit' : null;
   }
@@ -100,7 +104,8 @@ function createAccess(db) {
   /**
    * Decide what (if anything) this user may run.
    * Returns { version, classId, preview } or null.
-   *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin)
+   *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin,
+   *    and a colleague trying the published version of a shared app - see canSeeVersion)
    *  - classId given: the version approved for that class
    *  - neither: owner's published version, school-wide release, or any of the user's classes
    */
@@ -172,9 +177,9 @@ function createAccess(db) {
   // ----- feedback (teacher -> one student, private) -----
   const canGiveFeedback = (user, classId, studentId) => canChangeClass(user, classId) && isStudentOf(classId, studentId);
   /** The student it is for, and the teachers of that class. */
-  const canReadFeedback = (user, f) => Boolean(user && f) && (f.student_id === user.id || canManageClass(user, f.class_id));
+  const canReadFeedback = (user, f) => Boolean(user && f) && (sameId(f.student_id, user.id) || canManageClass(user, f.class_id));
   /** The author, the student (it is their data), the admin. */
-  const canDeleteFeedback = (user, f) => Boolean(user && f) && (f.author_id === user.id || f.student_id === user.id || isAdmin(user));
+  const canDeleteFeedback = (user, f) => Boolean(user && f) && (sameId(f.author_id, user.id) || sameId(f.student_id, user.id) || isAdmin(user));
 
   // ----- per-class app settings (declared in schulhub.json) -----
   const canEditAppSettings = (user, classId, appId) => canChangeClass(user, classId) && appApprovedIn(classId, appId);
@@ -195,7 +200,8 @@ function createAccess(db) {
   // ----- lists filtered by permission (search, catalogue, start page) -----
   /**
    * Apps this user can open, with how: own (published), approved in one of
-   * their active classes, released school-wide, or shared with staff.
+   * their active classes, released school-wide, or shared with staff (a colleague's
+   * shared app that is none of the others opens as a preview of its published version).
    * q: optional search text (matched against name/description), category: exact.
    */
   function visibleApps(user, { q = '', category = '', limit = 60 } = {}) {
@@ -264,7 +270,7 @@ function createAccess(db) {
   const canSeeClassResults = (user, classId, appId) =>
     canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
   /** Only the student a feedback is for marks it as read. */
-  const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
+  const canMarkFeedbackRead = (user, f) => Boolean(user && f) && sameId(f.student_id, user.id);
   /**
    * Take an app out of a class (or take back one's own submission): the class's
    * teachers (and the admin) for any app, the app's owner for their own app if
@@ -273,7 +279,7 @@ function createAccess(db) {
    */
   function canRemoveFromClass(user, cls, row) {
     if (!user || !cls || !row || row.class_id !== cls.id || isArchived(cls.id)) return false;
-    return canChangeClass(user, cls.id) || (row.owner_id === user.id && canViewClass(user, cls.id));
+    return canChangeClass(user, cls.id) || (sameId(row.owner_id, user.id) && canViewClass(user, cls.id));
   }
   // ----- package B -----
   /**
@@ -294,14 +300,14 @@ function createAccess(db) {
    * The owner's own steps with an app in a class - submit, withdraw, take out.
    * Only the owner: the admin manages every app, but never acts as its owner.
    */
-  const isAppOwner = (user, app) => Boolean(user && app) && app.owner_id === user.id;
+  const isAppOwner = (user, app) => Boolean(user && app) && sameId(app.owner_id, user.id);
 
   /**
    * Delete a comment on an app: only a plain comment (decisions stay as the
    * review record), and only by its author or the admin.
    */
   const canDeleteComment = (user, comment) =>
-    Boolean(user && comment) && comment.kind === 'comment' && (comment.author_id === user.id || isAdmin(user));
+    Boolean(user && comment) && comment.kind === 'comment' && (sameId(comment.author_id, user.id) || isAdmin(user));
 
   // ----- package P2 -----
   /**
