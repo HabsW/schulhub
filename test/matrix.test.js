@@ -726,7 +726,7 @@ before(async () => {
   G = await h.makeApp(T, 'Matrix-Quiz', { 'index.html': '<h1>Quiz</h1>' });
   h.db.run('UPDATE apps SET shared = 1 WHERE id = ?', G.id); // colleagues may add it to their classes
   S = await h.makeApp(T, 'Schulweit-Spiel', { 'index.html': '<h1>Für alle</h1>' });
-  assert.equal((await AD.post(`/apps/${S.id}/schulweit`, { an: '1' })).status, 303);
+  assert.equal((await AD.post(`/apps/${S.id}/schulweit`, { an: '1', version: S.published_version_id })).status, 303);
   MA = await h.makeApp(M, 'Maras App', { 'index.html': '<h1>Mara</h1>' });
 
   // Tom's other class: Mara plays there too. Nothing of it may show anywhere else.

@@ -316,7 +316,7 @@ test('Mit Kolleg/innen teilen: nur Lehrkräfte als Besitzer', async () => {
 test('Schulweites Update: nur die Verwaltung gibt es frei – und nur genau die wartende Version', async () => {
   const app = await h.makeApp(L, 'Schulweit-Test', { 'index.html': 'v1' });
   const v1 = app.published_version_id;
-  await A.post(`/apps/${app.id}/schulweit`, { an: '1' });
+  await A.post(`/apps/${app.id}/schulweit`, { an: '1', version: app.published_version_id });
   assert.equal(appRow(app.id).schoolwide_version_id, v1);
   const v2 = await h.uploadFolder(L, app.id, { 'index.html': 'v2' });
   await L.post(`/apps/${app.id}/veroeffentlichen`, { version: v2 });

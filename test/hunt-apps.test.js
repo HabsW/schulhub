@@ -84,3 +84,24 @@ test('Erfolge: Titel aus einer neuen, noch nicht geprüften Version erscheinen n
   assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: v2 })).status, 303);
   assert.ok((await B.get('/start')).text.includes('BEN IST DOOF'));
 });
+
+test('Schulweit freigeben: gilt nur für die Version, die die Verwaltung vor sich hatte', async () => {
+  const app = await h.makeApp(M, uniq('Schulweit-Bindung'), { 'index.html': '<h1>v1</h1>' });
+  const v1 = app.published_version_id;
+  // The admin looks at Version 1 and is about to release it - on the app page or in the list of all apps.
+  for (const page of [`/apps/${app.id}`, '/admin/apps']) {
+    const forms = formsTo((await A.page(page)).text, `/apps/${app.id}/schulweit`).filter((f) => f.an === '1');
+    assert.equal(forms.length, 1, page);
+    // Meanwhile Mia publishes a version that nobody has looked at.
+    const v = await publish(M, app.id, { 'index.html': `<h1>ungeprüft ${page}</h1>` });
+    const res = await A.post(`/apps/${app.id}/schulweit`, forms[0]);
+    assert.notEqual(appRow(app.id).schoolwide_version_id, v, `${page}: the whole school got a version the admin never saw`);
+    assert.ok([303, 400].includes(res.status), `${page}: ${res.status}`);
+    h.db.run('UPDATE apps SET schoolwide_version_id = NULL, schoolwide_requested_version_id = NULL WHERE id = ?', app.id);
+  }
+  // Released from a fresh page, it is exactly the published version.
+  const fresh = formsTo((await A.page(`/apps/${app.id}`)).text, `/apps/${app.id}/schulweit`).find((f) => f.an === '1');
+  assert.equal((await A.post(`/apps/${app.id}/schulweit`, fresh)).status, 303);
+  assert.equal(appRow(app.id).schoolwide_version_id, appRow(app.id).published_version_id);
+  assert.notEqual(appRow(app.id).schoolwide_version_id, v1);
+});

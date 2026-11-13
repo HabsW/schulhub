@@ -529,7 +529,7 @@ module.exports = (app, ctx) => {
           <p class="meta">${a.schoolwide_version_id ? `Alle angemeldeten Personen können Version ${num(a.schoolwide_version_id) ?? '–'} öffnen.` : 'Bisher nur in Klassen.'}</p>
           <div class="actions">${a.schoolwide_version_id
             ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweite Freigabe beenden', { size: 'sm', fields: { an: '0' }, confirm: 'Schulweite Freigabe beenden?\nDie App ist danach nur noch in den Klassen, in denen sie freigegeben ist.', confirmLabel: 'Beenden' })
-            : published ? postButton(req, `/apps/${a.id}/schulweit`, 'Für die ganze Schule freigeben', { size: 'sm', icon: 'school', fields: { an: '1' }, confirm: `Version ${published.number} für die ganze Schule freigeben?\nAlle angemeldeten Personen – auch Schüler/innen aller Klassen – können sie dann öffnen.`, confirmLabel: 'Freigeben' })
+            : published ? postButton(req, `/apps/${a.id}/schulweit`, 'Für die ganze Schule freigeben', { size: 'sm', icon: 'school', fields: { an: '1', version: published.id }, confirm: `Version ${published.number} für die ganze Schule freigeben?\nAlle angemeldeten Personen – auch Schüler/innen aller Klassen – können sie dann öffnen.`, confirmLabel: 'Freigeben' })
               : html`<span class="meta">Erst möglich, wenn eine Version veröffentlicht ist.</span>`}</div></div>`
       : a.schoolwide_version_id && classRows.length ? html`<p class="meta apps-after apps-iconline">${icon('school', { cls: 'sm' })}<span>Die Verwaltung hat Version ${num(a.schoolwide_version_id) ?? '–'} für die ganze Schule freigegeben.</span></p>` : '';
     const classSection = html`<section class="section" id="klassen" aria-labelledby="h-klassen">
@@ -875,6 +875,8 @@ module.exports = (app, ctx) => {
     }
     const on = req.body.an === '1';
     if (on && !a.published_version_id) throw bad('Diese App ist noch nicht veröffentlicht.');
+    // Bound to the version the admin saw (the form sends it): one the owner published meanwhile was never looked at.
+    if (on && str(req.body.version) !== a.published_version_id) throw bad('Inzwischen ist eine andere Version veröffentlicht. Bitte lade die Seite neu und sieh sie dir an.');
     db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', on ? a.published_version_id : null, a.id);
     services.audit(req.user, on ? 'schulweit_freigegeben' : 'schulweit_beendet', a.name, '', { appId: a.id });
     flash(req, on ? `„${a.name}“ ist jetzt für die ganze Schule freigegeben.` : `„${a.name}“ ist nicht mehr schulweit freigegeben.`);

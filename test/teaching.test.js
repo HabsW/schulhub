@@ -401,7 +401,7 @@ test('Überblick und Ergebnisse: nur Ergebnisse aus dieser Klasse; fremde Lehrkr
   h.db.run("INSERT INTO results (app_id, user_id, title, score, max_score, class_id, created_at) VALUES (?, ?, 'ERGEBNIS-ALT', 1, 2, '', ?)", quiz.id, pia.id, Date.now());
   // made without any class: Paul plays the school-wide release at home, before joining 7b
   await A.page(`/apps/${quiz.id}`);
-  assert.equal((await A.post(`/apps/${quiz.id}/schulweit`, { an: '1' })).status, 303);
+  assert.equal((await A.post(`/apps/${quiz.id}/schulweit`, { an: '1', version: quiz.published_version_id })).status, 303);
   const paul = h.addUser('Paul Zuhause', 'student');
   const PZ = await h.browser().login(paul);
   const home = await h.token(PZ, quiz);

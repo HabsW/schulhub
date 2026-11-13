@@ -73,7 +73,7 @@ test('Name und Beschreibung: eine Schüler-App, die die Klasse sieht, lässt sic
     assert.equal((await edit(M, { name: 'Wortspiel 3', description: 'Jetzt mit Anleitung' })).status, 303);
 
     // School-wide: the whole school sees the name, so it stays too (the admin can still change it).
-    assert.equal((await A.post(`/apps/${app.id}/schulweit`, { an: '1' })).status, 303);
+    assert.equal((await A.post(`/apps/${app.id}/schulweit`, { an: '1', version: app.published_version_id })).status, 303);
     assert.equal((await rename(M)).status, 400, 'released school-wide: refused');
     assert.match((await M.get(`/apps/${app.id}`)).text, /ganze Schule freigegeben/);
     assert.equal(row().name, 'Wortspiel 3');
