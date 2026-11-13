@@ -268,3 +268,33 @@ test('Beitreten: ein veralteter Link zählt pro Klick einmal – vier Klicks spe
   const fresh = await kid.b.get(`/beitreten/${joinCode(c.id)}`);
   assert.equal(fresh.status, 200, `the new code is refused with ${fresh.status}`);
 });
+
+test('Beitreten: wer schon in der Klasse ist und den alten Link aus dem Chat öffnet, landet in der Klasse – nicht bei „frag nach einem neuen Code“', { todo: 'Vorschlag: abgelaufener Code einer Klasse, in der die Person ist (und die sie sehen darf) -> zur Klasse, ohne Fehlversuch' }, async () => {
+  const c = await newClass(T);
+  const kid = await person('Ole Dabei', 'student');
+  const code = joinCode(c.id);
+  assert.equal((await kid.b.post(`/beitreten/${code}`)).status, 303);
+  // A week later the teacher's link in the class chat has expired; Ole uses it to get to his class.
+  h.db.run('UPDATE join_codes SET expires_at = ? WHERE code = ?', Date.now() - 1000, code);
+  const res = await kid.b.get(`/beitreten/${code}`);
+  assert.equal(classRole(kid.user.id, c.id), 'student');
+  assert.equal(res.status, 302, `he is told: ${/ungültig oder abgelaufen[^<]*/.exec(res.text)?.[0]}`);
+  assert.equal(res.headers.location, `/klassen/${c.id}`);
+});
+
+// Outside the classes area (start page of a student in several classes), found on the way.
+test('Startseite einer Schülerin in mehreren Klassen: „Aufgaben“ zählt alle offenen – nicht nur die sechs gezeigten', { todo: 'Vorschlag: Gesamtzahl zählen und unter der Liste auf die Klassenseiten verweisen' }, async () => {
+  const kid = await person('Pia Viele', 'student');
+  const quiz = await h.makeApp(T, uniq('Quiz'), { 'index.html': '<h1>Quiz</h1>' });
+  for (let i = 0; i < 4; i++) {
+    const c = await newClass(T);
+    assert.equal((await kid.b.post(`/beitreten/${joinCode(c.id)}`)).status, 303);
+    assert.equal((await T.post(`/klassen/${c.id}/apps`, { app: quiz.id })).status, 303);
+    for (let j = 0; j < 2; j++) assert.equal((await T.post(`/klassen/${c.id}/aufgaben`, { app: quiz.id, titel: uniq('Aufgabe') })).status, 303);
+  }
+  const open = h.hub.ctx.assignments.openFor(kid.user.id, { limit: 100 }).length;
+  assert.equal(open, 8);
+  const start = (await kid.b.get('/start')).text;
+  const heading = /<h2 id="s-tasks">[^<]*<span class="count-text">(\d+)<\/span><\/h2>/.exec(start);
+  assert.equal(heading && heading[1], '8', 'the heading counts every open assignment');
+});
