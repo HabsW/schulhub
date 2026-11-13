@@ -42,7 +42,7 @@ async function main() {
   // the one that runs - and this process never touches the data folder.
   if (open && (await hubAnswers(config))) {
     console.log(`${config.hubName} läuft schon: ${config.hubOrigin} – der Browser öffnet sich.`);
-    openBrowser(config.hubOrigin);
+    await openBrowser(config.hubOrigin); // until the opener has handed the address on: ending first may take it along
     return;
   }
   let hub;
@@ -87,9 +87,19 @@ function openBrowser(url) {
     process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
     : process.platform === 'darwin' ? ['open', [url]]
     : ['xdg-open', [url]];
-  try {
-    spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
-  } catch {
-    // no browser to open: the address is printed above
-  }
+  // Settles when the opener has handed the address to the browser (it ends then) - at the latest after 5 s.
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true });
+      const timer = setTimeout(resolve, 5000);
+      const done = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      child.on('error', done); // no browser to open: the address is printed above
+      child.on('exit', done);
+    } catch {
+      resolve();
+    }
+  });
 }

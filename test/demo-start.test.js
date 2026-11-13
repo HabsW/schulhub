@@ -53,11 +53,12 @@ async function until(ok, what, ms = 20_000) {
 test('Demo: ein zweiter Start öffnet den laufenden Hub im Browser und fasst keinen Datenordner an – ein fremdes Programm auf dem Port wird nie für ihn gehalten', { skip: process.platform !== 'linux' && 'the stand-in for the browser is xdg-open' }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-demo-'));
   try {
-    // A stand-in for the browser: it only notes which address it was asked to open.
+    // A stand-in for the browser: it takes a second, then notes which address it was asked to open. (A start that
+    // ends before its opener is done may take the opener along - wine does, for one.)
     const bin = path.join(tmp, 'bin');
     fs.mkdirSync(bin);
     const opened = path.join(tmp, 'geoeffnet.txt');
-    fs.writeFileSync(path.join(bin, 'xdg-open'), `#!/bin/sh\necho "$@" >> '${opened}'\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'xdg-open'), `#!/bin/sh\nsleep 1\necho "$@" >> '${opened}'\n`, { mode: 0o755 });
     const port = await freePort();
     const env = { BASE_URL: `http://localhost:${port}`, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
 
@@ -67,7 +68,7 @@ test('Demo: ein zweiter Start öffnet den laufenden Hub im Browser und fasst kei
       const second = run(['--dev', '--open'], { ...env, DATA_DIR: path.join(tmp, 'zweiter') });
       assert.equal(await second.exited(), 0, second.output());
       assert.match(second.output(), /läuft schon/);
-      assert.equal(fs.readFileSync(opened, 'utf8').trim(), `http://localhost:${port}`, 'the browser opens the running Hub');
+      assert.equal(fs.existsSync(opened) && fs.readFileSync(opened, 'utf8').trim(), `http://localhost:${port}`, 'the browser opens the running Hub - before the start ends');
       assert.equal(fs.existsSync(path.join(tmp, 'zweiter', 'hub.sqlite')), false, 'no database made, no data folder touched');
     } finally {
       first.child.kill();
