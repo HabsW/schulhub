@@ -149,12 +149,13 @@ function createUploads(ctx) {
   function addFile(version, ownerId, rawPath, buffer) {
     const { p, junk } = versionFileName(rawPath);
     if (junk) return false;
-    // Checked again now that the body is complete (it may have taken minutes): a version that was
-    // finished meanwhile - and perhaps approved since - never takes another file. From here to the
-    // INSERT below nothing else runs, so this check and the write are one step.
-    if (!db.get("SELECT 1 AS open FROM app_versions WHERE id = ? AND status = 'uploading'", version.id)) {
-      throw fail('Diese Version ist schon fertig und ändert sich nicht mehr. Lade die Datei in eine neue Version hoch.');
-    }
+    // Checked again now that the body is complete (it may have taken minutes). Meanwhile the version
+    // may be gone (with its app, or its owner's account), or finished - and perhaps approved since: it
+    // never takes another file. From here to the INSERT below nothing else runs, so check and write
+    // are one step.
+    const state = db.get('SELECT status FROM app_versions WHERE id = ?', version.id);
+    if (!state) throw gone();
+    if (state.status !== 'uploading') throw fail('Diese Version ist schon fertig und ändert sich nicht mehr. Lade die Datei in eine neue Version hoch.');
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
 
     const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM app_files WHERE version_id = ?', version.id);
@@ -164,8 +165,6 @@ function createUploads(ctx) {
     if (db.get('SELECT 1 AS dup FROM app_files WHERE version_id = ? AND path_lower = ?', version.id, p.toLowerCase())) {
       throw fail(`Die Datei "${p.slice(0, 80)}" kommt doppelt vor.`);
     }
-    // The body took a while: the version may be gone by now (with its app, or its owner's account).
-    if (!db.get("SELECT 1 AS ok FROM app_versions WHERE id = ? AND status = 'uploading'", version.id)) throw gone();
     const sha = writeBlob(buffer);
     db.run('INSERT INTO app_files (version_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', version.id, p, p.toLowerCase(), buffer.length, sha);
     return true;
