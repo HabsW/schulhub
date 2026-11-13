@@ -505,9 +505,68 @@ function createUploads(ctx) {
             res.once('drain', done);
             res.once('close', done);
           });
+    // A file on disk (the backup: database copy and content files) is streamed: read, deflated and sent
+    // piece by piece, its checksum and sizes follow in a data descriptor (flag bit 3). Never in memory as
+    // a whole - a database copy of hundreds of MB (or more than 2 GiB, which readFile refuses) included.
+    async function streamed(f, name) {
+      const head = Buffer.alloc(30);
+      head.writeUInt32LE(0x04034b50, 0);
+      head.writeUInt16LE(20, 4);
+      head.writeUInt16LE(0x0808, 6); // UTF-8 names, sizes and checksum after the data
+      head.writeUInt16LE(8, 8); // deflate
+      head.writeUInt32LE(0x00210000, 10); // fixed date 1980-01-01
+      head.writeUInt16LE(name.length, 26);
+      await write(head);
+      await write(name);
+      let crc = 0;
+      let size = 0;
+      let packedSize = 0;
+      const source = fs.createReadStream(f.file);
+      const deflater = zlib.createDeflateRaw();
+      source.on('data', (chunk) => {
+        crc = zlib.crc32(chunk, crc);
+        size += chunk.length;
+      });
+      source.on('error', (err) => deflater.destroy(err));
+      source.pipe(deflater);
+      for await (const chunk of deflater) {
+        if (res.destroyed) {
+          source.destroy();
+          deflater.destroy();
+          return null;
+        }
+        packedSize += chunk.length;
+        await write(chunk);
+      }
+      const descriptor = Buffer.alloc(16);
+      descriptor.writeUInt32LE(0x08074b50, 0);
+      descriptor.writeUInt32LE(crc >>> 0, 4);
+      descriptor.writeUInt32LE(packedSize, 8);
+      descriptor.writeUInt32LE(size, 12);
+      await write(descriptor);
+      head.writeUInt32LE(crc >>> 0, 14); // for the central directory entry
+      head.writeUInt32LE(packedSize, 18);
+      head.writeUInt32LE(size, 22);
+      return { head, length: 30 + name.length + packedSize + 16 };
+    }
+
     for (const f of files) {
       if (res.destroyed) return;
-      const data = f.data ? f.data : f.file ? await fs.promises.readFile(f.file) : await fs.promises.readFile(blobPath(f.sha256));
+      if (f.file) {
+        const name = Buffer.from(f.path, 'utf8');
+        const done = await streamed(f, name);
+        if (!done || res.destroyed) return;
+        const entry = Buffer.alloc(46);
+        entry.writeUInt32LE(0x02014b50, 0);
+        entry.writeUInt16LE(20, 4);
+        entry.writeUInt16LE(20, 6);
+        done.head.copy(entry, 8, 6, 30); // flags .. name length, with the real checksum and sizes
+        entry.writeUInt32LE(offset, 42);
+        central.push(entry, name);
+        offset += done.length;
+        continue;
+      }
+      const data = f.data ? f.data : await fs.promises.readFile(blobPath(f.sha256));
       const packed = await deflate(data);
       if (res.destroyed) return;
       const name = Buffer.from(f.path, 'utf8');

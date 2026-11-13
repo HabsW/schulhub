@@ -292,3 +292,55 @@ test('Eine App löschen, zu der viele Rückmeldungen geschrieben wurden: ihre Mi
     await h.stop();
   }
 });
+
+test('Sicherung: Datenbank und Dateien werden gestreamt – nie als Ganzes in den Speicher gelesen – und das Archiv ist gültig', async () => {
+  const h = await startHub();
+  const realReadFile = fs.promises.readFile;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const teacher = h.addUser('Tilda Lehrerin', 'teacher');
+    const A = await h.browser().login(admin);
+    const T = await h.browser().login(teacher);
+    await h.makeApp(T, 'Gesichert', { 'index.html': '<h1>gesichert</h1>', 'daten.bin': require('node:crypto').randomBytes(300_000) });
+    const read = [];
+    fs.promises.readFile = (file, ...rest) => {
+      read.push(String(file));
+      return realReadFile(file, ...rest);
+    };
+    await A.page('/admin/sicherung');
+    const res = await A.post('/admin/sicherung');
+    fs.promises.readFile = realReadFile;
+    assert.equal(res.status, 200);
+    assert.deepEqual(read.filter((f) => f.includes('sicherung-')), [], 'files of the backup are streamed, not read whole');
+    // The archive is valid: every entry inflates to its declared size and checksum (yauzl checks both).
+    const yauzl = require('yauzl');
+    const zipFile = require('node:path').join(h.config.dataDir, 'test-backup.zip');
+    fs.writeFileSync(zipFile, res.buffer);
+    const entries = await new Promise((resolve, reject) => {
+      yauzl.open(zipFile, { lazyEntries: true, validateEntrySizes: true }, (err, zip) => {
+        if (err) return reject(err);
+        const out = [];
+        zip.on('entry', (e) => zip.openReadStream(e, (e2, stream) => {
+          if (e2) return reject(e2);
+          const chunks = [];
+          stream.on('data', (c) => chunks.push(c));
+          stream.on('error', reject);
+          stream.on('end', () => {
+            out.push({ name: e.fileName, data: Buffer.concat(chunks) });
+            zip.readEntry();
+          });
+        }));
+        zip.on('end', () => resolve(out));
+        zip.readEntry();
+      });
+    });
+    const dbEntry = entries.find((e) => e.name === 'hub.sqlite');
+    assert.ok(dbEntry && dbEntry.data.subarray(0, 16).toString('latin1') === 'SQLite format 3\u0000', 'the database copy is in the archive');
+    for (const e of entries.filter((x) => x.name.startsWith('blobs/'))) {
+      assert.equal(require('node:crypto').createHash('sha256').update(e.data).digest('hex'), e.name.split('/').pop(), `${e.name} is intact`);
+    }
+  } finally {
+    fs.promises.readFile = realReadFile;
+    await h.stop();
+  }
+});
