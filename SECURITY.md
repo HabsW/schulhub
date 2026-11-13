@@ -264,6 +264,19 @@ the same moment, joining while the code is renewed, deleting an account while it
 uploaded, removing a student from a class or archiving the class during play, publishing a new version
 while the teacher reviews the old one – also with a call whose body is still on its way.
 
+### Accounts, sessions, notices, retention and backups (bug hunt, November 2026)
+
+| Threat | Handling |
+|---|---|
+| A form decided with the account as it was when its headers arrived | The person is loaded before the body is read – and once more after the body parsers (`src/app.js`): if the stored session is gone meanwhile (logout in another tab, a block, a deletion) the request is treated as signed out, and a blocked, deleted or demoted account acts with its rights of that moment. Two admins blocking or deleting each other at the same moment no longer leave the school without an active admin, a deleted admin's late form writes no name back into the audit log, and a form on its way during a logout does not store the ended session again. Async routes (`/admin`, `/admin/datenbank-pruefen`, the backup) are not re-checked after their own waits. |
+| Announcements pushed off the start page | The start page reads only announcements of classes the person can see (the rule of `canViewClass`, then `access.canSeeAnnouncement` per row) – no longer the 20 newest of the whole school, which hid a class's own and the school-wide announcements as soon as other classes wrote more. |
+| Notices outliving what they quote | An announcement's notice points at `/start#ankuendigung-<id>`; deleting the announcement deletes it. Deleting an assignment deletes its notice, deleting a class (teacher, admin, retention, or with its only teacher's account) deletes the notices of its assignments, announcements and review requests. Notices of announcements made before this change point at `/start` and stay until they fade (180 days). Feedback and comment notices still stay when the feedback or comment is deleted. |
+| Deleted files in backups | The worker that copies the database also reads which content files the copy refers to; only those go into the archive, so files of an account or app data deleted while the backup ran are not in it. A restore leaves out every file the restored database does not refer to (archives made before this change) and says so. |
+| Retention settings | `AUDIT_RETENTION_DAYS` must be a whole number from 30 to 3650 (the range of the setting in the Hub), otherwise the Hub does not start: "0" deleted the whole audit log at every start. The inactive-account flag follows the period the admin set now: a longer period clears flags set under a shorter one. |
+| Smaller gaps | Demoting a blocked admin is allowed while one active admin remains (the guard counts active admins). "Meine Daten" names the classes that go with the account by membership, also for a teacher made a student. The export lists every audit entry the page counts. A role restored by `ADMIN_EMAILS` at sign-in is in the audit log. |
+
+Tests: `test/hunt-accounts.test.js`.
+
 ### Example apps and demo data
 
 | Threat | Handling |
