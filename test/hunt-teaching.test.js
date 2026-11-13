@@ -269,3 +269,27 @@ test('Aufgabe zu einer entfernten App: die Schülerin kann sie trotzdem selbst a
   assert.equal(h.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done');
   assert.ok(!(await K.get('/start')).text.includes('Mit entfernter App'), 'off her start page');
 });
+
+// ------------------------------------------------------------------ archived classes are read-only
+
+test('Archivierte Klasse: Rückmeldungen löscht die Lehrkraft dort nicht mehr – die Schülerin ihre eigenen schon', async () => {
+  const { T, cls, kids } = await world(2);
+  const [{ user: mia, b: M }, { user: ben }] = kids;
+  for (const [kid, text] of [[mia, 'FUER-MIA'], [ben, 'FUER-BEN']]) {
+    assert.equal((await T.post(`/klassen/${cls}/rueckmeldungen`, { schueler: kid.id, text })).status, 303);
+  }
+  const id = (text) => h.db.get('SELECT id FROM feedback WHERE body = ?', text)?.id;
+  const [toMia, toBen] = [id('FUER-MIA'), id('FUER-BEN')];
+  assert.equal((await T.post(`/klassen/${cls}/archivieren`)).status, 303);
+  // "Archiviert – nur noch lesbar … niemand kann etwas ändern": the page offers no delete button ...
+  const detail = (await T.get('/rueckmeldungen')).text;
+  assert.ok(detail.includes('FUER-BEN'), 'precondition: the teacher still reads it');
+  assert.ok(!detail.includes(`/rueckmeldungen/${toBen}/loeschen`), 'no delete button in an archived class');
+  // ... and the route refuses.
+  assert.equal((await T.post(`/rueckmeldungen/${toBen}/loeschen`)).status, 404);
+  assert.ok(id('FUER-BEN'), 'the feedback is still there');
+  // The student's own data stays hers to delete.
+  await M.page('/rueckmeldungen');
+  assert.equal((await M.post(`/rueckmeldungen/${toMia}/loeschen`)).status, 303);
+  assert.equal(id('FUER-MIA'), undefined);
+});

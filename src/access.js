@@ -179,8 +179,9 @@ function createAccess(db) {
   const canGiveFeedback = (user, classId, studentId) => canChangeClass(user, classId) && isStudentOf(classId, studentId);
   /** The student it is for, and the teachers of that class. */
   const canReadFeedback = (user, f) => Boolean(user && f) && (f.student_id === user.id || canManageClass(user, f.class_id));
-  /** The author, the student (it is their data), the admin. */
-  const canDeleteFeedback = (user, f) => Boolean(user && f) && (f.author_id === user.id || f.student_id === user.id || isAdmin(user));
+  /** The author while the class may change (an archived class is read-only), the student (it is their data), the admin. */
+  const canDeleteFeedback = (user, f) =>
+    Boolean(user && f) && ((f.author_id === user.id && canChangeClass(user, f.class_id)) || f.student_id === user.id || isAdmin(user));
 
   // ----- per-class app settings (declared in schulhub.json) -----
   const canEditAppSettings = (user, classId, appId) => canChangeClass(user, classId) && appApprovedIn(classId, appId);
