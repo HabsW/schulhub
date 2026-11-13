@@ -373,3 +373,35 @@ test('Aufbewahrung: viele alte Protokolleinträge gehen in Schritten – der Hub
     await h.stop();
   }
 });
+
+test('Uploads: was alle zusammen gerade im Speicher halten, ist begrenzt – ein ZIP (auf die Platte) zählt nicht', async () => {
+  const h = await startHub({ limits: { uploadMemoryBytes: 1024 * 1024 } });
+  try {
+    const http = require('node:http');
+    const people = [h.addUser('Anna Bau', 'teacher'), h.addUser('Ben Bau', 'teacher')];
+    const [A, B] = await Promise.all(people.map((u) => h.browser().login(u)));
+    const appA = await h.makeApp(A, 'App A');
+    const appB = await h.makeApp(B, 'App B');
+    const vA = (await A.send('POST', `/apps/${appA.id}/versionen`)).json();
+    const vB = (await B.send('POST', `/apps/${appB.id}/versionen`)).json();
+    // Anna's 700 KB body is on its way (held open) …
+    const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await A.page('/apps')).text)[1];
+    const held = http.request({
+      host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${appA.id}/versionen/${vA.id}/datei?pfad=gross.bin`,
+      headers: { host: h.config.hubHost, cookie: [...A.jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': 700 * 1024, 'x-csrf-token': csrf },
+    });
+    held.on('error', () => {});
+    held.write(Buffer.alloc(10));
+    await new Promise((r) => setTimeout(r, 100));
+    // … so Ben's 700 KB do not fit into the 1 MB the whole Hub may hold: 429, unread.
+    const refused = await B.send('PUT', `/apps/${appB.id}/versionen/${vB.id}/datei?pfad=gross.bin`, Buffer.alloc(700 * 1024), 'application/octet-stream');
+    assert.equal(refused.status, 429);
+    // A small file still fits, and a ZIP is not held in memory at all.
+    assert.equal((await B.send('PUT', `/apps/${appB.id}/versionen/${vB.id}/datei?pfad=index.html`, Buffer.from('<h1>b</h1>'), 'application/octet-stream')).status, 200);
+    const zip = require('./helpers').makeZip([{ name: 'index.html', data: '<h1>z</h1>' }, { name: 'gross.bin', data: Buffer.alloc(700 * 1024) }]);
+    assert.equal((await B.send('POST', `/apps/${appB.id}/versionen/zip`, zip, 'application/zip')).status, 200);
+    held.destroy();
+  } finally {
+    await h.stop();
+  }
+});

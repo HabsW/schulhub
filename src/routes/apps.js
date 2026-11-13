@@ -762,7 +762,7 @@ module.exports = (app, ctx) => {
     // with folder, editor and hub.files uploads). A refusal closes the connection unread.
     try {
       uploads.admitBody(req, res, {
-        person: req.user.id, name: 'Das Archiv', into: null, maxBytes: L.maxZipBytes,
+        person: req.user.id, name: 'Das Archiv', into: null, maxBytes: L.maxZipBytes, memory: false,
         tooLarge: `Das Archiv ist zu groß (maximal ${Math.round(L.maxZipBytes / 1048576)} MB).`,
       });
     } catch (err) {

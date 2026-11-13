@@ -426,7 +426,7 @@ function createUploads(ctx) {
    * replaces, or null. The admission ends when the response is finished or the
    * connection closes.
    */
-  function admitBody(req, res, { person, owner, name, into, old = null, maxBytes = L.maxFileBytes, tooLarge = null, bucket = 'person', limit = L.parallelUploads, busy = null }) {
+  function admitBody(req, res, { person, owner, name, into, old = null, maxBytes = L.maxFileBytes, tooLarge = null, bucket = 'person', limit = L.parallelUploads, busy = null, memory = true }) {
     const length = req.headers['content-length'];
     if (req.headers['transfer-encoding'] !== undefined || typeof length !== 'string' || !/^\d{1,15}$/.test(length)) {
       throw new HttpError(411, 'Beim Hochladen fehlt die Größe der Datei. Lade die Seite neu und versuche es noch einmal.');
@@ -447,7 +447,12 @@ function createUploads(ctx) {
     if (inFlight(`${bucket}:${person}`).n >= limit) {
       throw new HttpError(429, busy || `Du lädst gerade schon ${limit} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
     }
-    const keys = into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`];
+    // All bodies read into memory at this moment, across the whole school (L.uploadMemoryBytes): a class
+    // uploading big files at once must not take the server's memory. A ZIP goes to a temp file: memory false.
+    if (memory && inFlight('memory').bytes + size > L.uploadMemoryBytes) {
+      throw new HttpError(429, 'Gerade werden sehr viele Dateien hochgeladen. Bitte versuche es in einem Moment noch einmal.');
+    }
+    const keys = [...(into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`]), ...(memory ? ['memory'] : [])];
     track(keys, 1, size);
     let held = true;
     const release = () => {
