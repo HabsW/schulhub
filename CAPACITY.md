@@ -90,7 +90,33 @@ every minute; two people upload app versions. 3× multiplies all of it (900 sign
 
 ### Peak and stress
 
-<!-- RESULTS-PEAK -->
+Final code; "before" is the code at the start of this work, same data, same machine. Latencies are
+measured by the load generator per request (the person waits for several requests in a row where the
+table says so). "Server busy" is the event-loop utilisation of the Hub's thread over the measured time.
+
+| Scenario | Requests | Errors | p50 | p95 | p99 | Max | Server busy | RSS max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Morning sign-in, 300 people in 2 min (1×) | 1,500 | 0 | 1.2 ms | 187 ms | 218 ms | 226 ms | 1.4 % | 176 MB |
+| Morning sign-in, 900 people in 2 min (3×) | 4,500 | 0 | 1.1 ms | 189 ms | 219 ms | 232 ms | 3.6 % | 168 MB |
+| QR join, 30 in the same second (1×) | 155 | 0 | 1.4 ms | 124 ms | 207 ms | 209 ms | 1.4 % | 176 MB |
+| QR join, 90 in the same second (3×) | 473 | 0 | 14.6 ms | 143 ms | 220 ms | 235 ms | 4.4 % | 171 MB |
+| Peak 1×: 10 classes play, results, CSV, uploads (4 min) | 42,844 | 0 | 0.3 ms | 0.9 ms | 2.7 ms | 41 ms | 4.8 % | 192 MB |
+| Peak 3×: 30 classes play, results, CSV, uploads (4 min) | 100,666 | 0 | 0.3 ms | 1.1 ms | 9.7 ms | 99 ms | 10.5 % | 201 MB |
+| *Before:* peak 3× | 75,160 | 0 | 1.4 ms | 9 ms | 36 ms | 787 ms | 41 % | 202 MB |
+
+- **Sign-in as a person waits for it** (Hub page, Microsoft stand-in with 150 ms ± 50 % simulated network
+  time, back, first page): p95 223 ms at 1×, 224 ms at 3×. The Hub's own share is a few milliseconds; the
+  rest is the simulated round trip to Microsoft.
+- **QR join as a student waits for it** (open the link, half of them sign in first, confirm, class page):
+  p95 193 ms at 1×, 303 ms at 3× – before: 1,168 ms at 3×. All 30 / 90 students were members exactly once
+  afterwards; the projector's join counter answered within 73 ms during the burst (before: 856 ms).
+- **During peak 3×** (selected requests, p95): save 1 ms, leaderboard 0.6 ms, the teacher's live results
+  page 8.6 ms, the class page 29 ms, CSV export of the 93-student class 7.8 ms (before 17 ms), one uploaded
+  file 2.6 ms (before 14 ms), a 10 MB ZIP 40 ms (before 787 ms).
+- **Data checked after the 3× run:** 56,133 confirmed saves and results of 713 players – each person's last
+  save, best score, every result with the class it was made in, progress and achievements – all present,
+  none holding another person's data; 54 uploaded versions identical byte for byte.
+
 
 ### Where the limit is (ramp)
 
@@ -123,11 +149,29 @@ Hub's, not the generator's.
 | „Datenbank prüfen“ (`quick_check`) | 74 ms on the Hub thread | in a worker thread |
 | Upgrade 4 → 5 at start (23 indexes on the big tables) | – | 0.45 s, once |
 
-Slowest pages with the big school, one request at a time (median of 5): the admin's start page 70 ms
-before (29 ms after the index), the teacher's start page 24 ms, „Meine Daten“ export 18 ms, the class
-page of the year group (93 students) 13 ms; every other page under 13 ms.
+Slowest pages with the big school, one request at a time (median of 5), before → after: the admin's start
+page 70 → 28 ms, the class page of the year group (93 students) 13 → 15 ms, the admin overview 16 → 14 ms,
+„Meine Daten“ export of the busiest student 18 → 11 ms, the teacher's start page 24 → 10 ms, the student's
+start page 7 → 2 ms; every other page under 5 ms.
 
-<!-- RESULTS-CRASH -->
+### Crash test: kill -9 while writing
+
+`scripts/scale/crash.js`, 12 rounds. In each round 80 students save and add results as fast as they can,
+new accounts sign in and delete themselves again, teachers create classes that students join, upload and
+publish versions and delete apps – and after 4–13 seconds the Hub is killed with `SIGKILL`, then started
+again. After every kill the database file is opened and checked before the next start.
+
+- **All checks passed in all 12 rounds:** `PRAGMA integrity_check` = ok, no broken foreign keys; every write
+  the Hub had confirmed is there – 66,390 saves (the last value of each person), 66,352 results,
+  60 uploaded versions (byte for byte, with their files on disk), 118 classes with their teacher and
+  590 joins –; 632 deleted accounts and 28 deleted apps stayed deleted; the Hub started again each time,
+  and the sessions of signed-in people still worked.
+- **At the end:** every file the database names is on disk, every published version and every version a
+  class plays exists and is ready, every class has a teacher, and no orphaned files were left.
+- **Requests that failed are expected:** the ones a kill cut off, and many refusals of the test's teachers,
+  who keep creating apps and classes in a loop until the Hub's limits (30 apps, 60 classes per person,
+  uploads per hour) refuse them – the limits doing their job.
+
 
 <!-- RESULTS-SOAK -->
 

@@ -146,7 +146,7 @@ async function main() {
           if (k % 2 === 0) {
             await b.page('teacher: new class', '/klassen/neu');
             const made = await b.post('teacher: create class', '/klassen', { name: `Crash ${RUN} ${round}-${k}` });
-            if (!made.ok) continue;
+            if (!made.ok) break; // a limit refused it (or the Hub is gone): this teacher is done for the round
             const classId = made.location.split('/').pop();
             const qr = await b.page('teacher: QR', `/klassen/${classId}/qr`);
             const code = /\/beitreten\/([A-Za-z0-9_-]{32})/.exec(qr.text);
@@ -168,11 +168,11 @@ async function main() {
           } else {
             await b.page('upload: new app', '/apps/neu');
             const made = await b.post('upload: create app', '/apps', { name: `Crash ${RUN} ${round}-${k}`, emoji: '🎮', color: '2' });
-            if (!made.ok) continue;
+            if (!made.ok) break; // a limit refused it (or the Hub is gone): this teacher is done for the round
             const appId = made.location.split('/').pop();
             await b.page('upload: app page', `/apps/${appId}`);
             const v = await b.send('upload: start', 'POST', `/apps/${appId}/versionen`, {});
-            if (!v.ok) continue;
+            if (!v.ok) break;
             const vid = JSON.parse(v.text).id;
             const files = { 'index.html': Buffer.from(`<h1>Crash ${RUN} ${crypto.randomBytes(8).toString('hex')}</h1>`), 'app.js': crypto.randomBytes(30000), 'big.bin': crypto.randomBytes(2_000_000) };
             for (const [p, d] of Object.entries(files)) await b.send('upload: file', 'PUT', `/apps/${appId}/versionen/${vid}/datei?pfad=${encodeURIComponent(p)}`, d, { type: 'application/octet-stream' });
