@@ -491,8 +491,12 @@ module.exports = (app, ctx) => {
     const cls = kit.loadClass(ctx, req, 'manage');
     if (cls.archived_at) throw bad('Diese Klasse ist schon archiviert.');
     const now = Date.now();
-    db.run('UPDATE classes SET archived_at = ? WHERE id = ?', now, cls.id);
-    services.audit(req.user, 'klasse_archiviert', cls.name);
+    db.tx(() => {
+      db.run('UPDATE classes SET archived_at = ? WHERE id = ?', now, cls.id);
+      // As when the admin archives: the codes go, so that an old QR code does not work again after a restore.
+      db.run('DELETE FROM join_codes WHERE class_id = ?', cls.id);
+      services.audit(req.user, 'klasse_archiviert', cls.name);
+    });
     flash(req, `„${cls.name}“ ist archiviert und wird am ${kit.deletionDay(ctx, { ...cls, archived_at: now })} gelöscht. Bis dahin kannst du sie zurückholen.`);
     res.redirect(303, `/klassen/${cls.id}`);
   });
