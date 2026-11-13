@@ -394,7 +394,7 @@ module.exports = (app, ctx) => {
     ${teachersSee('Ist eine App in einer deiner Klassen freigegeben, sehen die Lehrkräfte dieser Klasse:')}
     <p>Deine E-Mail-Adresse sehen sie nie. Die Verwaltung der Schule kann alles sehen, was Lehrkräfte sehen. Schreib deshalb nichts Geheimes in eine App.</p>
     <h2>Von Lehrkräften</h2>
-    <ul><li><strong>Aufgaben und Rückmeldungen</strong>, die deine Lehrkraft dir gibt. Rückmeldungen sehen nur du und die Lehrkräfte deiner Klasse.</li>
+    <ul><li><strong>Aufgaben und Rückmeldungen</strong>, die deine Lehrkraft dir gibt. Rückmeldungen sehen nur du, die Lehrkräfte deiner Klasse und die Schulverwaltung.</li>
     <li><strong>Mitteilungen</strong> im Hub (zum Beispiel „deine App wurde freigegeben“). Es werden keine E-Mails verschickt.</li></ul>
     <h2>Deine Rechte</h2>
     <p>Unter <a href="/meine-daten">Meine Daten</a> kannst du jederzeit alles ansehen, herunterladen und löschen – einzelne App-Daten oder dein ganzes Konto.</p>

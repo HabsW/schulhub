@@ -417,7 +417,7 @@ module.exports = (app, ctx) => {
       title: 'Rückmeldungen',
       lead: staff
         ? 'Was du Schüler/innen zurückgemeldet hast. Jede Rückmeldung sehen nur die Person selbst und die Lehrkräfte ihrer Klasse.'
-        : 'Was deine Lehrkräfte dir zu deiner Arbeit schreiben. Das sehen nur du und die Lehrkräfte deiner Klasse.',
+        : 'Was deine Lehrkräfte dir zu deiner Arbeit schreiben. Das sehen nur du, die Lehrkräfte deiner Klasse und die Schulverwaltung.',
       meta: unread ? html`<span>${plural(unread, 'neue Rückmeldung', 'neue Rückmeldungen')}</span>` : '',
       actions: unread ? kit.headPostButton(req, '/rueckmeldungen/gelesen', 'Alle als gelesen markieren', { icon: 'check' }) : '',
     })}
