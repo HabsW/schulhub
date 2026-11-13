@@ -7,7 +7,7 @@ const {
   html, page, flash, csrfField, postButton, linkButton, appIcon, icon, badge, ROLE_LABEL,
   pageHead, tabs, sectionHead, list, row, stat, stats, empty, notice, dataTable, field,
 } = require('../html');
-const { deny, bad, isLocalPath, formatDate, formatDay, formatAgo, formatBytes, plural, dayKey } = require('../util');
+const { deny, bad, isLocalPath, formatDate, formatDay, formatFullDate, formatAgo, formatBytes, plural, dayKey } = require('../util');
 const { auditLabel, actorLabel } = require('../auditLabels');
 const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, joinDe } = require('../formKit');
 const backup = require('../backup');
@@ -438,7 +438,8 @@ module.exports = (app, ctx) => {
             { label: 'Schüler/innen', num: true, key: 'students' },
             { label: 'Apps', num: true, key: 'apps' },
             archiv
-              ? { label: 'Archiviert', render: (c) => html`${formatDay(c.archived_at)}<span class="admin-mail">wird am ${formatDay(c.archived_at + keepDays * DAY)} gelöscht</span>` }
+              // The deletion day with its year (as on the class's own pages): "Sa., 13. Nov." would read as this year's.
+              ? { label: 'Archiviert', render: (c) => html`${formatDay(c.archived_at)}<span class="admin-mail">wird am ${formatFullDate(c.archived_at + keepDays * DAY)} gelöscht</span>` }
               : { label: 'Angelegt', render: (c) => formatDay(c.created_at) },
             {
               label: 'Aktionen', actions: true, render: (c) => html`${c.archived_at

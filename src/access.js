@@ -254,14 +254,18 @@ function createAccess(db) {
   // ----- package A -----
   /**
    * Leave a class oneself: a student may always leave an active class; a
-   * teacher only while another teacher remains (otherwise the class would be
-   * orphaned - archive or delete it instead). Archived classes are read-only.
+   * teacher only while another teacher remains who can sign in (otherwise the
+   * class would be orphaned - archive or delete it instead; a blocked account
+   * teaches nobody). Archived classes are read-only.
    */
   function canLeaveClass(user, classId) {
     const role = classRole(user, classId);
     if (!role || isArchived(classId)) return false;
     if (role === 'student') return true;
-    return Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND role = 'teacher' AND user_id <> ?", classId, user.id));
+    return Boolean(db.get(
+      "SELECT 1 AS ok FROM class_members m JOIN users u ON u.id = m.user_id AND u.disabled = 0 WHERE m.class_id = ? AND m.role = 'teacher' AND m.user_id <> ?",
+      classId, user.id
+    ));
   }
   /**
    * Results of one app in one class (lists, overview, CSV): the class's teachers

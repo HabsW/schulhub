@@ -71,6 +71,13 @@ function createHubApp(ctx) {
 
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(express.json({ limit: '64kb' }));
+  // Express 5 leaves req.body undefined when a request has no form or JSON body (e.g. only the CSRF
+  // header): routes read fields from it, so an empty object means "nothing sent", never a crash.
+  // Upload routes still parse their own raw bodies later (body-parser looks at the request, not at this).
+  app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+  });
   app.use(csrfProtect(config));
 
   // Default deny + a general limit on state-changing requests.

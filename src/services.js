@@ -114,11 +114,23 @@ function createServices(ctx) {
     return code;
   }
 
-  /** Delete a class and what belongs only to it (cascades: members, codes, apps in it, assignments, feedback, settings, announcements). */
+  /**
+   * The rows of a class and what belongs only to it (cascades: members, codes, apps in it, assignments,
+   * feedback, settings, announcements). In-Hub notices that lead into the class - to one of its
+   * assignments or to a review request in it - would lead nowhere: they go too. Call inside a transaction.
+   */
+  function deleteClassRows(classId) {
+    for (const x of db.all('SELECT id FROM assignments WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
+    const review = `/pruefen/${classId}/`;
+    db.run('DELETE FROM notices WHERE href >= ? AND href < ?', review, prefixEnd(review));
+    db.run('DELETE FROM shared_data WHERE class_id = ?', classId);
+    db.run('DELETE FROM classes WHERE id = ?', classId);
+  }
+
+  /** Delete a class and what belongs only to it (see deleteClassRows). */
   function deleteClass(actor, cls, detail = '') {
     db.tx(() => {
-      db.run('DELETE FROM shared_data WHERE class_id = ?', cls.id);
-      db.run('DELETE FROM classes WHERE id = ?', cls.id);
+      deleteClassRows(cls.id);
       audit(actor, 'klasse_geloescht', cls.name, detail);
     }, { durable: true });
   }
@@ -362,10 +374,7 @@ function createServices(ctx) {
           WHERE NOT EXISTS (SELECT 1 FROM class_members o WHERE o.class_id = c.id AND o.role = 'teacher' AND o.user_id <> ?)`,
         user.id, user.id
       );
-      for (const c of orphaned) {
-        db.run('DELETE FROM shared_data WHERE class_id = ?', c.id);
-        db.run('DELETE FROM classes WHERE id = ?', c.id);
-      }
+      for (const c of orphaned) deleteClassRows(c.id);
       db.run('DELETE FROM sessions WHERE user_id = ?', user.id);
       // Their apps go too, and with them every trace of their names (app names are often personal,
       // e.g. "Marlenes Spiel"). Audit entries about an app carry its id: the person's apps are the

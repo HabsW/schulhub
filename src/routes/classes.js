@@ -312,7 +312,8 @@ module.exports = (app, ctx) => {
     const now = Date.now();
     const base = `/klassen/${cls.id}`;
     const change = access.canChangeClass(req.user, cls.id);
-    const students = studentsOf(cls.id);
+    const students = studentsOf(cls.id); // the matrix shows at most 300; the numbers count everybody
+    const total = studentCount(cls.id);
     const apps = db.all(
       `SELECT a.*, ca.decided_at FROM class_apps ca JOIN apps a ON a.id = ca.app_id
         WHERE ca.class_id = ? AND ca.status = 'approved' ORDER BY ca.decided_at DESC LIMIT 200`,
@@ -379,8 +380,8 @@ module.exports = (app, ctx) => {
         ${list(waiting.slice(0, 5).map((w) => submissionRow(cls, w)), 'attention')}
         ${waiting.length > 5 ? html`<p class="mt-2">${linkButton(`${base}/apps`, `Alle ${waiting.length} ansehen`, { kind: 'quiet', size: 'sm' })}</p>` : ''}</section>` : ''}
       <section class="section" aria-label="Zahlen dieser Woche">${stats([
-        stat({ label: 'Schüler/innen', value: students.length, href: `${base}/mitglieder` }),
-        stat({ label: 'Aktiv diese Woche', value: active, sub: students.length ? `von ${students.length} · seit Montag` : 'seit Montag' }),
+        stat({ label: 'Schüler/innen', value: total, href: `${base}/mitglieder` }),
+        stat({ label: 'Aktiv diese Woche', value: active, sub: total ? `von ${total} · seit Montag` : 'seit Montag' }),
         stat({ label: 'Ergebnisse diese Woche', value: bars[bars.length - 1].value, sub: `Vorwoche: ${bars[bars.length - 2].value}` }),
         stat({ label: 'Laufende Aufgaben', value: running.length, href: `${base}/aufgaben` }),
       ])}</section>
@@ -551,11 +552,12 @@ module.exports = (app, ctx) => {
       cls.id
     );
     const teachers = teachersOf(cls.id);
+    const total = studentCount(cls.id); // the table shows at most 300
 
     return teacherPage(req, cls, 'mitglieder', html`
       <section class="section" aria-labelledby="s-students">${sectionHead('Schüler/innen', {
         id: 's-students',
-        count: String(students.length),
+        count: String(total),
         sub: change ? 'Schüler/innen treten selbst per QR-Code oder Link bei – über „Beitreten lassen“ oben. Niemand wird von Hand hinzugefügt.' : 'Schüler/innen treten selbst per QR-Code oder Link bei. Niemand wird von Hand hinzugefügt.',
       })}
         ${dataTable({
@@ -579,7 +581,7 @@ module.exports = (app, ctx) => {
           rows: students,
           empty: empty({ icon: 'userPlus', title: 'Noch niemand in der Klasse', text: 'Zeig den QR-Code an der Tafel oder teile den Link. Wer beitritt, erscheint hier.', actions: change ? linkButton(`${base}/qr`, 'QR-Code zeigen', { icon: 'qr' }) : '' }),
         })}
-        ${students.length >= 300 ? html`<p class="meta mt-2">Es werden die ersten 300 Schüler/innen gezeigt.</p>` : ''}</section>
+        ${total > students.length ? html`<p class="meta mt-2">Es werden die ersten ${students.length} von ${total} Schüler/innen gezeigt.</p>` : ''}</section>
       <div class="grid-2 even section">
         <section aria-labelledby="s-teachers">${sectionHead('Lehrkräfte', { id: 's-teachers', count: String(teachers.length) })}
           ${list(teachers.map((t) => row({ title: t.name, start: avatar(t.name), sub: `dabei seit ${formatDay(t.joined_at)}`, end: t.id === user.id ? badge('du') : '' })))}</section>
@@ -936,11 +938,15 @@ module.exports = (app, ctx) => {
     return { row: found, cls: getClass(found.class_id) };
   }
 
+  /** A teacher invitation for a staff member who once joined this class with its code: it makes them its teacher. */
+  const upgrades = (current, role) => current === 'student' && role === 'teacher';
+
   app.get('/beitreten/:code', (req, res) => {
     const { row: code, cls } = findCode(req);
     delete req.session.returnTo;
-    if (access.classRole(req.user, cls.id)) return res.redirect(`/klassen/${cls.id}`);
     const role = access.joinRoleFor(req.user, code);
+    const current = access.classRole(req.user, cls.id);
+    if (current && !upgrades(current, role)) return res.redirect(`/klassen/${cls.id}`);
     const invite = code.role === 'teacher';
     if (!role) {
       // Someone this code is not for (a teacher invitation, a student account): no class, no names.
@@ -975,7 +981,12 @@ module.exports = (app, ctx) => {
     const { row: code, cls } = findCode(req);
     const role = access.joinRoleFor(req.user, code);
     if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
-    const added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
+    let added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
+    // Already a student of the class (a colleague who tried its QR code first): the invitation makes them its teacher.
+    // joinRoleFor gave 'teacher', so this is a staff account with a valid invitation; a class code never changes a role.
+    if (!added.changes && upgrades(access.classRole(req.user, cls.id), role)) {
+      added = db.run("UPDATE class_members SET role = 'teacher' WHERE class_id = ? AND user_id = ? AND role = 'student'", cls.id, req.user.id);
+    }
     if (added.changes) {
       services.audit(req.user, 'klasse_beigetreten', cls.name, role === 'teacher' ? 'als Lehrkraft' : 'als Schüler/in');
       flash(req, role === 'teacher' ? `Du führst „${cls.name}“ jetzt mit.` : `Willkommen in „${cls.name}“!`);
