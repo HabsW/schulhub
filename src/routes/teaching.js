@@ -117,7 +117,7 @@ module.exports = (app, ctx) => {
       crumbs: [['/klassen', 'Klassen'], [`/klassen/${cls.id}/aufgaben`, cls.name]],
       eyebrow: 'Aufgabe stellen',
       title: 'Neue Aufgabe',
-      lead: `Eine App, ein Termin – fertig. ${n ? `${kit.studentsText(n)} bekommen eine Mitteilung.` : 'Noch ist niemand in der Klasse.'} Wer fertig ist, erkennt der Hub an den Ergebnissen.`,
+      lead: `Eine App, ein Termin – fertig. ${n ? `Beginnt die Aufgabe sofort, bekommen ${kit.studentsText(n)} eine Mitteilung. Eine geplante Aufgabe sehen sie erst ab dem Start.` : 'Noch ist niemand in der Klasse.'} Wer fertig ist, erkennt der Hub an den Ergebnissen.`,
     })}
       ${apps.length
         ? assignmentForm(req, { cls, apps, chosen, errors: kit.takeFieldErrors(req, 'assignmentErrors') })
@@ -138,12 +138,24 @@ module.exports = (app, ctx) => {
       id, cls.id, target.id, f.title, f.note, f.starts, f.due, req.user.id, now
     );
     services.audit(req.user, 'aufgabe_erstellt', f.title, cls.name);
-    const students = studentIds(cls.id);
-    const when = [f.starts > Date.now() + 60_000 ? `ab ${formatDay(f.starts)}` : '', f.due ? formatDue(f.due).text : ''].filter(Boolean).join(', ');
-    services.notify(students, 'aufgabe', `Neue Aufgabe in ${cls.name}: „${f.title}“${when ? ` (${when})` : ''}`, `/aufgaben/${id}`);
-    flash(req, `Die Aufgabe „${f.title}“ ist gestellt.${students.length ? ` ${kit.studentsText(students.length)} ${students.length === 1 ? 'hat' : 'haben'} eine Mitteilung bekommen.` : ''}`);
+    // A planned assignment stays hidden from students until its start (access.canSeeAssignment):
+    // no notice now - from the start it is on their start page.
+    if (f.starts > now) {
+      flash(req, `Die Aufgabe „${f.title}“ ist geplant. Die Schüler/innen sehen sie ab ${formatDate(f.starts)} auf ihrer Startseite.`);
+      return res.redirect(303, `/aufgaben/${id}`);
+    }
+    const told = notifyStart(cls, { id, title: f.title, due_at: f.due });
+    flash(req, `Die Aufgabe „${f.title}“ ist gestellt.${told ? ` ${kit.studentsText(told)} ${told === 1 ? 'hat' : 'haben'} eine Mitteilung bekommen.` : ''}`);
     res.redirect(303, `/aufgaben/${id}`);
   });
+
+  /** "Neue Aufgabe" to every student of the class - only for an assignment that has started. Returns how many. */
+  function notifyStart(cls, x) {
+    const students = studentIds(cls.id);
+    const due = x.due_at ? ` (${formatDue(x.due_at).text})` : '';
+    services.notify(students, 'aufgabe', `Neue Aufgabe in ${cls.name}: „${x.title}“${due}`, `/aufgaben/${x.id}`);
+    return students.length;
+  }
 
   app.get('/aufgaben/:id', (req, res) => {
     const x = loadAssignment(req);
@@ -172,7 +184,9 @@ module.exports = (app, ctx) => {
     const due = formatDue(x.due_at, now);
     const past = x.due_at && x.due_at < now;
     const results = access.canSeeClassResults(user, x.class_id, x.app_id);
-    const canFeedback = access.canChangeClass(user, x.class_id);
+    // Before the start the students do not see the assignment, so nothing may be written to them about it.
+    const planned = x.starts_at > now;
+    const canFeedback = access.canChangeClass(user, x.class_id) && !planned;
     const here = `/aufgaben/${x.id}`;
     const stateBadge = (s) => (s.state === 'open' && past ? badge('nicht erledigt', 'danger') : s.state === 'open' && due.tone === 'wait' ? badge('offen', 'wait') : badge(STATE[s.state][0], STATE[s.state][1]));
     const feedback = db
@@ -197,6 +211,7 @@ module.exports = (app, ctx) => {
         ? html`${linkButton(`${here}/bearbeiten`, 'Bearbeiten', { icon: 'pencil' })}${kit.headPostButton(req, `${here}/loeschen`, 'Löschen', { kind: 'danger', icon: 'trash', confirm: `Aufgabe „${x.title}“ löschen?\nDie Aufgabe verschwindet für alle Schüler/innen. Ihre Ergebnisse in der App bleiben erhalten.`, confirmLabel: 'Löschen' })}`
         : '',
     })}
+    ${planned ? notice({ tone: 'wait', icon: 'calendar', title: 'Geplant', text: `Die Schüler/innen sehen diese Aufgabe erst ab ${formatDate(x.starts_at)}. Dann steht sie auf ihrer Startseite – eine Mitteilung bekommen sie dafür nicht.`, cls: 'mb-6' }) : ''}
     ${x.note ? html`<div class="panel teach-note mb-6"><p class="pre">${x.note}</p></div>` : ''}
     <section class="section" aria-label="Stand der Klasse">
       <div class="stats teach-stats3">${[
@@ -229,7 +244,7 @@ module.exports = (app, ctx) => {
       })}</section>
     <section class="section teach-narrow" aria-labelledby="s-fb" id="rueckmeldung">${sectionHead('Rückmeldungen zu dieser Aufgabe', { id: 's-fb', count: feedback.length ? String(feedback.length) : null })}
       ${canFeedback && states.length ? kit.feedbackForm(req, ctx, { cls: { id: x.class_id }, students: states, chosen: String(req.query.an || ''), appId: x.app_id, assignmentId: x.id, back: here }) : ''}
-      ${feedback.length ? html`<div class="mt-6">${kit.feedbackTimeline(req, ctx, feedback, { back: here, showStudent: true, showClass: false })}</div>` : canFeedback && states.length ? '' : html`<p class="muted">Noch keine Rückmeldungen.</p>`}</section>`;
+      ${feedback.length ? html`<div class="mt-6">${kit.feedbackTimeline(req, ctx, feedback, { back: here, showStudent: true, showClass: false })}</div>` : canFeedback && states.length ? '' : html`<p class="muted">${planned ? 'Rückmeldungen zu dieser Aufgabe schreibst du ab dem Start.' : 'Noch keine Rückmeldungen.'}</p>`}</section>`;
     return page(req, { title: x.title, body, active: 'klassen', classId: x.class_id, styles: STYLES });
   }
 
@@ -316,7 +331,12 @@ module.exports = (app, ctx) => {
     if (Object.keys(errors).length) return assignmentErrors(req, res, `/aufgaben/${x.id}/bearbeiten`, errors);
     db.run('UPDATE assignments SET title = ?, note = ?, starts_at = ?, due_at = ? WHERE id = ?', f.title, f.note, f.starts, f.due, x.id);
     services.audit(req.user, 'aufgabe_geaendert', f.title, x.class_name);
-    flash(req, 'Die Aufgabe ist gespeichert.');
+    // A planned assignment that now starts at once is new for the students: they are told now.
+    // One moved into the future is hidden again - so is the notice they got about it.
+    const now = Date.now();
+    const told = x.starts_at > now && f.starts <= now ? notifyStart({ id: x.class_id, name: x.class_name }, { id: x.id, title: f.title, due_at: f.due }) : 0;
+    if (x.starts_at <= now && f.starts > now) db.run("DELETE FROM notices WHERE kind = 'aufgabe' AND href = ?", `/aufgaben/${x.id}`);
+    flash(req, `Die Aufgabe ist gespeichert.${told ? ` ${kit.studentsText(told)} ${told === 1 ? 'hat' : 'haben'} eine Mitteilung bekommen.` : ''}`);
     res.redirect(303, `/aufgaben/${x.id}`);
   });
 
@@ -367,6 +387,8 @@ module.exports = (app, ctx) => {
     const assignmentId = typeof req.body.aufgabe === 'string' && req.body.aufgabe ? req.body.aufgabe : null;
     const x = assignmentId ? db.get('SELECT * FROM assignments WHERE id = ? AND class_id = ?', assignmentId, cls.id) : null;
     if (assignmentId && !x) throw deny();
+    // The feedback (and its notice) would show the title of an assignment the student may not see yet.
+    if (x && x.starts_at > Date.now()) throw bad('Diese Aufgabe hat noch nicht begonnen, die Schüler/innen sehen sie noch nicht. Schreib die Rückmeldung nach dem Start – oder ohne Bezug zur Aufgabe.');
     const appId = typeof req.body.app === 'string' && req.body.app ? req.body.app : x ? x.app_id : null;
     if (appId && !db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", cls.id, appId)) throw deny();
     const student = db.get('SELECT id, name FROM users WHERE id = ?', studentId);

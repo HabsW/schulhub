@@ -9,6 +9,16 @@ const { analyzeVersion } = require('./checks');
 
 const DAY = 86_400_000;
 
+/**
+ * Columns that keep a person's id WITHOUT a foreign key to users (foreign keys cascade or are set
+ * to NULL by SQLite itself). deleteUser sets these to NULL and handles the others in its own way;
+ * test/people.test.js checks the live schema against both lists, so a new column cannot be forgotten.
+ */
+const ID_COLUMNS_SET_NULL = [['join_codes', 'created_by'], ['class_apps', 'added_by'], ['class_apps', 'decided_by']];
+const ID_COLUMNS_HANDLED = ['sessions.user_id', 'audit_log.actor_id', 'audit_log.subject_id', 'notices.subject_id'];
+/** Audit actions whose target is a class or an account - never an app, even one with the same name. */
+const NOT_APP_TARGET = "action NOT LIKE 'klasse_%' AND action NOT LIKE 'konto_%' AND action NOT LIKE 'beitrittscode_%' AND action NOT LIKE 'einladung_%' AND action NOT LIKE 'lehrkraft_%' AND action NOT IN ('mitglied_entfernt','rolle_geaendert')";
+
 function createServices(ctx) {
   const { db, config, uploads } = ctx;
 
@@ -259,6 +269,30 @@ function createServices(ctx) {
     ctx.userFiles.collectGarbage(files);
   }
 
+  /**
+   * Drop what a session keeps for one more page view - a waiting message ("„Marlenes Spiel“ ist
+   * freigegeben"), typed form values, the page to return to - wherever it mentions one of `words`.
+   * The rest of the session (who is signed in) stays.
+   */
+  function scrubSessions(words) {
+    for (const word of new Set(words)) {
+      if (typeof word !== 'string' || word.length < 2) continue;
+      const needle = JSON.stringify(word).slice(1, -1); // how the word appears inside the stored JSON
+      for (const s of db.all('SELECT sid_hash, data FROM sessions WHERE instr(data, ?) > 0', needle)) {
+        let data;
+        try {
+          data = JSON.parse(s.data);
+        } catch {
+          continue;
+        }
+        for (const key of ['flash', 'formState', 'returnTo']) {
+          if (data[key] !== undefined && JSON.stringify(data[key]).includes(needle)) delete data[key];
+        }
+        db.run('UPDATE sessions SET data = ? WHERE sid_hash = ?', JSON.stringify(data), s.sid_hash);
+      }
+    }
+  }
+
   /** Delete an account and everything that belongs to it. */
   function deleteUser(actor, user) {
     const ownApps = db.all('SELECT id FROM apps WHERE owner_id = ?', user.id).map((r) => r.id);
@@ -276,6 +310,13 @@ function createServices(ctx) {
         db.run('DELETE FROM classes WHERE id = ?', c.id);
       }
       db.run('DELETE FROM sessions WHERE user_id = ?', user.id);
+      // Their apps go too, and with them every trace of their names (app names are often personal,
+      // e.g. "Marlenes Spiel"): today's names, and earlier ones from the person's own audit entries
+      // (only an app's owner creates or submits it). Read before the entries lose the person's id.
+      const apps = db.all('SELECT id, name FROM apps WHERE owner_id = ?', user.id);
+      const appNames = new Set(apps.map((a) => a.name));
+      for (const r of db.all("SELECT DISTINCT target FROM audit_log WHERE actor_id = ? AND action IN ('app_erstellt','app_aus_vorlage','app_eingereicht') AND target <> ''", user.id)) appNames.add(r.target);
+      const assignmentsOnApps = db.all('SELECT x.id, x.title FROM assignments x JOIN apps a ON a.id = x.app_id WHERE a.owner_id = ?', user.id);
       db.run("UPDATE audit_log SET actor_id = NULL, actor_label = 'Gelöschtes Konto' WHERE actor_id = ?", user.id);
       // Entries ABOUT the person keep what happened, but not who it was.
       db.run("UPDATE audit_log SET target = 'Gelöschtes Konto', detail = '', subject_id = NULL WHERE subject_id = ?", user.id);
@@ -287,14 +328,40 @@ function createServices(ctx) {
       );
       // Notices to other people that name this person go with them.
       db.run('DELETE FROM notices WHERE subject_id = ?', user.id);
-      // Their apps go too: notices pointing at them, and app names in the audit log (app names are
-      // often personal, e.g. "Marlenes Spiel").
-      for (const a of db.all('SELECT id, name FROM apps WHERE owner_id = ?', user.id)) {
-        db.run("DELETE FROM notices WHERE href LIKE ? OR href LIKE ?", `/apps/${a.id}%`, `/pruefen/%/${a.id}%`);
-        db.run("UPDATE audit_log SET target = 'Gelöschte App', detail = '' WHERE target = ? AND (actor_id IS NULL OR actor_id = ? OR action LIKE 'app_%' OR action LIKE 'version_%' OR action IN ('veroeffentlicht','einreichung_zurueckgezogen','schulweit_freigegeben','schulweit_beendet','schulweit_aktualisiert','schulweit_update_abgelehnt','kommentar_geloescht'))", a.name, user.id);
+      // Columns that keep a person's id without a foreign key: the row stays, the person goes.
+      for (const [table, col] of ID_COLUMNS_SET_NULL) db.run(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = ?`, user.id);
+
+      // Other people's notices about their apps: pointing at an app, its review, or an assignment
+      // built on it (those assignments go with the app) ...
+      for (const a of apps) db.run('DELETE FROM notices WHERE href LIKE ? OR href LIKE ?', `/apps/${a.id}%`, `/pruefen/%/${a.id}%`);
+      for (const x of assignmentsOnApps) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
+      // ... and feedback about such an app or assignment, which quoted its name to the student.
+      const quoted = [...appNames, ...assignmentsOnApps.map((x) => x.title)].map((n) => `„${n}“`);
+      const told = db.all(
+        `SELECT DISTINCT f.student_id FROM feedback f
+          WHERE f.app_id IN (SELECT id FROM apps WHERE owner_id = ?)
+             OR f.assignment_id IN (SELECT x.id FROM assignments x JOIN apps a ON a.id = x.app_id WHERE a.owner_id = ?)`,
+        user.id, user.id
+      );
+      for (const { student_id: sid } of told) for (const q of quoted) db.run("DELETE FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND instr(text, ?) > 0", sid, q);
+
+      // The audit log keeps what happened with their apps, not their names - whoever did it.
+      for (const name of appNames) {
+        // An assignment is called like its app unless the teacher chose a title.
+        db.run("UPDATE audit_log SET target = 'Gelöschte Aufgabe' WHERE target = ? AND action LIKE 'aufgabe_%'", name);
+        // A refused upload's detail may quote the person's own file names.
+        db.run("UPDATE audit_log SET detail = '' WHERE target = ? AND action = 'upload_abgelehnt'", name);
+        // Every action whose target can be an app (not a class or an account, which a name equal
+        // to the app's must not hit), and any detail that is or quotes the name.
+        db.run(`UPDATE audit_log SET target = 'Gelöschte App' WHERE target = ? AND ${NOT_APP_TARGET}`, name);
+        db.run("UPDATE audit_log SET detail = 'Gelöschte App' WHERE detail = ?", name);
+        db.run("UPDATE audit_log SET detail = replace(detail, ?, '„Gelöschte App“') WHERE instr(detail, ?) > 0", `„${name}“`, `„${name}“`);
       }
-      // cascades: memberships, apps (+ versions, drafts), saves, scores, results, progress, achievements,
-      // files, favourites, feedback to them, notices, comments
+      // A one-time message still waiting in someone else's session may name them or their app.
+      scrubSessions([user.name, user.email, user.id, ...appNames]);
+
+      // cascades: memberships, apps (+ versions, drafts, assignments on them), saves, scores, results,
+      // progress, achievements, files, favourites, feedback to them, notices, comments
       db.run('DELETE FROM users WHERE id = ?', user.id);
       // The audit entry names the role, never the person (their data is gone).
       const roleLabel = { student: 'Schüler/in', teacher: 'Lehrkraft', admin: 'Admin' }[user.role] || '';
@@ -311,4 +378,4 @@ function createServices(ctx) {
   };
 }
 
-module.exports = { createServices };
+module.exports = { createServices, ID_COLUMNS_SET_NULL, ID_COLUMNS_HANDLED };

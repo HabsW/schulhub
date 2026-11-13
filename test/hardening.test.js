@@ -30,11 +30,17 @@ test('Konto löschen: kein Name bleibt zurück – weder im Protokoll noch in Mi
   try {
     const admin = h.addUser('Anna Adler', 'admin');
     const lehmann = h.addUser('Herr Lehmann', 'teacher');
+    const zwirbel = h.addUser('Herr Zwirbel', 'teacher');
     const ziel = h.addUser('Marlene Zuckerbrot', 'student');
-    const [A, L, Z] = await Promise.all([admin, lehmann, ziel].map((u) => h.browser().login(u)));
+    const paul = h.addUser('Paul Peer', 'student');
+    const [A, L, W, Z, P] = await Promise.all([admin, lehmann, zwirbel, ziel, paul].map((u) => h.browser().login(u)));
     await L.post('/klassen', { name: '7b' });
     const cls = teacherClass(h, lehmann.id);
     await Z.post(`/beitreten/${joinCode(h, cls)}`);
+    await P.post(`/beitreten/${joinCode(h, cls)}`);
+    // Herr Zwirbel teaches the class with Herr Lehmann (invitation link).
+    await L.post(`/klassen/${cls}/einladung`, { minuten: '60' });
+    assert.equal((await W.post(`/beitreten/${h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'teacher'", cls).code}`)).status, 303);
     // An older entry without a subject (written before subjects existed).
     h.hub.ctx.services.audit(admin, 'konto_gesperrt', 'Marlene Zuckerbrot');
     // Through the real routes: she comments on the teacher's app (a notice naming her goes to him),
@@ -49,19 +55,50 @@ test('Konto löschen: kein Name bleibt zurück – weder im Protokoll noch in Mi
     assert.equal((await Z.post(`/apps/${own.id}/kommentare`, { text: 'Bitte anschauen!' })).status, 303);
     assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND kind = 'kommentar' AND text LIKE 'Marlene%'", lehmann.id), 'precondition: a notice names her');
     assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND text LIKE '%Marlenes Spiel%'", lehmann.id), 'precondition: the teacher was told about her app');
-    // Account actions about her, by the admin (role there and back, block, unblock).
+    // Herr Zwirbel decides about her app, makes a new join code, and adds a colleague's shared app.
+    assert.equal((await W.post(`/pruefen/${cls}/${own.id}/freigeben`, { version: own.published_version_id })).status, 303);
+    assert.equal((await W.post(`/klassen/${cls}/code`, { minuten: '60' })).status, 303);
+    const shared = await h.makeApp(L, 'Geteiltes Quiz', { 'index.html': 'x' });
+    await L.post(`/apps/${shared.id}/bearbeiten`, { name: 'Geteiltes Quiz', emoji: '🎮', color: '0', shared_field: '1', shared: '1' });
+    assert.equal((await W.post(`/klassen/${cls}/apps`, { app: shared.id })).status, 303);
+    // Herr Lehmann sets her app as an assignment (its title is the app's name; Paul is told), writes Paul
+    // feedback about it, exports the results, and sets it once more without looking at the next page.
+    const assign = () => L.post(`/klassen/${cls}/aufgaben`, { app: own.id, titel: '', notiz: '' });
+    const first = (await assign()).headers.location.split('/').pop();
+    assert.equal((await L.post(`/klassen/${cls}/rueckmeldungen`, { schueler: paul.id, text: 'Gut gespielt.', aufgabe: first })).status, 303);
+    assert.equal((await L.get(`/klassen/${cls}/apps/${own.id}/ergebnisse.csv`)).status, 200);
+    assert.equal((await assign()).status, 303);
+    for (const [what, sql, min] of [
+      ['notices of the assignment to Paul', "SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND kind = 'aufgabe' AND text LIKE '%Marlenes Spiel%'", 2],
+      ['a feedback notice to Paul', "SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND text LIKE '%Marlenes Spiel%'", 1],
+    ]) assert.equal(h.db.get(sql, paul.id).n, min, `precondition: ${what}`);
+    assert.equal(h.db.get("SELECT COUNT(DISTINCT action) AS n FROM audit_log WHERE action IN ('aufgabe_erstellt','ergebnisse_exportiert') AND target = 'Marlenes Spiel'").n, 2, 'precondition: the assignment and the export are logged with her app');
+    assert.ok(h.db.get("SELECT 1 AS ok FROM sessions WHERE user_id = ? AND data LIKE '%Marlenes Spiel%'", lehmann.id), 'precondition: a message about her app waits in his session');
+    for (const col of ['class_apps.decided_by', 'class_apps.added_by', 'join_codes.created_by']) {
+      const [table, c] = col.split('.');
+      assert.ok(h.db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE ${c} = ?`, zwirbel.id).n, `precondition: ${col} names him`);
+    }
+    // Account actions about her, by the admin (role there and back, block, unblock). The last
+    // message about it waits in the admin's session.
     await A.page(`/admin/konten/${ziel.id}`);
     for (const [path, fields] of [['rolle', { rolle: 'teacher' }], ['rolle', { rolle: 'student' }], ['sperren', { an: '1' }], ['sperren', {}]]) {
       assert.equal((await A.post(`/admin/nutzer/${ziel.id}/${path}`, fields)).status, 303, path);
     }
     assert.ok(allText(h.db).some((t) => t.v.includes('Marlene Zuckerbrot')), 'precondition: the name is stored');
 
-    await A.page('/admin'); // the admin sees the last message (a pending flash lives in the admin's own session)
+    // First the co-teacher goes: his id stays nowhere (who decided, who made a code, who added an app).
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', zwirbel.id));
+    assert.deepEqual(allText(h.db).filter((t) => t.v.includes('Zwirbel') || t.v.includes(zwirbel.email) || t.v.includes(zwirbel.id)), [], 'nothing of the deleted teacher');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM class_apps WHERE class_id = ? AND status = 'approved'", cls).n, 3, 'what he decided stays in place');
+
     h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', ziel.id));
     const left = allText(h.db).filter((t) => t.v.includes('Marlene') || t.v.includes(ziel.email) || t.v.includes(ziel.id));
     // (her app's personal name is covered by the 'Marlene' check above)
     assert.deepEqual(left, [], 'no name, e-mail or id of the deleted person anywhere');
     assert.ok(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE target = 'Gelöschtes Konto'").n >= 4, 'what happened is kept, who it was is not');
+    assert.ok(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'ergebnisse_exportiert' AND target = 'Gelöschte App' AND detail = '7b'").n, 'the export is still on record');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'aufgabe_erstellt' AND target = 'Gelöschte Aufgabe'").n, 2);
+    assert.match((await L.page('/start')).text, /Hallo/, 'a session whose waiting message was dropped still works');
   } finally {
     await h.stop();
   }

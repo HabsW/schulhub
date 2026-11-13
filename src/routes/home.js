@@ -9,6 +9,7 @@ const {
 } = require('../html');
 const { HttpError, formatAgo, formatDue, formatLongDay, plural, dayKey, isLocalPath } = require('../util');
 const { manifestOf } = require('../manifest');
+const { teachersSee } = require('../teacherView');
 
 const MOSAIC = [['🔤', 0], ['⭐', 4], ['🎨', 2], ['🧮', 5], ['🌍', 1], ['🔬', 3], ['🎵', 6], ['🧩', 7]];
 
@@ -379,16 +380,19 @@ module.exports = (app, ctx) => {
     <h1>Welche Daten speichert ${config.hubName}?</h1>
     <p class="lead">So wenig wie möglich. Hier steht alles – in normaler Sprache.</p>
     <h2>Über dich</h2>
-    <ul><li><strong>Name und Schul-E-Mail-Adresse</strong> aus deinem Microsoft-Schulkonto, damit Lehrkräfte dich erkennen.</li>
+    <ul><li><strong>Name und Schul-E-Mail-Adresse</strong> aus deinem Microsoft-Schulkonto. Deinen Namen sehen zum Beispiel deine Lehrkräfte, die E-Mail-Adresse sieht nur die Verwaltung der Schule.</li>
     <li><strong>Eine Kennnummer</strong> von Microsoft, damit dein Konto dasselbe bleibt, auch wenn sich dein Name ändert.</li>
     <li><strong>Deine Rolle</strong> (Schüler/in, Lehrkraft oder Admin) und in welchen Klassen du bist.</li>
     <li>Wann du dich zuletzt angemeldet hast, und wie du ${config.hubName} angezeigt bekommen möchtest (zum Beispiel hell oder dunkel).</li></ul>
     <p>Dein Passwort sieht ${config.hubName} nie. Es werden keine Fotos, Geburtsdaten, Adressen oder Standorte gespeichert, und es gibt keine Werbung und kein Tracking.</p>
     <h2>In den Apps</h2>
     <ul><li><strong>Spielstände und Dateien</strong> (zum Beispiel ein gemaltes Bild), damit du weitermachen kannst.</li>
-    <li><strong>Ergebnisse, Fortschritt und Erfolge.</strong> Die sehen nur du und die Lehrkräfte der Klasse, in der die App benutzt wird.</li>
+    <li><strong>Ergebnisse, Bestwerte, Fortschritt und Erfolge</strong>, wenn eine App sie für dich festhält.</li>
     <li><strong>Bestenlisten.</strong> Deinen Namen sehen dort nur Personen aus deinen Klassen. Du kannst einstellen, dass auch dort „Anonym“ steht.</li></ul>
     <p>Apps laufen abgeschottet: Eine App kommt nur an ihre eigenen Daten und kann nichts ins Internet schicken. Apps erfahren deinen Namen, aber nicht deine E-Mail-Adresse. In der Vorschau einer App wird nichts gespeichert.</p>
+    <h2>Was Lehrkräfte sehen</h2>
+    ${teachersSee('Ist eine App in einer deiner Klassen freigegeben, sehen die Lehrkräfte dieser Klasse:')}
+    <p>Deine E-Mail-Adresse sehen sie nie. Die Verwaltung der Schule kann alles sehen, was Lehrkräfte sehen. Schreib deshalb nichts Geheimes in eine App.</p>
     <h2>Von Lehrkräften</h2>
     <ul><li><strong>Aufgaben und Rückmeldungen</strong>, die deine Lehrkraft dir gibt. Rückmeldungen sehen nur du und die Lehrkräfte deiner Klasse.</li>
     <li><strong>Mitteilungen</strong> im Hub (zum Beispiel „deine App wurde freigegeben“). Es werden keine E-Mails verschickt.</li></ul>
