@@ -79,6 +79,29 @@ test('Einladung: eine Lehrkraft, die die Klasse vorher per QR-Code als Schüler/
   assert.equal(classRole(beta.id, c.id), 'teacher', 'the class code never turns a teacher back into a student');
 });
 
+test('Klasse verlassen: bleibt nur eine gesperrte Lehrkraft zurück, ist die Klasse verwaist – die letzte aktive Lehrkraft geht nicht', async () => {
+  const c = await newClass(T);
+  const gast = await person('Herr Gast', 'teacher');
+  await T.page(`/klassen/${c.id}/mitglieder`);
+  assert.equal((await T.post(`/klassen/${c.id}/einladung`, { minuten: '60' })).status, 303);
+  assert.equal((await gast.b.post(`/beitreten/${joinCode(c.id, 'teacher')}`)).status, 303);
+  assert.equal(classRole(gast.user.id, c.id), 'teacher');
+  // Herr Gast leaves the school: the admin blocks his account (as the admin page suggests).
+  const { b: AD } = await person('Anna Admin', 'admin');
+  await AD.page('/admin');
+  assert.equal((await AD.post(`/admin/nutzer/${gast.user.id}/sperren`, { an: '1' })).status, 303);
+  // Tom must not leave: nobody who can sign in would teach the class any more.
+  const settings = await T.page(`/klassen/${c.id}/einstellungen`);
+  assert.ok(!settings.text.includes(`action="/klassen/${c.id}/verlassen"`), 'no leave button');
+  assert.equal((await T.post(`/klassen/${c.id}/verlassen`)).status, 400);
+  assert.equal(classRole(tom.id, c.id), 'teacher');
+  // Unblocked again, Herr Gast counts again.
+  assert.equal((await AD.post(`/admin/nutzer/${gast.user.id}/sperren`, { an: '0' })).status, 303);
+  await T.page(`/klassen/${c.id}/einstellungen`);
+  assert.equal((await T.post(`/klassen/${c.id}/verlassen`)).status, 303);
+  assert.equal(classRole(tom.id, c.id), null);
+});
+
 // ------------------------------------------------------------- class lists
 
 test('Startseite: eine Lehrkraft mit mehr als 12 Klassen sieht die richtige Zahl und kommt zu allen', async () => {
