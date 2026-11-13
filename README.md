@@ -411,4 +411,8 @@ Details und geprüfte Punkte: `scripts/vendor/README.md`.
   (`Start-Windows.cmd`) und Mac (`Start-Mac.command`, oder im Terminal `npm run demo`).
 - Jede neue Funktion braucht eine Prüfung auf dem Server (`src/access.js`), einen Angriffstest in
   `test/` und einen Eintrag in [SECURITY.md](SECURITY.md).
+- `test/access-model.test.js` vergleicht jede Funktion von `src/access.js` in zufälligen Welten mit
+  einem eigenen Modell der Regeln, auch über die echten Seiten. Eine neue Funktion in `access.js`
+  braucht dort ihre Regel im Modell. Andere Welten: `ACCESS_SEED=<Zahl> ACCESS_WORLDS=<Anzahl> node
+  --test test/access-model.test.js`.
 - Git: `main` ist der Stand vor dem Umbau, `redesign` der Umbau mit einem Commit pro Etappe.
