@@ -107,7 +107,9 @@ function createAccess(db) {
    *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin,
    *    and a colleague trying the published version of a shared app - see canSeeVersion)
    *  - classId given: the version approved for that class
-   *  - neither: owner's published version, school-wide release, or any of the user's classes
+   *  - neither: owner's published version, school-wide release, or any of the user's classes -
+   *    or, for staff, a colleague's shared app: its published version as a preview (nothing is
+   *    stored), to try it before adding it to a class
    */
   function resolvePlay(user, app, { classId = null, versionId = null } = {}) {
     if (!user || !app) return null;
@@ -142,6 +144,7 @@ function createAccess(db) {
     }
     if (viaClass && ready(viaClass.version_id)) return { version: ready(viaClass.version_id), classId: viaClass.class_id, preview: false };
     if (ready(app.schoolwide_version_id)) return { version: ready(app.schoolwide_version_id), classId: null, preview: false };
+    if (isSharedWith(user, app) && ready(app.published_version_id)) return { version: ready(app.published_version_id), classId: null, preview: true };
     return null;
   }
 
@@ -155,9 +158,13 @@ function createAccess(db) {
   function canSeeStudentData(user, classId, appId, studentId) {
     if (!canManageClass(user, classId)) return false;
     const inClass = db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId);
-    const appInClass = db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId);
-    return Boolean(inClass && appInClass);
+    return Boolean(inClass && wasApprovedIn(classId, appId));
   }
+  /**
+   * The app is or was approved in this class: its row keeps the version the class had, also after
+   * it was removed - and while a new submission of the removed app waits or was given back.
+   */
+  const wasApprovedIn = (classId, appId) => Boolean(db.get('SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND version_id IS NOT NULL', classId, appId));
   const isStudentOf = (classId, studentId) => Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId));
   const appApprovedIn = (classId, appId) => Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status = 'approved'", classId, appId));
 
@@ -271,8 +278,7 @@ function createAccess(db) {
    * Results of one app in one class (lists, overview, CSV): the class's teachers
    * (and the admin), while the app is approved there - or after it was removed.
    */
-  const canSeeClassResults = (user, classId, appId) =>
-    canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
+  const canSeeClassResults = (user, classId, appId) => canManageClass(user, classId) && wasApprovedIn(classId, appId);
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && sameId(f.student_id, user.id);
   /**

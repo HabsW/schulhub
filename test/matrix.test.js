@@ -671,7 +671,7 @@ pruefliste             404      404      404      login    login    login    ohn
 sucheKlasse            ohne     mit      mit      login    login    login    mit      ohne     ohne     ohne     mit      mit      ohne     mit      mit
 suchePerson            ohne     ohne     ohne     login    login    login    ohne     ohne     ohne     ohne     person   person   ohne     person   ohne
 spielenMitKlasse       404      klasse   klasse   login    login    login    klasse   404      404      404      klasse   klasse   404      ohne     klasse
-spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   404      404      404      klasse   klasse   404      404      ohne
+spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   404      ohne     ohne     klasse   klasse   404      ohne     ohne
 token                  404      klasse   klasse   403      401      403      klasse   404      404      404      klasse   klasse   404      ohne     klasse
 speichern              404      ok       ok       401      401      401      ok       404      404      404      ok       ok       404      ok       ok
 bestenliste            404      namen    namen    401      401      401      namen    404      404      404      namen    namen    404      anonym   anonym
@@ -728,7 +728,7 @@ before(async () => {
   G = await h.makeApp(T, 'Matrix-Quiz', { 'index.html': '<h1>Quiz</h1>' });
   h.db.run('UPDATE apps SET shared = 1 WHERE id = ?', G.id); // colleagues may add it to their classes
   S = await h.makeApp(T, 'Schulweit-Spiel', { 'index.html': '<h1>Für alle</h1>' });
-  assert.equal((await AD.post(`/apps/${S.id}/schulweit`, { an: '1' })).status, 303);
+  assert.equal((await AD.post(`/apps/${S.id}/schulweit`, { an: '1', version: S.published_version_id })).status, 303);
   MA = await h.makeApp(M, 'Maras App', { 'index.html': '<h1>Mara</h1>' });
 
   // Tom's other class: Mara plays there too. Nothing of it may show anywhere else.

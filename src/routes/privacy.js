@@ -96,13 +96,14 @@ module.exports = (app, ctx) => {
 
   /**
    * What the app's manifests say about achievements and result labels. Looks at
-   * the versions this person can have used: published, school-wide and the ones
-   * approved in their classes (newest names first).
+   * the versions this person can have used: published (only for whoever manages
+   * the app - for everybody else it may still wait for a review), school-wide and
+   * the ones approved in their classes (newest names first).
    */
-  function vocabulary(a, userId) {
+  function vocabulary(a, user) {
     const ids = [
-      a.published_version_id, a.schoolwide_version_id,
-      ...db.all('SELECT ca.version_id FROM class_apps ca JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ? WHERE ca.app_id = ? AND ca.version_id IS NOT NULL', userId, a.id).map((r) => r.version_id),
+      access.canManageApp(user, a) ? a.published_version_id : null, a.schoolwide_version_id,
+      ...db.all('SELECT ca.version_id FROM class_apps ca JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ? WHERE ca.app_id = ? AND ca.version_id IS NOT NULL', user.id, a.id).map((r) => r.version_id),
     ];
     const achievements = new Map();
     const labels = Object.create(null); // no prototype: keys like "constructor" stay plain keys
@@ -281,7 +282,7 @@ module.exports = (app, ctx) => {
   app.get('/meine-daten/app/:aid', (req, res) => {
     const u = req.user;
     const a = ownAppData(req);
-    const { achievements, labels } = vocabulary(a, u.id);
+    const { achievements, labels } = vocabulary(a, u);
     const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, u.id);
     const unlocked = db.all('SELECT achievement, unlocked_at FROM achievements WHERE app_id = ? AND user_id = ? ORDER BY unlocked_at DESC', a.id, u.id);
     const resultCount = db.get('SELECT COUNT(*) AS n FROM results WHERE app_id = ? AND user_id = ?', a.id, u.id).n;
@@ -407,7 +408,7 @@ module.exports = (app, ctx) => {
 
   /** One app in the download: what it stores for this person. Saves and results are lazy. */
   function appExport(a, u, fileUrl) {
-    const { achievements } = vocabulary(a, u.id);
+    const { achievements } = vocabulary(a, u);
     const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, u.id);
     const play = db.get('SELECT first_at, last_at, count FROM plays WHERE app_id = ? AND user_id = ?', a.id, u.id);
     return {

@@ -126,7 +126,7 @@ test('Player: eine schulweite App mit fremder Klasse öffnet schulweit – Klass
   const A = await h.browser().login(admin);
   const school = await h.makeApp(Y, 'Für alle', { 'index.html': 'x' });
   await A.page(`/apps/${school.id}`);
-  assert.equal((await A.post(`/apps/${school.id}/schulweit`, { an: '1' })).status, 303);
+  assert.equal((await A.post(`/apps/${school.id}/schulweit`, { an: '1', version: school.published_version_id })).status, 303);
   // Mia opens it with her class in the link, although it is not in that class: school-wide, no class context.
   const page = await M.page(`/apps/${school.id}/spielen?klasse=${cls7b}`);
   assert.equal(page.status, 200);

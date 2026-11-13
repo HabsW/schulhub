@@ -141,7 +141,7 @@ module.exports = (app, ctx) => {
   /** Classes of this app (active, not removed) and whether the actor teaches there. */
   const planRows = (actor, a) =>
     db.all(
-      `SELECT ca.class_id, ca.version_id, c.name, (m.role = 'teacher') AS teaches
+      `SELECT ca.class_id, ca.status, ca.version_id, c.name, (m.role = 'teacher') AS teaches
          FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
          LEFT JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ?
         WHERE ca.app_id = ? AND ca.status <> 'removed' ORDER BY c.name COLLATE NOCASE`,
@@ -155,19 +155,23 @@ module.exports = (app, ctx) => {
   function publishPlan(actor, a, versionId, rows = planRows(actor, a)) {
     const now = [];
     const wait = [];
+    const same = []; // the class plays this version already (going back to it)
     for (const r of rows) {
       if (actor.role === 'admin' || r.teaches) now.push(r.name);
       else if (r.version_id !== versionId) wait.push(r.name);
+      else if (r.status === 'approved') same.push(r.name);
     }
-    const schoolwide = a.schoolwide_version_id && a.schoolwide_version_id !== versionId ? (actor.role === 'admin' ? 'now' : 'wait') : '';
-    return { now, wait, schoolwide };
+    const schoolwide = !a.schoolwide_version_id ? '' : a.schoolwide_version_id === versionId ? 'same' : actor.role === 'admin' ? 'now' : 'wait';
+    return { now, wait, same, schoolwide };
   }
   function planText(plan, a, actor) {
     const parts = [];
     if (plan.now.length) parts.push(`Sofort neu in ${names(plan.now)}.`);
     if (plan.wait.length) parts.push(`In ${names(plan.wait)} wartet sie auf die Lehrkraft – bis zur Freigabe läuft dort die bisherige Version.`);
+    if (plan.same.length) parts.push(`In ${names(plan.same)} läuft sie schon.`);
     if (plan.schoolwide === 'now') parts.push('Für die ganze Schule gilt sie sofort.');
     if (plan.schoolwide === 'wait') parts.push('Für die ganze Schule wartet sie auf die Verwaltung.');
+    if (plan.schoolwide === 'same') parts.push('Für die ganze Schule gilt sie schon.');
     if (!parts.length) {
       // In no class and not school-wide: say exactly who can open it.
       parts.push(a.shared && access.canShareApp(actor, a)
@@ -509,6 +513,8 @@ module.exports = (app, ctx) => {
       const open = !r.archived_at && isOwner;
       const acts = [];
       if (open && r.request_state === 'returned') acts.push(postButton(req, `/apps/${a.id}/einreichen`, 'Erneut einreichen', { size: 'sm', icon: 'send', fields: { klasse: r.class_id } }));
+      // The class plays an older version and nothing waits (an update was withdrawn, or published while the class was archived).
+      if (open && r.status === 'approved' && !r.requested_version_id && published && r.version_id !== published.id && access.addToClassMode(user, a, r.class_id) === 'submit') acts.push(postButton(req, `/apps/${a.id}/einreichen`, `Version ${published.number} einreichen`, { size: 'sm', icon: 'send', fields: { klasse: r.class_id } }));
       if (open && r.requested_version_id) acts.push(postButton(req, `/apps/${a.id}/zurueckziehen`, 'Zurückziehen', { kind: 'quiet', size: 'sm', fields: { klasse: r.class_id }, confirm: `Einreichung in ${r.name} zurückziehen?\nDie Lehrkraft prüft diese Version dann nicht mehr.${r.status === 'approved' ? ' Die freigegebene Version bleibt in der Klasse.' : ''}`, confirmLabel: 'Zurückziehen' }));
       if (open && r.status === 'approved' && !r.requested_version_id) acts.push(postButton(req, `/apps/${a.id}/aus-klasse`, 'Aus der Klasse nehmen', { cls: 'btn quiet sm danger apps-quietdanger', fields: { klasse: r.class_id }, confirm: `„${a.name}“ aus ${r.name} nehmen?\nDie Klasse kann die App dann nicht mehr öffnen. Ergebnisse bleiben für die Lehrkraft lesbar.`, confirmLabel: 'Herausnehmen' }));
       // Actions sit under the text: the reason a teacher wrote needs the full width.
@@ -529,7 +535,7 @@ module.exports = (app, ctx) => {
           <p class="meta">${a.schoolwide_version_id ? `Alle angemeldeten Personen können Version ${num(a.schoolwide_version_id) ?? '–'} öffnen.` : 'Bisher nur in Klassen.'}</p>
           <div class="actions">${a.schoolwide_version_id
             ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweite Freigabe beenden', { size: 'sm', fields: { an: '0' }, confirm: 'Schulweite Freigabe beenden?\nDie App ist danach nur noch in den Klassen, in denen sie freigegeben ist.', confirmLabel: 'Beenden' })
-            : published ? postButton(req, `/apps/${a.id}/schulweit`, 'Für die ganze Schule freigeben', { size: 'sm', icon: 'school', fields: { an: '1' }, confirm: `Version ${published.number} für die ganze Schule freigeben?\nAlle angemeldeten Personen – auch Schüler/innen aller Klassen – können sie dann öffnen.`, confirmLabel: 'Freigeben' })
+            : published ? postButton(req, `/apps/${a.id}/schulweit`, 'Für die ganze Schule freigeben', { size: 'sm', icon: 'school', fields: { an: '1', version: published.id }, confirm: `Version ${published.number} für die ganze Schule freigeben?\nAlle angemeldeten Personen – auch Schüler/innen aller Klassen – können sie dann öffnen.`, confirmLabel: 'Freigeben' })
               : html`<span class="meta">Erst möglich, wenn eine Version veröffentlicht ist.</span>`}</div></div>`
       : a.schoolwide_version_id && classRows.length ? html`<p class="meta apps-after apps-iconline">${icon('school', { cls: 'sm' })}<span>Die Verwaltung hat Version ${num(a.schoolwide_version_id) ?? '–'} für die ganze Schule freigegeben.</span></p>` : '';
     const classSection = html`<section class="section" id="klassen" aria-labelledby="h-klassen">
@@ -780,7 +786,9 @@ module.exports = (app, ctx) => {
     } catch (err) {
       // Nothing of a refused upload is kept.
       if (v && db.get('SELECT 1 AS x FROM app_versions WHERE id = ?', v.id)) services.deleteVersion(null, a, v);
-      if (err instanceof HttpError) services.audit(req.user, 'upload_abgelehnt', a.name, err.message, { appId: a.id });
+      // Unpacking took a while: an account deleted meanwhile (with its apps) leaves no new entry naming it.
+      const still = db.get('SELECT 1 AS ok FROM apps a JOIN users u ON u.id = ? WHERE a.id = ?', req.user.id, a.id);
+      if (err instanceof HttpError && still) services.audit(req.user, 'upload_abgelehnt', a.name, err.message, { appId: a.id });
       throw err;
     } finally {
       fs.rm(file, { force: true }, () => {});
@@ -879,6 +887,8 @@ module.exports = (app, ctx) => {
     }
     const on = req.body.an === '1';
     if (on && !a.published_version_id) throw bad('Diese App ist noch nicht veröffentlicht.');
+    // Bound to the version the admin saw (the form sends it): one the owner published meanwhile was never looked at.
+    if (on && str(req.body.version) !== a.published_version_id) throw bad('Inzwischen ist eine andere Version veröffentlicht. Bitte lade die Seite neu und sieh sie dir an.');
     db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', on ? a.published_version_id : null, a.id);
     services.audit(req.user, on ? 'schulweit_freigegeben' : 'schulweit_beendet', a.name, '', { appId: a.id });
     flash(req, on ? `„${a.name}“ ist jetzt für die ganze Schule freigegeben.` : `„${a.name}“ ist nicht mehr schulweit freigegeben.`);
@@ -979,7 +989,9 @@ module.exports = (app, ctx) => {
     const a = reviewApp(req);
     const text = cleanText(req.body.text, 2000, { multiline: true });
     if (!text) throw bad('Der Kommentar ist leer.');
-    if (db.get('SELECT COUNT(*) AS n FROM comments WHERE app_id = ?', a.id).n >= L.commentsPerApp) throw bad('Hier gibt es schon sehr viele Kommentare.');
+    // Only plain comments count: decisions (submitted, approved, returned) can never be deleted, so a long review
+    // history would otherwise close the conversation for good.
+    if (db.get("SELECT COUNT(*) AS n FROM comments WHERE app_id = ? AND kind = 'comment'", a.id).n >= L.commentsPerApp) throw bad('Hier gibt es schon sehr viele Kommentare.');
     db.run("INSERT INTO comments (id, app_id, author_id, body, created_at, kind) VALUES (?, ?, ?, ?, ?, 'comment')", newId(), a.id, req.user.id, text, Date.now());
     // Tell the other side: the owner when someone else writes; the reviewing teachers when the owner writes.
     if (a.owner_id !== req.user.id) {

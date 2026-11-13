@@ -424,13 +424,19 @@ function createModel(w) {
     for (const x of mine) out.push(answer(readyVersionOf(app, x.version_id), x.class_id, false));
     const schoolwide = readyVersionOf(app, app.schoolwide_version_id);
     if (schoolwide) out.push(answer(schoolwide, null, false));
+    // "or, for staff, a colleague's shared app: its published version as a preview (nothing is stored)" -
+    // only when none of the above opens it.
+    const shared = !out.length && m.isSharedWith(user, app) ? readyVersionOf(app, app.published_version_id) : null;
+    if (shared) out.push(answer(shared, null, true));
     return out;
   };
 
   // ----- other people's data
   m.isStudentOf = (classId, studentId) => roleIn(classId, studentId) === 'student';
   m.appApprovedIn = (classId, appId) => placement(classId, appId)?.status === 'approved';
-  const usedIn = (classId, appId) => ['approved', 'removed'].includes(placement(classId, appId)?.status);
+  // "The app is or was approved in this class: its row keeps the version the class had, also after it was
+  // removed - and while a new submission of the removed app waits or was given back."
+  const usedIn = (classId, appId) => Boolean(placement(classId, appId)?.version_id);
   // "A teacher may look at a student's data in an app only if the student is in one of the teacher's classes
   // AND the app is (or was, before it was removed) in use in that same class."
   m.canSeeStudentData = (user, classId, appId, studentId) => m.canManageClass(user, classId) && m.isStudentOf(classId, studentId) && usedIn(classId, appId);

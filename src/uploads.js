@@ -335,8 +335,12 @@ function createUploads(ctx) {
     return p;
   }
 
-  /** Create or replace one draft file. Returns the normalised path. */
-  function putDraftFile(app, rawPath, buffer) {
+  /**
+   * Create or replace one draft file. Returns the normalised path.
+   * moving: the stored file this one is renamed from - the caller removes it in the same
+   * transaction, so it frees its place and its bytes (a rename at a limit adds nothing).
+   */
+  function putDraftFile(app, rawPath, buffer, { moving = null } = {}) {
     const p = draftFileName(rawPath);
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
     return db.tx(() => {
@@ -344,12 +348,15 @@ function createUploads(ctx) {
       if (!db.get('SELECT 1 AS ok FROM apps WHERE id = ?', app.id)) throw gone();
       ensureDraft(app);
       const old = db.get('SELECT path, size, sha256 FROM draft_files WHERE app_id = ? AND path_lower = ?', app.id, p.toLowerCase());
+      // A rename that only changes upper/lower case replaces `old` itself: nothing extra is freed.
+      const away = moving && (!old || old.path !== moving.path) ? moving : null;
+      const freed = (old ? old.size : 0) + (away ? away.size : 0);
       const now = db.get('SELECT COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM draft_files WHERE app_id = ?', app.id);
-      const files = now.files + (old ? 0 : 1);
-      const bytes = now.bytes - (old ? old.size : 0) + buffer.length;
+      const files = now.files + (old ? 0 : 1) - (away ? 1 : 0);
+      const bytes = now.bytes - freed + buffer.length;
       if (files > L.maxFiles) throw fail(`Zu viele Dateien (maximal ${L.maxFiles}).`);
       if (bytes > L.maxVersionBytes) throw fail(`Die App ist zu groß (maximal ${Math.round(L.maxVersionBytes / 1048576)} MB).`);
-      if (userBytes(app.owner_id) - (old ? old.size : 0) + buffer.length > L.maxUserBytes) throw fail('Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
+      if (userBytes(app.owner_id) - freed + buffer.length > L.maxUserBytes) throw fail('Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
       const sha = writeBlob(buffer);
       if (old) db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, old.path);
       db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', app.id, p, p.toLowerCase(), buffer.length, sha);

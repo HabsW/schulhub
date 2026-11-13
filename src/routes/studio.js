@@ -396,7 +396,7 @@ module.exports = (app, ctx) => {
       if (clash && clash.path !== old.path) throw new HttpError(409, `Eine Datei „${clash.path.slice(0, 80)}“ gibt es schon.`);
       const data = uploads.readBlob(old.sha256);
       db.tx(() => {
-        const written = uploads.putDraftFile(a, target, data);
+        const written = uploads.putDraftFile(a, target, data, { moving: old });
         // A rename that only changes upper/lower case has already replaced the old row.
         if (written !== old.path) uploads.deleteDraftFile(a, old.path);
       });

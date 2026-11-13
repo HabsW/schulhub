@@ -38,7 +38,7 @@ before(async () => {
   game = await h.makeApp(L, 'Sternenspiel', { 'index.html': '<h1>Spiel</h1>' });
   await L.post(`/klassen/${cls7b}/apps`, { app: game.id });
   await A.page(`/apps/${game.id}`);
-  assert.equal((await A.post(`/apps/${game.id}/schulweit`, { an: '1' })).status, 303);
+  assert.equal((await A.post(`/apps/${game.id}/schulweit`, { an: '1', version: game.published_version_id })).status, 303);
 
   miaApp = await h.makeApp(M, 'Mias Malprogramm', { 'index.html': '<h1>Mia</h1>' });
   await M.page(`/apps/${miaApp.id}`);

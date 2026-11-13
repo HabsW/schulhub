@@ -550,7 +550,7 @@ module.exports = (app, ctx) => {
               label: 'Aktionen', actions: true, render: (a) => html`${waitingUpdate(a) ? linkButton(`/apps/${a.id}`, 'Update prüfen', { size: 'sm', icon: 'eye' }) : ''}
                 ${a.schoolwide_version_id
                   ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweit beenden', { size: 'sm', fields: { an: '0' }, confirm: `Schulweite Freigabe von „${a.name}“ beenden?\nWer die App nur über die Schule öffnet, sieht sie nicht mehr. In Klassen, die sie benutzen, bleibt sie.`, confirmLabel: 'Beenden' })
-                  : a.published_version_id ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweit freigeben', { size: 'sm', fields: { an: '1' }, confirm: `„${a.name}“ für die ganze Schule freigeben?\nAlle angemeldeten Personen können dann Version ${a.pub_number} öffnen. Spätere Versionen warten auf deine Freigabe.`, confirmLabel: 'Freigeben' }) : ''}`,
+                  : a.published_version_id ? postButton(req, `/apps/${a.id}/schulweit`, 'Schulweit freigeben', { size: 'sm', fields: { an: '1', version: a.published_version_id }, confirm: `„${a.name}“ für die ganze Schule freigeben?\nAlle angemeldeten Personen können dann Version ${a.pub_number} öffnen. Spätere Versionen warten auf deine Freigabe.`, confirmLabel: 'Freigeben' }) : ''}`,
             },
           ],
           rows: apps,
