@@ -149,3 +149,33 @@ test('Von Kolleg/innen geteilt: der Link im Katalog öffnet die App (als Vorscha
   assert.equal((await B.get(`/apps/${shared.id}/spielen`)).status, 404);
   assert.equal(await h.token(B, shared), null);
 });
+
+test('Entfernt und wieder eingereicht: die Ergebnisse der Klasse bleiben für die Lehrkraft lesbar', async () => {
+  const app = await approved(M, uniq('Ergebnis-Spiel'), { 'index.html': '<h1>v1</h1>' });
+  const t = await h.token(B, app, cls);
+  assert.equal((await B.api(app, t.token, 'results.add', { title: 'BENS-RUNDE', score: 3, maxScore: 4 })).json().ok, true);
+  const results = `/klassen/${cls}/apps/${app.id}/ergebnisse`;
+  // Herr Lehmann takes the app out of the class: the results stay readable (SECURITY.md).
+  await L.page(`/klassen/${cls}/apps`);
+  assert.equal((await L.post(`/klassen/${cls}/apps/${app.id}/entfernen`)).status, 303);
+  assert.ok((await L.get(results)).text.includes('BENS-RUNDE'));
+
+  // Mia submits her app again. While it waits - and after the teacher gives it back - the results stay his.
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+  assert.equal(classApp(cls, app.id).request_state, 'waiting');
+  let res = await L.get(results);
+  assert.equal(res.status, 200, 'the results disappear while the new submission waits');
+  assert.ok(res.text.includes('BENS-RUNDE'));
+  assert.equal((await L.get(`${results}/${ben.id}`)).status, 200, 'Ben’s detail page too');
+  // ... and its feedback form, which links the app, works.
+  const fb = formsTo((await L.page(`${results}/${ben.id}`)).text, `/klassen/${cls}/rueckmeldungen`)[0];
+  assert.equal(fb && fb.app, app.id);
+  assert.equal((await L.post(`/klassen/${cls}/rueckmeldungen`, { ...fb, text: 'Gute Runde!' })).status, 303, 'feedback about the app is refused');
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/zurueckgeben`, { version: app.published_version_id, grund: 'Noch nicht.' })).status, 303);
+  res = await L.get(results);
+  assert.equal(res.status, 200, 'after giving it back the results stay hidden - and nothing in the UI brings them back');
+  // The class's page lists the app where its results are.
+  assert.ok((await L.get(`/klassen/${cls}/apps`)).text.includes(`href="${results}"`), 'no link to the results on the class page');
+  // Classmates still cannot open it.
+  assert.equal(await h.token(B, app, cls), null);
+});

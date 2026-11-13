@@ -324,7 +324,7 @@ module.exports = (app, ctx) => {
     const perWeek = db.get(
       `SELECT ${kit.weekSums('r.created_at', wk.length)} FROM results r
          JOIN class_members m ON m.user_id = r.user_id AND m.class_id = ? AND m.role = 'student'
-         JOIN class_apps ca ON ca.app_id = r.app_id AND ca.class_id = m.class_id AND ca.status IN ('approved','removed')
+         JOIN class_apps ca ON ca.app_id = r.app_id AND ca.class_id = m.class_id AND ca.version_id IS NOT NULL
         WHERE (r.class_id = m.class_id OR r.class_id = '') AND r.created_at >= ?`,
       ...kit.weekParams(wk), cls.id, wk[0].start
     );
@@ -332,7 +332,7 @@ module.exports = (app, ctx) => {
     const active = db.get(
       `SELECT COUNT(DISTINCT p.user_id) AS n FROM plays p
          JOIN class_members m ON m.user_id = p.user_id AND m.class_id = ? AND m.role = 'student'
-         JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = m.class_id AND ca.status IN ('approved','removed')
+         JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = m.class_id AND ca.version_id IS NOT NULL
         WHERE p.last_at >= ?`,
       cls.id, thisWeek
     ).n;
@@ -449,7 +449,7 @@ module.exports = (app, ctx) => {
       `SELECT a.*, ca.status, ca.version_id, ca.decided_at, u.name AS owner_name, v.number AS version_number, v.manifest AS manifest
          FROM class_apps ca JOIN apps a ON a.id = ca.app_id JOIN users u ON u.id = a.owner_id
          LEFT JOIN app_versions v ON v.id = ca.version_id
-        WHERE ca.class_id = ? AND ca.status IN ('approved','removed') ORDER BY a.name COLLATE NOCASE LIMIT 200`,
+        WHERE ca.class_id = ? AND ca.version_id IS NOT NULL ORDER BY a.name COLLATE NOCASE LIMIT 200`,
       cls.id
     );
     const started = new Map(
@@ -464,7 +464,8 @@ module.exports = (app, ctx) => {
     );
     const total = studentCount(cls.id);
     const approved = rows.filter((r) => r.status === 'approved');
-    const removed = rows.filter((r) => r.status === 'removed');
+    // Removed - also when a new submission of it waits or was given back: its results stay readable.
+    const removed = rows.filter((r) => r.status !== 'approved');
 
     const approvedRow = (a) => {
       const hasSettings = manifestOf({ manifest: a.manifest }).settings.length > 0;
@@ -531,7 +532,7 @@ module.exports = (app, ctx) => {
         <div class="disclosure-body"><p class="meta mb-4">Die Klasse kann diese Apps nicht mehr öffnen. Ihre Ergebnisse bleiben für dich lesbar.</p>
         ${list(removed.map((a) => appRow(a, {
           sub: `von ${a.owner_name} · Version ${a.version_number || '–'}`,
-          end: html`<div class="teach-actions">${linkButton(`${base}/apps/${a.id}/ergebnisse`, 'Ergebnisse', { size: 'sm', icon: 'chart' })}${change ? postButton(req, `${base}/apps/${a.id}/zurueckholen`, 'Zurückholen', { kind: 'quiet', size: 'sm', icon: 'undo' }) : ''}</div>`,
+          end: html`<div class="teach-actions">${linkButton(`${base}/apps/${a.id}/ergebnisse`, 'Ergebnisse', { size: 'sm', icon: 'chart' })}${change && a.status === 'removed' ? postButton(req, `${base}/apps/${a.id}/zurueckholen`, 'Zurückholen', { kind: 'quiet', size: 'sm', icon: 'undo' }) : ''}</div>`,
           cls: 'wrap',
         })))}</div></details>` : ''}`);
   }
@@ -544,7 +545,7 @@ module.exports = (app, ctx) => {
     const change = access.canChangeClass(user, cls.id);
     const students = db.all(
       `SELECT u.id, u.name, m.joined_at,
-              (SELECT MAX(p.last_at) FROM plays p JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = m.class_id AND ca.status IN ('approved','removed')
+              (SELECT MAX(p.last_at) FROM plays p JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = m.class_id AND ca.version_id IS NOT NULL
                 WHERE p.user_id = u.id) AS last_at
          FROM class_members m JOIN users u ON u.id = m.user_id
         WHERE m.class_id = ? AND m.role = 'student' ORDER BY u.name COLLATE NOCASE LIMIT 300`,

@@ -153,9 +153,13 @@ function createAccess(db) {
   function canSeeStudentData(user, classId, appId, studentId) {
     if (!canManageClass(user, classId)) return false;
     const inClass = db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId);
-    const appInClass = db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId);
-    return Boolean(inClass && appInClass);
+    return Boolean(inClass && wasApprovedIn(classId, appId));
   }
+  /**
+   * The app is or was approved in this class: its row keeps the version the class had, also after
+   * it was removed - and while a new submission of the removed app waits or was given back.
+   */
+  const wasApprovedIn = (classId, appId) => Boolean(db.get('SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND version_id IS NOT NULL', classId, appId));
   const isStudentOf = (classId, studentId) => Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId));
   const appApprovedIn = (classId, appId) => Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status = 'approved'", classId, appId));
 
@@ -264,8 +268,7 @@ function createAccess(db) {
    * Results of one app in one class (lists, overview, CSV): the class's teachers
    * (and the admin), while the app is approved there - or after it was removed.
    */
-  const canSeeClassResults = (user, classId, appId) =>
-    canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
+  const canSeeClassResults = (user, classId, appId) => canManageClass(user, classId) && wasApprovedIn(classId, appId);
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
   /**
