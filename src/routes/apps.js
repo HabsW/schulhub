@@ -513,6 +513,8 @@ module.exports = (app, ctx) => {
       const open = !r.archived_at && isOwner;
       const acts = [];
       if (open && r.request_state === 'returned') acts.push(postButton(req, `/apps/${a.id}/einreichen`, 'Erneut einreichen', { size: 'sm', icon: 'send', fields: { klasse: r.class_id } }));
+      // The class plays an older version and nothing waits (an update was withdrawn, or published while the class was archived).
+      if (open && r.status === 'approved' && !r.requested_version_id && published && r.version_id !== published.id && access.addToClassMode(user, a, r.class_id) === 'submit') acts.push(postButton(req, `/apps/${a.id}/einreichen`, `Version ${published.number} einreichen`, { size: 'sm', icon: 'send', fields: { klasse: r.class_id } }));
       if (open && r.requested_version_id) acts.push(postButton(req, `/apps/${a.id}/zurueckziehen`, 'Zurückziehen', { kind: 'quiet', size: 'sm', fields: { klasse: r.class_id }, confirm: `Einreichung in ${r.name} zurückziehen?\nDie Lehrkraft prüft diese Version dann nicht mehr.${r.status === 'approved' ? ' Die freigegebene Version bleibt in der Klasse.' : ''}`, confirmLabel: 'Zurückziehen' }));
       if (open && r.status === 'approved' && !r.requested_version_id) acts.push(postButton(req, `/apps/${a.id}/aus-klasse`, 'Aus der Klasse nehmen', { cls: 'btn quiet sm danger apps-quietdanger', fields: { klasse: r.class_id }, confirm: `„${a.name}“ aus ${r.name} nehmen?\nDie Klasse kann die App dann nicht mehr öffnen. Ergebnisse bleiben für die Lehrkraft lesbar.`, confirmLabel: 'Herausnehmen' }));
       // Actions sit under the text: the reason a teacher wrote needs the full width.

@@ -260,6 +260,33 @@ test('Editor: an der Grenze lässt sich eine Datei trotzdem umbenennen oder vers
   }
 });
 
+test('Update zurückgezogen: die App-Seite bietet an, die veröffentlichte Version wieder einzureichen', async () => {
+  const app = await approved(M, uniq('Zurückgezogen'), { 'index.html': '<h1>v1</h1>' });
+  const v2 = await publish(M, app.id, { 'index.html': '<h1>v2</h1>' });
+  await M.page(`/apps/${app.id}`);
+  assert.equal((await M.post(`/apps/${app.id}/zurueckziehen`, { klasse: cls })).status, 303);
+  assert.equal(classApp(cls, app.id).request_state, null, 'the class keeps Version 1, nothing waits');
+  // Mia changes her mind: Version 2 should be looked at after all. Her page has to offer that.
+  const offers = () => M.page(`/apps/${app.id}`).then((r) => formsTo(r.text, `/apps/${app.id}/einreichen`).filter((f) => f.klasse === cls));
+  const [offer] = await offers();
+  assert.ok(offer, 'nothing on the app page submits Version 2 to 7b again');
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, offer)).status, 303);
+  assert.deepEqual([classApp(cls, app.id).request_state, classApp(cls, app.id).requested_version_id], ['waiting', v2]);
+  assert.deepEqual(await offers(), [], 'not while it waits');
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: v2 })).status, 303);
+  assert.deepEqual(await offers(), [], 'not when the class plays the published version');
+  // Only where the owner may submit: not in a class she has left (the button would lead to a 404).
+  await publish(M, app.id, { 'index.html': '<h1>v3</h1>' });
+  await M.post(`/apps/${app.id}/zurueckziehen`, { klasse: cls });
+  assert.equal((await offers()).length, 1);
+  h.db.run('DELETE FROM class_members WHERE class_id = ? AND user_id = ?', cls, mia.id);
+  try {
+    assert.deepEqual(await offers(), [], 'offered in a class she is no longer in');
+  } finally {
+    h.db.run("INSERT INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, 'student', ?)", cls, mia.id, Date.now());
+  }
+});
+
 test('Ohne Formularinhalt: eine Anfrage mit gültigem Token führt nie zu einem Serverfehler', async () => {
   const app = await h.makeApp(M, uniq('Leere Anfrage'));
   const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await M.get('/start')).text)[1];
