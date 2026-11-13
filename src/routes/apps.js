@@ -669,7 +669,7 @@ module.exports = (app, ctx) => {
       'UPDATE apps SET name = ?, description = ?, emoji = ?, color = ?, category = ?, grade_min = ?, grade_max = ?, shared = ?, updated_at = ? WHERE id = ?',
       f.name, f.description, f.emoji, f.color, cat.category, cat.gradeMin, cat.gradeMax, shared, Date.now(), a.id
     );
-    if (shared !== a.shared) services.audit(req.user, shared ? 'app_geteilt' : 'app_nicht_mehr_geteilt', f.name);
+    if (shared !== a.shared) services.audit(req.user, shared ? 'app_geteilt' : 'app_nicht_mehr_geteilt', f.name, '', { appId: a.id });
     flash(req, shared !== a.shared ? (shared ? 'Gespeichert. Kolleg/innen können die App jetzt finden.' : 'Gespeichert. Die App ist nicht mehr mit Kolleg/innen geteilt.') : 'Gespeichert.');
     res.redirect(303, `/apps/${a.id}#einstellungen`);
   });
@@ -740,7 +740,7 @@ module.exports = (app, ctx) => {
     const v = db.get("SELECT * FROM app_versions WHERE id = ? AND app_id = ? AND status = 'uploading'", String(req.params.vid), a.id);
     if (!v) throw deny();
     services.deleteVersion(null, a, v);
-    services.audit(req.user, 'upload_abgebrochen', a.name, `Version ${v.number}`);
+    services.audit(req.user, 'upload_abgebrochen', a.name, `Version ${v.number}`, { appId: a.id });
     res.json({ ok: true });
   });
 
@@ -748,7 +748,17 @@ module.exports = (app, ctx) => {
     const a = manageApp(req);
     limiter.guard('uploadVersions', req.user.id);
     if (!req.is('application/zip') && !req.is('application/octet-stream')) throw new HttpError(415, 'Bitte lade eine ZIP-Datei hoch.');
-    if (Number(req.headers['content-length']) > L.maxZipBytes) throw new HttpError(413, `Das Archiv ist zu groß (maximal ${Math.round(L.maxZipBytes / 1048576)} MB).`);
+    // Before the archive is read: its declared size, and one of the person's upload places (shared
+    // with folder, editor and hub.files uploads). A refusal closes the connection unread.
+    try {
+      uploads.admitBody(req, res, {
+        person: req.user.id, name: 'Das Archiv', into: null, maxBytes: L.maxZipBytes,
+        tooLarge: `Das Archiv ist zu groß (maximal ${Math.round(L.maxZipBytes / 1048576)} MB).`,
+      });
+    } catch (err) {
+      res.set('Connection', 'close');
+      throw err;
+    }
     const note = cleanText(str(req.query.notiz), 500, { multiline: true });
     const file = await uploads.receiveToTemp(req, L.maxZipBytes);
     let v = null;
@@ -761,7 +771,7 @@ module.exports = (app, ctx) => {
     } catch (err) {
       // Nothing of a refused upload is kept.
       if (v && db.get('SELECT 1 AS x FROM app_versions WHERE id = ?', v.id)) services.deleteVersion(null, a, v);
-      if (err instanceof HttpError) services.audit(req.user, 'upload_abgelehnt', a.name, err.message);
+      if (err instanceof HttpError) services.audit(req.user, 'upload_abgelehnt', a.name, err.message, { appId: a.id });
       throw err;
     } finally {
       fs.rm(file, { force: true }, () => {});
@@ -847,12 +857,12 @@ module.exports = (app, ctx) => {
       const v = getVersion(a, vid);
       if (typeof req.body.update === 'string') {
         db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ? AND schoolwide_requested_version_id = ?', v.id, a.id, v.id);
-        services.audit(req.user, 'schulweit_aktualisiert', a.name, `Version ${v.number}`);
+        services.audit(req.user, 'schulweit_aktualisiert', a.name, `Version ${v.number}`, { appId: a.id });
         if (owner !== req.user.id) services.notify([owner], 'freigegeben', `Version ${v.number} von „${a.name}“ ist jetzt für die ganze Schule freigegeben.`, `/apps/${a.id}`);
         flash(req, `Version ${v.number} gilt jetzt für die ganze Schule.`);
       } else {
         db.run('UPDATE apps SET schoolwide_requested_version_id = NULL WHERE id = ? AND schoolwide_requested_version_id = ?', a.id, v.id);
-        services.audit(req.user, 'schulweit_update_abgelehnt', a.name, `Version ${v.number}`);
+        services.audit(req.user, 'schulweit_update_abgelehnt', a.name, `Version ${v.number}`, { appId: a.id });
         if (owner !== req.user.id) services.notify([owner], 'zurueckgegeben', `Version ${v.number} von „${a.name}“ wurde nicht schulweit freigegeben. Die Schule behält die bisherige Version.`, `/apps/${a.id}`);
         flash(req, `Version ${v.number} wird nicht schulweit freigegeben.`);
       }
@@ -861,7 +871,7 @@ module.exports = (app, ctx) => {
     const on = req.body.an === '1';
     if (on && !a.published_version_id) throw bad('Diese App ist noch nicht veröffentlicht.');
     db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', on ? a.published_version_id : null, a.id);
-    services.audit(req.user, on ? 'schulweit_freigegeben' : 'schulweit_beendet', a.name);
+    services.audit(req.user, on ? 'schulweit_freigegeben' : 'schulweit_beendet', a.name, '', { appId: a.id });
     flash(req, on ? `„${a.name}“ ist jetzt für die ganze Schule freigegeben.` : `„${a.name}“ ist nicht mehr schulweit freigegeben.`);
     res.redirect(303, `/apps/${a.id}`);
   });
@@ -983,7 +993,7 @@ module.exports = (app, ctx) => {
     const c = db.get('SELECT * FROM comments WHERE id = ? AND app_id = ?', String(req.params.cid), a.id);
     if (!c || !access.canDeleteComment(req.user, c)) throw deny();
     db.run('DELETE FROM comments WHERE id = ?', c.id);
-    services.audit(req.user, 'kommentar_geloescht', a.name);
+    services.audit(req.user, 'kommentar_geloescht', a.name, '', { appId: a.id });
     flash(req, 'Kommentar gelöscht.');
     res.redirect(303, `/apps/${a.id}#verlauf`);
   });

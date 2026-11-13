@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { appHeaders } = require('./security');
-const { cleanText } = require('./util');
+const { cleanText, HttpError } = require('./util');
 const { ApiError, liveStore, createPreviewStores } = require('./sdkStore');
 const { FileError } = require('./userFiles');
 const { manifestOf, parseManifest, effectiveSettings } = require('./manifest');
@@ -436,9 +436,27 @@ function createAppsHost(ctx) {
     sendJson(res, 500, { ok: false, error: { code: 'server_error', message: 'Da ist etwas schiefgegangen.' } });
   }
 
+  /**
+   * Admit a request body before it is read (uploads.admitBody: declared size, places per person),
+   * or refuse it as an SDK error without reading it - the connection is closed.
+   */
+  function admit(req, res, options) {
+    try {
+      ctx.uploads.admitBody(req, res, options);
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+      res.setHeader('Connection', 'close');
+      throw new ApiError(err.status === 429 ? 'rate_limited' : err.status === 413 ? 'too_large' : 'bad_value', err.message, err.status);
+    }
+  }
+
   async function api(req, res, appRow) {
     try {
       const { user, classId, versionId, store } = caller(req, appRow);
+      admit(req, res, {
+        person: user.id, name: 'Anfrage', into: null, maxBytes: L.saveValueBytes + 4096, tooLarge: 'Die Anfrage ist zu groß.',
+        bucket: 'api', limit: L.parallelApiCalls, busy: 'Zu viele gleichzeitige Anfragen. Bitte kurz warten.',
+      });
       const body = await readJson(req, L.saveValueBytes + 4096);
       const table = methods(appRow, user, classId, store, versionId);
       const fn = body && typeof body.method === 'string' && Object.hasOwn(table, body.method) ? table[body.method] : null;
@@ -484,6 +502,8 @@ function createAppsHost(ctx) {
       const { user, store } = caller(req, appRow);
       if (req.method === 'PUT') {
         if (!limiter.hit('sdkFiles', `${user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Dateien in kurzer Zeit. Bitte kurz warten.', 429);
+        // Shares the person's upload places with folder, editor and ZIP uploads.
+        admit(req, res, { person: user.id, name, into: null, maxBytes: L.fileBytes });
         const body = await readBody(req, L.fileBytes);
         return sendJson(res, 200, { ok: true, result: store.filePut(name, req.headers['content-type'], body) });
       }

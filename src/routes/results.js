@@ -229,7 +229,7 @@ module.exports = (app, ctx) => {
         lines.push([s.name, r.title, csvNumber(r.score), csvNumber(r.max_score), pct === null ? '' : String(pct), formatDate(r.created_at), progress].map(csvCell).join(';'));
       }
     }
-    services.audit(req.user, 'ergebnisse_exportiert', a.name, cls.name);
+    services.audit(req.user, 'ergebnisse_exportiert', a.name, cls.name, { appId: a.id });
     const file = `ergebnisse-${slug(cls.name)}-${slug(a.name)}-${dayKey(Date.now())}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
@@ -342,7 +342,7 @@ module.exports = (app, ctx) => {
     // belong to the student (Meine Daten); results of other classes and legacy
     // results without a class ('') belong to no single class and stay.
     const done = db.run('DELETE FROM results WHERE app_id = ? AND user_id = ? AND class_id = ?', a.id, student.id, cls.id);
-    services.audit(req.user, 'appdaten_zurueckgesetzt', a.name, `${cls.name}: Ergebnisse dieser Klasse`);
+    services.audit(req.user, 'appdaten_zurueckgesetzt', a.name, `${cls.name}: Ergebnisse dieser Klasse`, { appId: a.id });
     flash(req, done.changes
       ? `${plural(done.changes, 'Ergebnis', 'Ergebnisse')} von ${student.name} in „${a.name}“ aus ${cls.name} gelöscht. Spielstände, Fortschritt und Erfolge bleiben.`
       : `${student.name} hatte in „${a.name}“ keine Ergebnisse aus ${cls.name}.`);

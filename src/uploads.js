@@ -405,13 +405,13 @@ function createUploads(ctx) {
    * replaces, or null. The admission ends when the response is finished or the
    * connection closes.
    */
-  function admitBody(req, res, { person, owner, name, into, old = null }) {
+  function admitBody(req, res, { person, owner, name, into, old = null, maxBytes = L.maxFileBytes, tooLarge = null, bucket = 'person', limit = L.parallelUploads, busy = null }) {
     const length = req.headers['content-length'];
     if (req.headers['transfer-encoding'] !== undefined || typeof length !== 'string' || !/^\d{1,15}$/.test(length)) {
       throw new HttpError(411, 'Beim Hochladen fehlt die Größe der Datei. Lade die Seite neu und versuche es noch einmal.');
     }
     const size = Number(length);
-    if (size > L.maxFileBytes) throw new HttpError(413, `"${name.slice(0, 80)}" ist zu groß (maximal ${mb(L.maxFileBytes)} MB pro Datei).`);
+    if (size > maxBytes) throw new HttpError(413, tooLarge || `"${name.slice(0, 80)}" ist zu groß (maximal ${mb(maxBytes)} MB pro Datei).`);
     if (into) {
       const busy = inFlight(`into:${into.key}`);
       const freed = old ? old.size : 0;
@@ -421,10 +421,12 @@ function createUploads(ctx) {
         throw new HttpError(413, 'Der Speicherplatz dieses Kontos ist voll. Lösche alte Versionen, um Platz zu schaffen.');
       }
     }
-    if (inFlight(`person:${person}`).n >= L.parallelUploads) {
-      throw new HttpError(429, `Du lädst gerade schon ${L.parallelUploads} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
+    // bucket 'person': every upload body of a person (folder, editor, ZIP, hub.files) shares
+    // L.parallelUploads places; other buckets (the SDK data API) have their own limit.
+    if (inFlight(`${bucket}:${person}`).n >= limit) {
+      throw new HttpError(429, busy || `Du lädst gerade schon ${limit} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
     }
-    const keys = into ? [`person:${person}`, `owner:${owner}`, `into:${into.key}`] : [`person:${person}`];
+    const keys = into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`];
     track(keys, 1, size);
     let held = true;
     const release = () => {
@@ -526,7 +528,7 @@ function createUploads(ctx) {
   return {
     addFile, addZip, addDirectory, receiveToTemp, collectGarbage, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes,
     putDraftFile, deleteDraftFile, draftFromVersion, deleteDraft, listDraftFiles, findDraftFile, isAllowedPath: (p) => Boolean(types[extOf(p)]),
-    admitVersionFile, admitDraftFile,
+    admitVersionFile, admitDraftFile, admitBody,
   };
 }
 

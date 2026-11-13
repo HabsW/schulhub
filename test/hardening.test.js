@@ -488,3 +488,101 @@ test('Konto löschen: Mitteilungen anderer, die die Person nennen, verschwinden 
     await h.stop();
   }
 });
+
+test('Konto löschen: gleichnamige Apps und Klassen anderer behalten ihre Einträge im Protokoll', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Adler', 'admin');
+    const lehrer = h.addUser('Herr Lehmann', 'teacher');
+    const schueler = h.addUser('Paul', 'student');
+    const [L, S] = await Promise.all([lehrer, schueler].map((u) => h.browser().login(u)));
+    await L.post('/klassen', { name: 'Klasse B' });
+    const cls = teacherClass(h, lehrer.id);
+    const own = await h.makeApp(L, 'Vokabeltest', { 'index.html': 'x' });
+    await L.post(`/klassen/${cls}/apps`, { app: own.id });
+    const teacherRows = () => h.db.all('SELECT action, target, detail FROM audit_log WHERE actor_id = ? ORDER BY rowid', lehrer.id);
+    const before = teacherRows();
+    assert.ok(before.some((r) => r.target === 'Vokabeltest') && before.some((r) => r.target === 'Klasse B' || r.detail === 'Klasse B'), 'precondition');
+    // The pupil names his own apps exactly like the teacher's app and class - then his account is deleted.
+    for (const name of ['Vokabeltest', 'Klasse B']) await h.makeApp(S, name, { 'index.html': 'x' });
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', schueler.id));
+    assert.deepEqual(teacherRows(), before, "the teacher's own entries stay exactly as they were");
+    assert.equal(
+      h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE actor_label = 'Gelöschtes Konto' AND (target IN ('Vokabeltest', 'Klasse B') OR detail IN ('Vokabeltest', 'Klasse B'))").n,
+      0, "the pupil's own entries lost his app names"
+    );
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Konto löschen: eine lange Vorgeschichte hält den Hub nicht auf', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Adler', 'admin');
+    const schueler = h.addUser('Paul', 'student');
+    // 3000 apps, each with its own name, created and deleted before - as his own entries record them.
+    const ins = 'INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail, app_id) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    h.db.tx(() => {
+      for (let i = 0; i < 3000; i++) {
+        const id = `alt${String(i).padStart(13, '0')}`;
+        h.db.run(ins, Date.now(), schueler.id, 'Paul (student)', 'app_erstellt', `Alte App ${i}`, '', id);
+        h.db.run(ins, Date.now(), schueler.id, 'Paul (student)', 'app_geloescht', `Alte App ${i}`, '', id);
+      }
+    });
+    const started = Date.now();
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', schueler.id));
+    const ms = Date.now() - started;
+    assert.ok(ms < 1500, `deleting the account took ${ms} ms - the Hub serves nobody meanwhile`);
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE target LIKE 'Alte App %'").n, 0, 'every old name is gone');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Konto löschen: auch Namen, die eine App nur zwischendurch hatte, verschwinden', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Adler', 'admin');
+    const marlene = h.addUser('Marlene', 'student');
+    const M = await h.browser().login(marlene);
+    const app = await h.makeApp(M, 'Neue App', { 'index.html': 'x' });
+    await M.page(`/apps/${app.id}`);
+    const rename = async (name) => assert.equal((await M.post(`/apps/${app.id}/bearbeiten`, { name, emoji: '🎮', color: '0' })).status, 303);
+    await rename('Marlenes Geheimnis');
+    // Under that name a new version is uploaded and published.
+    const v = await h.uploadFolder(M, app.id, { 'index.html': 'y' });
+    assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, { version: v })).status, 303);
+    await rename('Spiel');
+    await M.page('/apps');
+    assert.equal((await M.post(`/apps/${app.id}/loeschen`)).status, 303);
+    assert.ok(h.db.get("SELECT 1 AS ok FROM audit_log WHERE target = 'Marlenes Geheimnis'"), 'precondition: the log knew the name in between');
+    h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', marlene.id));
+    const left = allText(h.db).filter((t) => t.v.includes('Marlene'));
+    assert.deepEqual(left, [], 'no name the app ever had, and not hers either');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('App löschen: Mitteilungen anderer zu dieser App verschwinden mit ihr', async () => {
+  const h = await startHub();
+  try {
+    const lehrer = h.addUser('Herr Lehmann', 'teacher');
+    const mia = h.addUser('Mia', 'student');
+    const [L, M] = await Promise.all([lehrer, mia].map((u) => h.browser().login(u)));
+    await L.post('/klassen', { name: '7b' });
+    const cls = teacherClass(h, lehrer.id);
+    await M.post(`/beitreten/${joinCode(h, cls)}`);
+    const app = await h.makeApp(M, 'Mias Rätsel', { 'index.html': 'x' });
+    await M.page(`/apps/${app.id}`);
+    assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+    const aboutApp = () => h.db.get("SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND (instr(href, ?) > 0 OR text LIKE '%Mias Rätsel%')", lehrer.id, app.id).n;
+    assert.ok(aboutApp() > 0, 'precondition: the teacher was told about the submission');
+    await M.page('/apps');
+    assert.equal((await M.post(`/apps/${app.id}/loeschen`)).status, 303);
+    assert.equal(aboutApp(), 0, 'the notice about the deleted app is gone with it');
+  } finally {
+    await h.stop();
+  }
+});

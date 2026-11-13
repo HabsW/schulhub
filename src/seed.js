@@ -148,7 +148,7 @@ function seedDemo(ctx) {
   db.run('INSERT INTO comments (id, app_id, author_id, body, created_at) VALUES (?, ?, ?, ?, ?)', newId(), pixel.id, mia.id, 'Hallo Herr Lehmann, können wir mein Pixel-Studio in der Klasse benutzen?', now - 20 * MINUTE);
   // The admin releases Frau Yilmaz's flashcards for the whole school (as POST /apps/:id/schulweit does).
   db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', cards.id);
-  services.audit(admin, 'schulweit_freigegeben', cards.name);
+  services.audit(admin, 'schulweit_freigegeben', cards.name, '', { appId: cards.id });
 
   // ----- per-class settings, checked against the app's manifest like the settings form does -----
   function classSettings(app, input, when) {
@@ -320,7 +320,7 @@ function seedDemo(ctx) {
   );
   services.notify([mia.id, ben.id], 'aufgabe', `Neue Aufgabe in ${cls.name}: „Vokabeln Unit 3 üben“`, `/aufgaben/${assignmentId}`);
   session(vocab, mia, now - 25 * MINUTE); // opened, not finished yet
-  services.audit(teacher, 'aufgabe_erstellt', 'Vokabeln Unit 3 üben', cls.name);
+  services.audit(teacher, 'aufgabe_erstellt', 'Vokabeln Unit 3 üben', cls.name, { appId: vocab.id });
 
   // ----- feedback from Herr Lehmann to Mia -----
   db.run(

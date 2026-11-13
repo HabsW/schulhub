@@ -462,3 +462,90 @@ test('Eingaben: unsichtbare Richtungszeichen verschwinden aus Namen und Texten �
     await h.stop();
   }
 });
+
+test('Plätze pro Person gelten auf allen Wegen: Dateien aus Apps, Daten-Schnittstelle und ZIP', async () => {
+  const x = await startHub({ limits: { parallelUploads: 2, parallelApiCalls: 2 } });
+  const held = [];
+  /** A request whose body is still on its way: `declared` bytes announced, 1 KB sent. */
+  const hold = (host, method, path, headers) => {
+    const req = http.request({ host: '127.0.0.1', port: x.config.publicPort, method, path, headers: { host, 'content-length': 64 * 1024, ...headers } });
+    req.on('error', () => {});
+    req.on('response', (res) => res.resume());
+    req.write(Buffer.alloc(1024, 0x41));
+    held.push(req);
+    return req;
+  };
+  /** Ask again and again until the answer has `status` (the server frees a place when a connection closes). */
+  const until = async (ask, status) => {
+    let last;
+    for (let i = 0; i < 80; i++) {
+      last = await ask();
+      if (last.status === status) return last;
+      await sleep(25);
+    }
+    return assert.fail(`never got ${status}, last ${last && last.status}`);
+  };
+  try {
+    const t = x.addUser('Frau Yilmaz', 'teacher');
+    const s = x.addUser('Paul', 'student');
+    const [T, S] = await Promise.all([t, s].map((u) => x.browser().login(u)));
+    const app = await x.makeApp(T, 'Für alle', { 'index.html': 'x' });
+    x.db.run('UPDATE apps SET schoolwide_version_id = published_version_id WHERE id = ?', app.id);
+    await S.page('/start');
+    const sdk = (await x.token(S, app)).token;
+    const appHost = x.appHost(app);
+    const bearer = { authorization: `Bearer ${sdk}` };
+    const filePut = () => S.raw('PUT', '/_hub/files/notiz.txt', { host: appHost, headers: { ...bearer, 'content-type': 'text/plain' }, body: 'hallo' });
+    const holdFile = () => hold(appHost, 'PUT', '/_hub/files/gross.txt', { ...bearer, 'content-type': 'text/plain' });
+
+    // hub.files: two bodies on their way, the third is refused unread - and a closed one frees its place.
+    const f1 = holdFile();
+    holdFile();
+    const busy = await until(filePut, 429);
+    assert.equal(busy.json().error.code, 'rate_limited');
+    assert.equal(busy.headers.connection, 'close', 'refused without reading');
+    f1.destroy();
+    assert.equal((await until(filePut, 200)).json().ok, true);
+
+    // ZIP uploads share the same places.
+    const own = await x.makeApp(S, 'Eigene', { 'index.html': 'x' });
+    await S.page(`/apps/${own.id}`);
+    const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await S.page('/start')).text)[1];
+    const cookie = [...S.jar].map(([k, v]) => `${k}=${v}`).join('; ');
+    for (const r of held) r.destroy();
+    held.length = 0;
+    await until(filePut, 200);
+    const zipPath = `/apps/${own.id}/versionen/zip`;
+    hold(x.config.hubHost, 'POST', zipPath, { cookie, 'x-csrf-token': csrf, 'content-type': 'application/zip', accept: 'application/json' });
+    hold(x.config.hubHost, 'POST', zipPath, { cookie, 'x-csrf-token': csrf, 'content-type': 'application/zip', accept: 'application/json' });
+    const zipBusy = await until(() => S.send('POST', zipPath, makeZip([{ name: 'index.html', data: 'z' }]), 'application/zip'), 429);
+    assert.match(zipBusy.text, /gleichzeitig/);
+    assert.equal((await filePut()).status, 429, 'a file from an app waits for the same places');
+    for (const r of held) r.destroy();
+    held.length = 0;
+    await until(() => S.send('POST', zipPath, makeZip([{ name: 'index.html', data: 'z' }]), 'application/zip'), 200);
+
+    // The data API has places of its own: two requests on their way, the third waits.
+    hold(appHost, 'POST', '/_hub/api', { ...bearer, 'content-type': 'application/json' });
+    hold(appHost, 'POST', '/_hub/api', { ...bearer, 'content-type': 'application/json' });
+    const apiBusy = await until(() => S.api(app, sdk, 'save.keys'), 429);
+    assert.equal(apiBusy.json().error.code, 'rate_limited');
+    assert.equal((await filePut()).status, 200, 'uploads are not affected by API requests');
+    // Another person is not affected at all.
+    const other = x.addUser('Mia', 'student');
+    const O = await x.browser().login(other);
+    await O.page('/start');
+    assert.equal((await O.api(app, (await x.token(O, app)).token, 'save.keys')).status, 200);
+    // A body without a declared size is refused.
+    const chunked = await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port: x.config.publicPort, method: 'PUT', path: '/_hub/files/x.txt', headers: { host: appHost, ...bearer, 'content-type': 'text/plain' } });
+      req.on('response', (res) => { res.resume(); resolve(res.statusCode); });
+      req.on('error', () => resolve(0));
+      req.write('abc');
+    });
+    assert.equal(chunked, 411);
+  } finally {
+    for (const r of held) r.destroy();
+    await x.stop();
+  }
+});

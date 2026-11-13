@@ -391,6 +391,15 @@ const MIGRATIONS = [
   -- From now on NULL means "recorded without any class context" and never shows in a class.
   UPDATE results SET class_id = '' WHERE class_id IS NULL;
   `,
+  // ---------------------------------------------------------------- 3 -> 4
+  `
+  -- The app an audit entry is ABOUT (its target may be the app's name at that moment), so that
+  -- deleting an account removes the names of the person's apps by id - never by matching names
+  -- across other people's entries.
+  ALTER TABLE audit_log ADD COLUMN app_id TEXT;
+  CREATE INDEX audit_app ON audit_log(app_id);
+  CREATE INDEX audit_actor ON audit_log(actor_id);
+  `,
 ];
 
 const SCHEMA_VERSION = MIGRATIONS.length;

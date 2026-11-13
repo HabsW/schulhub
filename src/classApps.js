@@ -51,7 +51,7 @@ function createClassApps(ctx) {
              requested_version_id = NULL, request_state = NULL, decided_by = excluded.decided_by, decided_at = excluded.decided_at`,
           cls.id, app.id, version, actor.id, actor.id, now, now
         );
-        services().audit(actor, 'app_zugewiesen', app.name, cls.name);
+        services().audit(actor, 'app_zugewiesen', app.name, cls.name, { appId: app.id });
       });
       return 'approved';
     }
@@ -79,7 +79,7 @@ function createClassApps(ctx) {
         db.run("INSERT INTO class_apps (class_id, app_id, status, requested_version_id, request_state, added_by, created_at) VALUES (?, ?, 'pending', ?, 'waiting', ?, ?)", cls.id, app.id, v, actor.id, Date.now());
       }
       timeline(actor, app, cls, 'submitted', v);
-      services().audit(actor, 'app_eingereicht', app.name, `${cls.name}, Version ${versionNumber(v)}`);
+      services().audit(actor, 'app_eingereicht', app.name, `${cls.name}, Version ${versionNumber(v)}`, { appId: app.id });
       services().notify(teachersOf(cls.id), 'pruefen', `„${app.name}“ (Version ${versionNumber(v)}) wartet auf deine Prüfung in ${cls.name}.`, `/pruefen/${cls.id}/${app.id}`);
     });
   }
@@ -97,7 +97,7 @@ function createClassApps(ctx) {
         versionId, actor.id, Date.now(), cls.id, app.id
       );
       timeline(actor, app, cls, 'approved', versionId, cleanText(note, 2000, { multiline: true }));
-      services().audit(actor, 'app_freigegeben', app.name, `${cls.name}, Version ${versionNumber(versionId)}`);
+      services().audit(actor, 'app_freigegeben', app.name, `${cls.name}, Version ${versionNumber(versionId)}`, { appId: app.id });
       if (app.owner_id !== actor.id) services().notify([app.owner_id], 'freigegeben', `„${app.name}“ ist jetzt in ${cls.name} freigegeben.`, `/apps/${app.id}`);
     });
   }
@@ -121,7 +121,7 @@ function createClassApps(ctx) {
         actor.id, Date.now(), cls.id, app.id
       );
       timeline(actor, app, cls, 'returned', versionId, text);
-      services().audit(actor, 'app_zurueckgegeben', app.name, `${cls.name}, Version ${versionNumber(versionId)}`);
+      services().audit(actor, 'app_zurueckgegeben', app.name, `${cls.name}, Version ${versionNumber(versionId)}`, { appId: app.id });
       services().notify([app.owner_id], 'zurueckgegeben', `„${app.name}“ wurde in ${cls.name} zurückgegeben. Schau dir an, was noch fehlt.`, `/apps/${app.id}`);
     });
   }
@@ -138,7 +138,7 @@ function createClassApps(ctx) {
       } else {
         db.run('DELETE FROM class_apps WHERE class_id = ? AND app_id = ?', cls.id, app.id);
       }
-      services().audit(actor, 'einreichung_zurueckgezogen', app.name, cls.name);
+      services().audit(actor, 'einreichung_zurueckgezogen', app.name, cls.name, { appId: app.id });
     });
   }
 
@@ -156,7 +156,7 @@ function createClassApps(ctx) {
       } else {
         db.run('DELETE FROM class_apps WHERE class_id = ? AND app_id = ?', cls.id, app.id);
       }
-      services().audit(actor, 'app_aus_klasse_entfernt', app.name, cls.name);
+      services().audit(actor, 'app_aus_klasse_entfernt', app.name, cls.name, { appId: app.id });
     });
   }
 
@@ -165,7 +165,7 @@ function createClassApps(ctx) {
     const row = get(cls.id, app.id);
     if (!row || row.status !== 'removed' || !row.version_id) throw bad('Diese App kann nicht zurückgeholt werden.');
     db.run("UPDATE class_apps SET status = 'approved', decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?", actor.id, Date.now(), cls.id, app.id);
-    services().audit(actor, 'app_zurueckgeholt', app.name, cls.name);
+    services().audit(actor, 'app_zurueckgeholt', app.name, cls.name, { appId: app.id });
   }
 
   /**

@@ -137,7 +137,7 @@ module.exports = (app, ctx) => {
       'INSERT INTO assignments (id, class_id, app_id, title, note, starts_at, due_at, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id, cls.id, target.id, f.title, f.note, f.starts, f.due, req.user.id, now
     );
-    services.audit(req.user, 'aufgabe_erstellt', f.title, cls.name);
+    services.audit(req.user, 'aufgabe_erstellt', f.title, cls.name, { appId: target.id });
     // A planned assignment stays hidden from students until its start (access.canSeeAssignment):
     // no notice now - from the start it is on their start page.
     if (f.starts > now) {
@@ -330,7 +330,7 @@ module.exports = (app, ctx) => {
     const { values: f, errors } = readAssignment(req.body, x.app_name, x.created_at);
     if (Object.keys(errors).length) return assignmentErrors(req, res, `/aufgaben/${x.id}/bearbeiten`, errors);
     db.run('UPDATE assignments SET title = ?, note = ?, starts_at = ?, due_at = ? WHERE id = ?', f.title, f.note, f.starts, f.due, x.id);
-    services.audit(req.user, 'aufgabe_geaendert', f.title, x.class_name);
+    services.audit(req.user, 'aufgabe_geaendert', f.title, x.class_name, { appId: x.app_id });
     // A planned assignment that now starts at once is new for the students: they are told now.
     // One moved into the future is hidden again - so is the notice they got about it.
     const now = Date.now();
@@ -343,7 +343,7 @@ module.exports = (app, ctx) => {
   app.post('/aufgaben/:id/loeschen', (req, res) => {
     const x = manageAssignment(req);
     db.run('DELETE FROM assignments WHERE id = ?', x.id);
-    services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name);
+    services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
     flash(req, `Die Aufgabe „${x.title}“ ist gelöscht.`);
     res.redirect(303, `/klassen/${x.class_id}/aufgaben`);
   });
@@ -628,7 +628,7 @@ module.exports = (app, ctx) => {
        ON CONFLICT (class_id, app_id) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
       cls.id, a.id, JSON.stringify(values), req.user.id, Date.now()
     );
-    services.audit(req.user, 'app_einstellungen_geaendert', a.name, cls.name);
+    services.audit(req.user, 'app_einstellungen_geaendert', a.name, cls.name, { appId: a.id });
     flash(req, 'Gespeichert. Die App nutzt die neuen Einstellungen beim nächsten Öffnen.');
     res.redirect(303, here);
   });
@@ -636,7 +636,7 @@ module.exports = (app, ctx) => {
   app.post('/klassen/:id/apps/:aid/einstellungen/zuruecksetzen', (req, res) => {
     const { cls, a } = loadAppSettings(req);
     const done = db.run('DELETE FROM class_app_settings WHERE class_id = ? AND app_id = ?', cls.id, a.id);
-    if (done.changes) services.audit(req.user, 'app_einstellungen_zurueckgesetzt', a.name, cls.name);
+    if (done.changes) services.audit(req.user, 'app_einstellungen_zurueckgesetzt', a.name, cls.name, { appId: a.id });
     flash(req, 'Die Einstellungen stehen wieder auf den Standardwerten der App.');
     res.redirect(303, `/klassen/${cls.id}/apps/${a.id}/einstellungen`);
   });

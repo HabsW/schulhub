@@ -16,8 +16,8 @@ const DAY = 86_400_000;
  */
 const ID_COLUMNS_SET_NULL = [['join_codes', 'created_by'], ['class_apps', 'added_by'], ['class_apps', 'decided_by']];
 const ID_COLUMNS_HANDLED = ['sessions.user_id', 'audit_log.actor_id', 'audit_log.subject_id', 'notices.subject_id'];
-/** Audit actions whose target is a class or an account - never an app, even one with the same name. */
-const NOT_APP_TARGET = "action NOT LIKE 'klasse_%' AND action NOT LIKE 'konto_%' AND action NOT LIKE 'beitrittscode_%' AND action NOT LIKE 'einladung_%' AND action NOT LIKE 'lehrkraft_%' AND action NOT IN ('mitglied_entfernt','rolle_geaendert')";
+/** Audit actions about an app (for entries written before they carried the app's id, schema version < 4). */
+const APP_ACTIONS = "(action LIKE 'app%' OR action LIKE 'version%' OR action LIKE 'schulweit%' OR action LIKE 'upload%' OR action LIKE 'aufgabe%' OR action IN ('veroeffentlicht', 'einreichung_zurueckgezogen', 'kommentar_geloescht', 'ergebnisse_exportiert'))";
 
 function createServices(ctx) {
   const { db, config, uploads } = ctx;
@@ -27,10 +27,11 @@ function createServices(ctx) {
    * Record what happened. `subjectId`: the person the entry is ABOUT (e.g. whose role changed),
    * so that deleting that account can anonymise the entry.
    */
-  function audit(actor, action, target = '', detail = '', { subjectId = null } = {}) {
+  // subjectId: the person an entry is about; appId: the app it is about (both for account deletion).
+  function audit(actor, action, target = '', detail = '', { subjectId = null, appId = null } = {}) {
     db.run(
-      'INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail, subject_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      Date.now(), actor ? actor.id : null, actor ? `${actor.name} (${actor.role})` : 'System', action, String(target).slice(0, 200), String(detail).slice(0, 500), subjectId
+      'INSERT INTO audit_log (at, actor_id, actor_label, action, target, detail, subject_id, app_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      Date.now(), actor ? actor.id : null, actor ? `${actor.name} (${actor.role})` : 'System', action, String(target).slice(0, 200), String(detail).slice(0, 500), subjectId, appId
     );
   }
   function pruneAudit() {
@@ -140,7 +141,7 @@ function createServices(ctx) {
       'INSERT INTO apps (id, owner_id, name, description, emoji, color, origin_key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       id, user.id, f.name, f.description, f.emoji, f.color, originKey, Date.now(), Date.now()
     );
-    audit(user, 'app_erstellt', f.name);
+    audit(user, 'app_erstellt', f.name, '', { appId: id });
     return id;
   }
 
@@ -178,7 +179,7 @@ function createServices(ctx) {
       // Catalogue data from the manifest fills fields the author has not set yet.
       if (manifest && manifest.category) db.run("UPDATE apps SET category = ? WHERE id = ? AND category = ''", manifest.category, app.id);
       if (manifest && manifest.grades) db.run('UPDATE apps SET grade_min = ?, grade_max = ? WHERE id = ? AND grade_min IS NULL', manifest.grades[0], manifest.grades[1], app.id);
-      audit(actor, 'version_hochgeladen', app.name, `Version ${version.number}, ${stats.files} Dateien`);
+      audit(actor, 'version_hochgeladen', app.name, `Version ${version.number}, ${stats.files} Dateien`, { appId: app.id });
     });
     return report;
   }
@@ -214,7 +215,7 @@ function createServices(ctx) {
   function deleteVersion(actor, app, version) {
     const shas = db.tx(() => deleteVersionRows(version));
     uploads.collectGarbage(shas);
-    if (actor) audit(actor, 'version_geloescht', app.name, `Version ${version.number}`);
+    if (actor) audit(actor, 'version_geloescht', app.name, `Version ${version.number}`, { appId: app.id });
   }
 
   /**
@@ -234,7 +235,7 @@ function createServices(ctx) {
         if (actor.role === 'admin') db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', version.id, app.id);
         else db.run('UPDATE apps SET schoolwide_requested_version_id = ? WHERE id = ?', version.id, app.id);
       }
-      audit(actor, 'veroeffentlicht', app.name, `Version ${version.number}`);
+      audit(actor, 'veroeffentlicht', app.name, `Version ${version.number}`, { appId: app.id });
     });
   }
 
@@ -248,8 +249,11 @@ function createServices(ctx) {
   function deleteApp(actor, app) {
     const { code, files } = db.tx(() => {
       const found = { code: codeShas([app.id]), files: ctx.userFiles.shasOfApp(app.id) };
-      db.run('DELETE FROM apps WHERE id = ?', app.id); // cascades: versions, files, drafts, saves, scores, results, progress, achievements, user files, comments …
-      audit(actor, 'app_geloescht', app.name);
+      const assignments = db.all('SELECT id FROM assignments WHERE app_id = ?', app.id);
+      db.run('DELETE FROM apps WHERE id = ?', app.id); // cascades: versions, files, drafts, saves, scores, results, progress, achievements, user files, comments, assignments …
+      // Notices pointing at the app, its review or its assignments would lead nowhere and may quote its name.
+      deleteAppNotices(app.id, assignments.map((x) => x.id));
+      audit(actor, 'app_geloescht', app.name, '', { appId: app.id });
       return found;
     });
     uploads.collectGarbage(code);
@@ -293,6 +297,15 @@ function createServices(ctx) {
     }
   }
 
+  /**
+   * Other people's in-Hub notices about one app: pointing at the app, at its review, or at one of
+   * its assignments. Ids are fixed-length random strings, so a prefix of the full id is exact.
+   */
+  function deleteAppNotices(appId, assignmentIds) {
+    db.run("DELETE FROM notices WHERE instr(href, ?) = 1 OR (href LIKE '/pruefen/%' AND instr(href, ?) > 0)", `/apps/${appId}`, `/${appId}`);
+    for (const id of assignmentIds) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
+  }
+
   /** Delete an account and everything that belongs to it. */
   function deleteUser(actor, user) {
     const ownApps = db.all('SELECT id FROM apps WHERE owner_id = ?', user.id).map((r) => r.id);
@@ -311,12 +324,23 @@ function createServices(ctx) {
       }
       db.run('DELETE FROM sessions WHERE user_id = ?', user.id);
       // Their apps go too, and with them every trace of their names (app names are often personal,
-      // e.g. "Marlenes Spiel"): today's names, and earlier ones from the person's own audit entries
-      // (only an app's owner creates or submits it). Read before the entries lose the person's id.
+      // e.g. "Marlenes Spiel"). Audit entries about an app carry its id: the person's apps are the
+      // ones they own now and the ones they ever created (their own entries say so - read before
+      // those entries lose the person's id). Never by name: other people's entries about their own
+      // apps or classes with the same name stay as they are, and a long history costs one statement.
       const apps = db.all('SELECT id, name FROM apps WHERE owner_id = ?', user.id);
-      const appNames = new Set(apps.map((a) => a.name));
-      for (const r of db.all("SELECT DISTINCT target FROM audit_log WHERE actor_id = ? AND action IN ('app_erstellt','app_aus_vorlage','app_eingereicht') AND target <> ''", user.id)) appNames.add(r.target);
-      const assignmentsOnApps = db.all('SELECT x.id, x.title FROM assignments x JOIN apps a ON a.id = x.app_id WHERE a.owner_id = ?', user.id);
+      const assignmentsOnApps = db.all('SELECT x.id, x.app_id, x.title FROM assignments x JOIN apps a ON a.id = x.app_id WHERE a.owner_id = ?', user.id);
+      db.run(
+        `WITH mine(id) AS (
+           SELECT id FROM apps WHERE owner_id = ?
+           UNION SELECT app_id FROM audit_log WHERE actor_id = ? AND app_id IS NOT NULL AND action IN ('app_erstellt', 'app_aus_vorlage'))
+         UPDATE audit_log SET target = CASE WHEN action LIKE 'aufgabe%' THEN 'Gelöschte Aufgabe' ELSE 'Gelöschte App' END,
+                              detail = CASE WHEN actor_id = ? THEN '' ELSE detail END
+          WHERE app_id IN (SELECT id FROM mine)`,
+        user.id, user.id, user.id
+      );
+      // Entries written before entries carried their app (schema version < 4): the person's own app entries.
+      db.run(`UPDATE audit_log SET target = 'Gelöschte App', detail = '' WHERE actor_id = ? AND app_id IS NULL AND ${APP_ACTIONS}`, user.id);
       db.run("UPDATE audit_log SET actor_id = NULL, actor_label = 'Gelöschtes Konto' WHERE actor_id = ?", user.id);
       // Entries ABOUT the person keep what happened, but not who it was.
       db.run("UPDATE audit_log SET target = 'Gelöschtes Konto', detail = '', subject_id = NULL WHERE subject_id = ?", user.id);
@@ -332,11 +356,11 @@ function createServices(ctx) {
       for (const [table, col] of ID_COLUMNS_SET_NULL) db.run(`UPDATE ${table} SET ${col} = NULL WHERE ${col} = ?`, user.id);
 
       // Other people's notices about their apps: pointing at an app, its review, or an assignment
-      // built on it (those assignments go with the app) ...
-      for (const a of apps) db.run('DELETE FROM notices WHERE href LIKE ? OR href LIKE ?', `/apps/${a.id}%`, `/pruefen/%/${a.id}%`);
-      for (const x of assignmentsOnApps) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
+      // built on it (those assignments go with the app). Apps deleted earlier took theirs along
+      // (deleteApp), so today's apps are all that is left - at most limits.maxAppsPerUser.
+      for (const a of apps) deleteAppNotices(a.id, assignmentsOnApps.filter((x) => x.app_id === a.id).map((x) => x.id));
       // ... and feedback about such an app or assignment, which quoted its name to the student.
-      const quoted = [...appNames, ...assignmentsOnApps.map((x) => x.title)].map((n) => `„${n}“`);
+      const quoted = [...apps.map((a) => a.name), ...assignmentsOnApps.map((x) => x.title)].map((n) => `„${n}“`);
       const told = db.all(
         `SELECT DISTINCT f.student_id FROM feedback f
           WHERE f.app_id IN (SELECT id FROM apps WHERE owner_id = ?)
@@ -345,20 +369,8 @@ function createServices(ctx) {
       );
       for (const { student_id: sid } of told) for (const q of quoted) db.run("DELETE FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND instr(text, ?) > 0", sid, q);
 
-      // The audit log keeps what happened with their apps, not their names - whoever did it.
-      for (const name of appNames) {
-        // An assignment is called like its app unless the teacher chose a title.
-        db.run("UPDATE audit_log SET target = 'Gelöschte Aufgabe' WHERE target = ? AND action LIKE 'aufgabe_%'", name);
-        // A refused upload's detail may quote the person's own file names.
-        db.run("UPDATE audit_log SET detail = '' WHERE target = ? AND action = 'upload_abgelehnt'", name);
-        // Every action whose target can be an app (not a class or an account, which a name equal
-        // to the app's must not hit), and any detail that is or quotes the name.
-        db.run(`UPDATE audit_log SET target = 'Gelöschte App' WHERE target = ? AND ${NOT_APP_TARGET}`, name);
-        db.run("UPDATE audit_log SET detail = 'Gelöschte App' WHERE detail = ?", name);
-        db.run("UPDATE audit_log SET detail = replace(detail, ?, '„Gelöschte App“') WHERE instr(detail, ?) > 0", `„${name}“`, `„${name}“`);
-      }
-      // A one-time message still waiting in someone else's session may name them or their app.
-      scrubSessions([user.name, user.email, user.id, ...appNames]);
+      // A one-time message still waiting in someone else's session may name them or one of their apps.
+      scrubSessions([user.name, user.email, user.id, ...apps.map((a) => a.name)]);
 
       // cascades: memberships, apps (+ versions, drafts, assignments on them), saves, scores, results,
       // progress, achievements, files, favourites, feedback to them, notices, comments
