@@ -273,7 +273,7 @@ test('Testmodus hört nur auf dem eigenen Rechner (127.0.0.1, ::1) – auch wenn
     // In real mode LISTEN_HOST decides (shows the variable is read at all).
     const real = {
       BASE_URL: 'https://hub.schule.example', SESSION_SECRET: 'k'.repeat(48), TENANT_ID: TENANT, CLIENT_ID: 'client-schulhub', CLIENT_SECRET: 'geheim',
-      STUDENT_EMAIL_DOMAINS: 'schueler.schule.example', APPS_DOMAIN: 'apps.schule.example',
+      STUDENT_EMAIL_DOMAINS: 'schueler.schule.example', APPS_DOMAIN: 'schule-apps.example',
     };
     assert.deepEqual(hosts(real, false), ['0.0.0.0']);
     assert.deepEqual(hosts({ ...real, LISTEN_HOST: '10.0.0.5' }, false), ['10.0.0.5']);
