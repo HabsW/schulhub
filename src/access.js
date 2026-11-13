@@ -150,9 +150,15 @@ function createAccess(db) {
   function canSeeStudentData(user, classId, appId, studentId) {
     if (!canManageClass(user, classId)) return false;
     const inClass = db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId);
-    const appInClass = db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId);
-    return Boolean(inClass && appInClass);
+    return Boolean(inClass && everApprovedIn(classId, appId));
   }
+  /**
+   * The app was approved in this class at some point: it is approved, it was removed - or it was
+   * submitted again after that and waits (or was given back). The row keeps the version the class
+   * played (version_id is only ever set by an approval), and its results stay readable.
+   */
+  const everApprovedIn = (classId, appId) =>
+    Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND (status IN ('approved','removed') OR version_id IS NOT NULL)", classId, appId));
   const isStudentOf = (classId, studentId) => Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId));
   const appApprovedIn = (classId, appId) => Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status = 'approved'", classId, appId));
 
@@ -259,10 +265,10 @@ function createAccess(db) {
   }
   /**
    * Results of one app in one class (lists, overview, CSV): the class's teachers
-   * (and the admin), while the app is approved there - or after it was removed.
+   * (and the admin), while the app is approved there - or after it was removed,
+   * also while it waits there again (everApprovedIn).
    */
-  const canSeeClassResults = (user, classId, appId) =>
-    canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
+  const canSeeClassResults = (user, classId, appId) => canManageClass(user, classId) && everApprovedIn(classId, appId);
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
   /**
@@ -331,7 +337,7 @@ function createAccess(db) {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
     canManageApp, canShareApp, isSharedWith, canReviewApp, canSeeVersion, reviewClasses, addToClassMode, resolvePlay,
-    canSeeStudentData, isStudentOf, appApprovedIn,
+    canSeeStudentData, isStudentOf, appApprovedIn, everApprovedIn,
     canAssign, canSeeAssignment, canManageAssignment, canMarkDone,
     canGiveFeedback, canReadFeedback, canDeleteFeedback,
     canEditAppSettings,

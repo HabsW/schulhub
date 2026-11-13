@@ -81,3 +81,46 @@ test('Start: Erfolge zeigen den geprüften Titel – nicht den einer neuen, noch
   const later = (await LE.get('/start')).text;
   assert.ok(!later.includes('Lea ist doof') && later.includes('Erste Runde'), 'after archiving too');
 });
+
+// ------------------------------------------------------------------ removed and resubmitted
+
+test('Schüler-App herausgenommen und neu eingereicht: Ergebnisse und Rückmeldungen zur Aufgabe bleiben für die Lehrkraft', async () => {
+  const { user: lehrer, b: L } = await person('Frau Klar', 'teacher');
+  const { b: M } = await person('Mia Autorin', 'student');
+  const { user: ben, b: B } = await person('Ben Spieler', 'student');
+  const cls = await newClass(L, '7c');
+  for (const b of [M, B]) assert.equal((await b.post(`/beitreten/${joinCode(cls)}`)).status, 303);
+  const app = await h.makeApp(M, 'Mias Quiz', { 'index.html': 'x' });
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: app.published_version_id })).status, 303);
+  const x = idOf(await L.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Mias Quiz spielen' }));
+  const bt = await h.token(B, app, cls);
+  assert.equal((await B.api(app, bt.token, 'results.add', { title: 'BEN-ERGEBNIS', score: 3, maxScore: 4 })).json().ok, true);
+
+  // Mia takes her app out of the class: "Ergebnisse bleiben für die Lehrkraft lesbar".
+  assert.equal((await M.post(`/apps/${app.id}/aus-klasse`, { klasse: cls })).status, 303);
+  const results = `/klassen/${cls}/apps/${app.id}/ergebnisse`;
+  assert.equal((await L.get(results)).status, 200, 'precondition: removed, results readable');
+  // ... and submits it again. Until the teacher decides, the old results must stay readable.
+  assert.equal((await M.post(`/apps/${app.id}/einreichen`, { klasse: cls })).status, 303);
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cls, app.id).status, 'pending');
+  assert.equal((await L.get(results)).status, 200, 'the results list');
+  assert.ok((await L.get(`${results}/${ben.id}`)).text.includes('BEN-ERGEBNIS'), "Ben's result in this class");
+  // The feedback form on the assignment page still works.
+  await L.page(`/aufgaben/${x}`);
+  const fb = await L.post(`/klassen/${cls}/rueckmeldungen`, { schueler: ben.id, text: 'Gut gemacht!', app: app.id, aufgabe: x, zurueck: `/aufgaben/${x}` });
+  assert.equal(fb.status, 303, 'feedback on the assignment');
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM feedback WHERE assignment_id = ? AND author_id = ?', x, lehrer.id).n, 1);
+  // Given back this time: still the class's old results.
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/zurueckgeben`, { version: app.published_version_id, grund: 'Bitte mit Anleitung.' })).status, 303);
+  assert.equal(h.db.get('SELECT status FROM class_apps WHERE class_id = ? AND app_id = ?', cls, app.id).status, 'rejected');
+  assert.equal((await L.get(results)).status, 200, 'after giving it back');
+
+  // Never approved in the class (only submitted): nothing to read, nothing to link - as before.
+  const fresh = await h.makeApp(B, 'Bens Entwurf', { 'index.html': 'x' });
+  assert.equal((await B.post(`/apps/${fresh.id}/einreichen`, { klasse: cls })).status, 303);
+  assert.equal((await L.get(`/klassen/${cls}/apps/${fresh.id}/ergebnisse`)).status, 404);
+  assert.equal((await L.get(`/klassen/${cls}/apps/${fresh.id}/ergebnisse/${ben.id}`)).status, 404);
+  assert.equal((await L.post(`/klassen/${cls}/rueckmeldungen`, { schueler: ben.id, text: 'zu früh', app: fresh.id })).status, 404);
+  assert.equal(h.db.get("SELECT COUNT(*) AS n FROM feedback WHERE body = 'zu früh'").n, 0);
+});

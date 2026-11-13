@@ -390,7 +390,7 @@ module.exports = (app, ctx) => {
     // The feedback (and its notice) would show the title of an assignment the student may not see yet.
     if (x && x.starts_at > Date.now()) throw bad('Diese Aufgabe hat noch nicht begonnen, die Schüler/innen sehen sie noch nicht. Schreib die Rückmeldung nach dem Start – oder ohne Bezug zur Aufgabe.');
     const appId = typeof req.body.app === 'string' && req.body.app ? req.body.app : x ? x.app_id : null;
-    if (appId && !db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", cls.id, appId)) throw deny();
+    if (appId && !access.everApprovedIn(cls.id, appId)) throw deny();
     const student = db.get('SELECT id, name FROM users WHERE id = ?', studentId);
     const appName = appId ? db.get('SELECT name FROM apps WHERE id = ?', appId).name : '';
     db.run(
