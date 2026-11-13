@@ -105,3 +105,30 @@ test('Schulweit freigeben: gilt nur für die Version, die die Verwaltung vor sic
   assert.equal(appRow(app.id).schoolwide_version_id, appRow(app.id).published_version_id);
   assert.notEqual(appRow(app.id).schoolwide_version_id, v1);
 });
+
+test('Zurück zur alten Version: die neuere wartet danach nirgends mehr auf eine Freigabe', async () => {
+  const app = await approved(M, uniq('Rückkehr'), { 'index.html': '<h1>v1</h1>' });
+  const v1 = app.published_version_id;
+  h.db.run('UPDATE apps SET schoolwide_version_id = ? WHERE id = ?', v1, app.id); // also released school-wide
+  const v2 = await publish(M, app.id, { 'index.html': '<h1>v2 kaputt</h1>' });
+  assert.deepEqual([classApp(cls, app.id).requested_version_id, appRow(app.id).schoolwide_requested_version_id], [v2, v2]);
+
+  // Version 2 is broken: Mia publishes Version 1 again ("Ältere Version 1 veröffentlichen").
+  const page = (await M.page(`/apps/${app.id}`)).text;
+  const back = formsTo(page, `/apps/${app.id}/veroeffentlichen`).find((f) => f.version === v1);
+  assert.ok(back, 'the page offers to publish Version 1 again');
+  // The question before it says what happens - not that only Mia could open it.
+  const ask = new RegExp(`<form method="post" action="/apps/${app.id}/veroeffentlichen" class="inline" data-confirm="([^"]*)"[^>]*>[^]*?name="version" value="${v1}"`).exec(page);
+  assert.ok(ask && !ask[1].includes('Öffnen kann sie dann nur du'), `the confirmation says: ${ask && ask[1]}`);
+  assert.ok(ask[1].includes('In 7b läuft sie schon') && ask[1].includes('Für die ganze Schule gilt sie schon'), ask[1]);
+  assert.equal((await M.post(`/apps/${app.id}/veroeffentlichen`, back)).status, 303);
+  assert.equal(appRow(app.id).published_version_id, v1);
+
+  // Nothing waits any more: not in the class, not for the school.
+  const row = classApp(cls, app.id);
+  assert.deepEqual([row.status, row.version_id, row.request_state, row.requested_version_id], ['approved', v1, null, null], 'Version 2 still waits in the class');
+  assert.equal(appRow(app.id).schoolwide_requested_version_id, null, 'Version 2 still waits for the school');
+  assert.ok(!(await L.get('/pruefen')).text.includes(`href="/pruefen/${cls}/${app.id}"`), 'the teacher is still asked to review Version 2');
+  assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: v2 })).status, 404, 'the teacher could still approve Version 2');
+  assert.equal(classApp(cls, app.id).version_id, v1, 'the class plays Version 1, which Mia publishes');
+});

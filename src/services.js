@@ -237,6 +237,9 @@ function createServices(ctx) {
       if (app.schoolwide_version_id && app.schoolwide_version_id !== version.id) {
         if (actor.role === 'admin') db.run('UPDATE apps SET schoolwide_version_id = ?, schoolwide_requested_version_id = NULL WHERE id = ?', version.id, app.id);
         else db.run('UPDATE apps SET schoolwide_requested_version_id = ? WHERE id = ?', version.id, app.id);
+      } else if (app.schoolwide_version_id) {
+        // Back to the released version: a newer one no longer waits for the admin.
+        db.run('UPDATE apps SET schoolwide_requested_version_id = NULL WHERE id = ?', app.id);
       }
       audit(actor, 'veroeffentlicht', app.name, `Version ${version.number}`, { appId: app.id });
     });

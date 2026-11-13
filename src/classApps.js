@@ -172,6 +172,8 @@ function createClassApps(ctx) {
    * After the owner published a new version: classes where the publisher is a
    * teacher (or the admin publishes) follow at once; everywhere else the class
    * keeps its approved version and the new one waits. Removed apps stay removed.
+   * Going back to the version a class already plays ends what waited (or was
+   * given back) there: that newer version is not what the owner publishes any more.
    */
   function onPublish(actor, app, version) {
     for (const row of db.all("SELECT ca.class_id, ca.status, ca.version_id, ca.requested_version_id, ca.request_state, c.name FROM class_apps ca JOIN classes c ON c.id = ca.class_id WHERE ca.app_id = ? AND ca.status <> 'removed' AND c.archived_at IS NULL", app.id)) {
@@ -182,6 +184,8 @@ function createClassApps(ctx) {
                   decided_by = ?, decided_at = ? WHERE class_id = ? AND app_id = ?`,
           version.id, actor.id, Date.now(), row.class_id, app.id
         );
+      } else if (row.status === 'approved' && row.version_id === version.id) {
+        if (row.requested_version_id) db.run('UPDATE class_apps SET requested_version_id = NULL, request_state = NULL WHERE class_id = ? AND app_id = ?', row.class_id, app.id);
       } else if (row.version_id !== version.id && !(row.request_state === 'waiting' && row.requested_version_id === version.id)) {
         db.run(
           `UPDATE class_apps SET requested_version_id = ?, request_state = 'waiting',

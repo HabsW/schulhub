@@ -141,7 +141,7 @@ module.exports = (app, ctx) => {
   /** Classes of this app (active, not removed) and whether the actor teaches there. */
   const planRows = (actor, a) =>
     db.all(
-      `SELECT ca.class_id, ca.version_id, c.name, (m.role = 'teacher') AS teaches
+      `SELECT ca.class_id, ca.status, ca.version_id, c.name, (m.role = 'teacher') AS teaches
          FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
          LEFT JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ?
         WHERE ca.app_id = ? AND ca.status <> 'removed' ORDER BY c.name COLLATE NOCASE`,
@@ -155,19 +155,23 @@ module.exports = (app, ctx) => {
   function publishPlan(actor, a, versionId, rows = planRows(actor, a)) {
     const now = [];
     const wait = [];
+    const same = []; // the class plays this version already (going back to it)
     for (const r of rows) {
       if (actor.role === 'admin' || r.teaches) now.push(r.name);
       else if (r.version_id !== versionId) wait.push(r.name);
+      else if (r.status === 'approved') same.push(r.name);
     }
-    const schoolwide = a.schoolwide_version_id && a.schoolwide_version_id !== versionId ? (actor.role === 'admin' ? 'now' : 'wait') : '';
-    return { now, wait, schoolwide };
+    const schoolwide = !a.schoolwide_version_id ? '' : a.schoolwide_version_id === versionId ? 'same' : actor.role === 'admin' ? 'now' : 'wait';
+    return { now, wait, same, schoolwide };
   }
   function planText(plan, a, actor) {
     const parts = [];
     if (plan.now.length) parts.push(`Sofort neu in ${names(plan.now)}.`);
     if (plan.wait.length) parts.push(`In ${names(plan.wait)} wartet sie auf die Lehrkraft – bis zur Freigabe läuft dort die bisherige Version.`);
+    if (plan.same.length) parts.push(`In ${names(plan.same)} läuft sie schon.`);
     if (plan.schoolwide === 'now') parts.push('Für die ganze Schule gilt sie sofort.');
     if (plan.schoolwide === 'wait') parts.push('Für die ganze Schule wartet sie auf die Verwaltung.');
+    if (plan.schoolwide === 'same') parts.push('Für die ganze Schule gilt sie schon.');
     if (!parts.length) {
       // In no class and not school-wide: say exactly who can open it.
       parts.push(a.shared && access.canShareApp(actor, a)
