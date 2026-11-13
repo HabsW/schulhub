@@ -179,13 +179,15 @@ const STATES = {
     },
   },
   l2s: {
-    title: 'Lehrkraft (Mitlehrkraft der Klasse) wird während der Sitzung Schüler/in',
+    // A student account has no teacher rights anywhere: its teacher entries in classes go with the
+    // role change - the class, its results, saves and feedback are closed at once (SECURITY.md).
+    title: 'Lehrkraft (Mitlehrkraft der Klasse) wird während der Sitzung Schüler/in – und verliert die Klasse',
     async setup() {
       const { user, b } = await person('teacher');
       const W = await classWorld(T);
       await invite(T, b, W);
       await admin(`/admin/nutzer/${user.id}/rolle`, { rolle: 'student' });
-      return context({ user, b, W });
+      return context({ user, b, W, hide: [W.name, MARA, ...CLASSMATE_DATA] });
     },
   },
   a2l: {
@@ -655,43 +657,43 @@ const FRESH = new Set(['beitrittLink', 'einladung', 'verlassen', 'neueKlasse', '
 // namen/anonym = Mara's name on the leaderboard · wartet/freigegeben = what submitting does.
 
 const TABLE = `
-                       ohne     eine     mehrere  gespA    gespN    gelo     s2l      l2s          a2l      lok      kll          col          ars      arl          adm
-start                  ok       ok       ok       login    login    login    ok       ok           ok       ok       ok           ok           ok       ok           ok
-klassenliste           ohne     mit      mit      login    login    login    mit      mit          ohne     ohne     mit          mit          ohne     mit          mit
-klassenseite           404      schueler schueler login    login    login    schueler lehrer       404      404      lehrer       lehrer       404      lehrer       lehrer
-reiter                 404      404      404      login    login    login    404      ok           404      404      ok           ok           404      ok           ok
-ergebnisse             404      404      404      login    login    login    404      ok           404      404      ok           ok           404      ok           ok
-einzelergebnis         404      404      404      login    login    login    404      ok           404      404      ok           ok           404      ok           ok
-csv                    404      404      404      login    login    login    404      ok           404      404      ok           ok           404      ok           ok
-zweiteKlasse           404      404      schueler login    login    login    404      404          404      404      404          404          404      404          lehrer
-aufgabeAnsehen         404      ok       ok       login    login    login    ok       ok           404      404      ok           ok           404      ok           ok
-pruefliste             404      404      404      login    login    login    ohne     404          ohne     ohne     mit          mit          404      ohne         ohne
-sucheKlasse            ohne     mit      mit      login    login    login    mit      mit          ohne     ohne     mit          mit          ohne     mit          mit
-suchePerson            ohne     ohne     ohne     login    login    login    ohne     ohne         ohne     ohne     person       person       ohne     person       ohne
-spielenMitKlasse       404      klasse   klasse   login    login    login    klasse   klasse       404      404      klasse       klasse       404      ohne         klasse
-spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   klasse       404      404      klasse       klasse       404      404          ohne
-token                  404      klasse   klasse   403      401      403      klasse   klasse       404      404      klasse       klasse       404      ohne         klasse
-speichern              404      ok       ok       401      401      401      ok       ok           404      404      ok           ok           404      ok           ok
-bestenliste            404      namen    namen    401      401      401      namen    namen        404      404      namen        namen        404      anonym       anonym
-ergebnisSdk            404      klasse   klasse   401      401      401      klasse   klasse       404      404      klasse       klasse       404      ohne         klasse
-klassendaten           404      forbidden forbidden 401    401      401      forbidden ok          404      404      ok           ok           404      no_class     ok
-gemeinsam              404      forbidden forbidden 401    401      401      forbidden forbidden   404      404      forbidden    forbidden    404      forbidden    ok
-schulweitOhneKlasse    ohne     klasse   klasse   401      401      401      klasse   klasse       ohne     ohne     klasse       klasse       ohne     ohne         ohne
-schulweitFremdeKlasse  ohne     ohne     ohne     403      401      403      ohne     ohne         ohne     ohne     ohne         ohne         ohne     ohne         ohne
-einreichen             404      wartet   wartet   403      401      403      wartet   freigegeben  404      404      freigegeben  freigegeben  404      404          freigegeben
-pruefen                404      404      404      login    login    login    404      ok           404      404      ok           ok           404      404          ok
-aufgabeStellen         404      404      404      403      401      403      404      ok           404      404      ok           ok           404      404          ok
-erledigt               404      ok       ok       403      401      403      ok       404          404      404      404          404          404      404          404
-rueckmeldungGeben      404      404      404      403      401      403      404      ok           404      404      ok           ok           404      404          ok
-rueckmeldungLesen      ok       ok       ok       login    login    login    ok       ok           ok       ok       ok           ok           ok       ok           ok
-meineDaten             ok       ok       ok       login    login    login    ok       ok           ok       ok       ok           ok           ok       ok           ok
-verwaltung             404      404      404      login    login    login    404      404          404      404      404          404          404      404          ok
-beitrittLink           schueler schueler schueler login    login    login    schueler schueler     schueler schueler schueler     schueler     schueler schueler     schueler
-einladung              400      400      400      login    login    login    lehrer   400          lehrer   lehrer   lehrer       lehrer       400      lehrer       lehrer
-verlassen              404      ok       ok       403      401      403      ok       ok           404      404      400          ok           404      400          404
-neueKlasse             404      404      404      403      401      403      ok       404          ok       ok       ok           ok           404      ok           ok
-appDatenLoeschen       ok       ok       ok       403      401      403      ok       ok           ok       ok       ok           ok           ok       ok           ok
-kontoLoeschen          ok       ok       ok       403      401      403      ok       ok           ok       ok       ok           ok           ok       ok           ok
+                       ohne     eine     mehrere  gespA    gespN    gelo     s2l      l2s      a2l      lok      kll      col      ars      arl      adm
+start                  ok       ok       ok       login    login    login    ok       ok       ok       ok       ok       ok       ok       ok       ok
+klassenliste           ohne     mit      mit      login    login    login    mit      ohne     ohne     ohne     mit      mit      ohne     mit      mit
+klassenseite           404      schueler schueler login    login    login    schueler 404      404      404      lehrer   lehrer   404      lehrer   lehrer
+reiter                 404      404      404      login    login    login    404      404      404      404      ok       ok       404      ok       ok
+ergebnisse             404      404      404      login    login    login    404      404      404      404      ok       ok       404      ok       ok
+einzelergebnis         404      404      404      login    login    login    404      404      404      404      ok       ok       404      ok       ok
+csv                    404      404      404      login    login    login    404      404      404      404      ok       ok       404      ok       ok
+zweiteKlasse           404      404      schueler login    login    login    404      404      404      404      404      404      404      404      lehrer
+aufgabeAnsehen         404      ok       ok       login    login    login    ok       404      404      404      ok       ok       404      ok       ok
+pruefliste             404      404      404      login    login    login    ohne     404      ohne     ohne     mit      mit      404      ohne     ohne
+sucheKlasse            ohne     mit      mit      login    login    login    mit      ohne     ohne     ohne     mit      mit      ohne     mit      mit
+suchePerson            ohne     ohne     ohne     login    login    login    ohne     ohne     ohne     ohne     person   person   ohne     person   ohne
+spielenMitKlasse       404      klasse   klasse   login    login    login    klasse   404      404      404      klasse   klasse   404      ohne     klasse
+spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   404      404      404      klasse   klasse   404      404      ohne
+token                  404      klasse   klasse   403      401      403      klasse   404      404      404      klasse   klasse   404      ohne     klasse
+speichern              404      ok       ok       401      401      401      ok       404      404      404      ok       ok       404      ok       ok
+bestenliste            404      namen    namen    401      401      401      namen    404      404      404      namen    namen    404      anonym   anonym
+ergebnisSdk            404      klasse   klasse   401      401      401      klasse   404      404      404      klasse   klasse   404      ohne     klasse
+klassendaten           404      forbidden forbidden 401      401      401      forbidden 404      404      404      ok       ok       404      no_class ok
+gemeinsam              404      forbidden forbidden 401      401      401      forbidden 404      404      404      forbidden forbidden 404      forbidden ok
+schulweitOhneKlasse    ohne     klasse   klasse   401      401      401      klasse   ohne     ohne     ohne     klasse   klasse   ohne     ohne     ohne
+schulweitFremdeKlasse  ohne     ohne     ohne     403      401      403      ohne     ohne     ohne     ohne     ohne     ohne     ohne     ohne     ohne
+einreichen             404      wartet   wartet   403      401      403      wartet   404      404      404      freigegeben freigegeben 404      404      freigegeben
+pruefen                404      404      404      login    login    login    404      404      404      404      ok       ok       404      404      ok
+aufgabeStellen         404      404      404      403      401      403      404      404      404      404      ok       ok       404      404      ok
+erledigt               404      ok       ok       403      401      403      ok       404      404      404      404      404      404      404      404
+rueckmeldungGeben      404      404      404      403      401      403      404      404      404      404      ok       ok       404      404      ok
+rueckmeldungLesen      ok       ok       ok       login    login    login    ok       ok       ok       ok       ok       ok       ok       ok       ok
+meineDaten             ok       ok       ok       login    login    login    ok       ok       ok       ok       ok       ok       ok       ok       ok
+verwaltung             404      404      404      login    login    login    404      404      404      404      404      404      404      404      ok
+beitrittLink           schueler schueler schueler login    login    login    schueler schueler schueler schueler schueler schueler schueler schueler schueler
+einladung              400      400      400      login    login    login    lehrer   400      lehrer   lehrer   lehrer   lehrer   400      lehrer   lehrer
+verlassen              404      ok       ok       403      401      403      ok       404      404      404      400      ok       404      400      404
+neueKlasse             404      404      404      403      401      403      ok       404      ok       ok       ok       ok       404      ok       ok
+appDatenLoeschen       ok       ok       ok       403      401      403      ok       ok       ok       ok       ok       ok       ok       ok       ok
+kontoLoeschen          ok       ok       ok       403      401      403      ok       ok       ok       ok       ok       ok       ok       ok       ok
 `;
 
 const EXPECT = (() => {

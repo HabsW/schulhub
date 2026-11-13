@@ -276,7 +276,7 @@ module.exports = (app, ctx) => {
       const lines = {
         admin: `${self ? 'Dich' : u.name} zum Admin machen?\n${who} ${self ? 'siehst' : 'sieht'} dann alle Konten, Klassen, Apps und das Protokoll und ${self ? 'kannst' : 'kann'} alles ändern und löschen – auch Sicherungen mit allen Daten herunterladen. Das gilt sofort.`,
         teacher: `${self ? 'Dich' : u.name} zur Lehrkraft machen?\n${ROLE_HELP.teacher}${u.role === 'admin' ? ' Die Admin-Rechte enden sofort.' : ' Das gilt sofort.'}`,
-        student: `${self ? 'Dich' : u.name} zur Schülerin / zum Schüler machen?\nDie Rechte als ${ROLE_LABEL[u.role]} enden sofort.${teaching.length ? ` In ${plural(teaching.length, 'Klasse', 'Klassen')} bleibt ${self ? 'dein' : 'der'} Eintrag als Lehrkraft bestehen.` : ''}`,
+        student: `${self ? 'Dich' : u.name} zur Schülerin / zum Schüler machen?\nDie Rechte als ${ROLE_LABEL[u.role]} enden sofort${teaching.length ? ` – auch in ${plural(teaching.length, 'Klasse', 'Klassen')}, in denen ${self ? 'du' : u.name} Lehrkraft ${self ? 'bist' : 'ist'}: Dieser Eintrag wird entfernt.${sole.length ? ` ${plural(sole.length, 'Klasse hat', 'Klassen haben')} danach keine Lehrkraft mehr (du findest sie unter Verwaltung → Klassen).` : ''}` : '.'}`,
       };
       return lines[r] + (self && u.role === 'admin' ? ' Du verlierst sofort den Zugang zur Verwaltung.' : '');
     };
@@ -349,9 +349,19 @@ module.exports = (app, ctx) => {
     if (!Object.hasOwn(ROLE_LABEL, role)) throw bad('Unbekannte Rolle.');
     if (u.role === 'admin' && role !== 'admin' && admins() <= 1) throw bad('Es muss mindestens einen Admin geben. Ernenne zuerst ein weiteres Konto zum Admin.');
     if (u.role !== role) {
-      db.run('UPDATE users SET role = ? WHERE id = ?', role, u.id);
-      services.audit(req.user, 'rolle_geaendert', u.name, `${ROLE_LABEL[u.role]} → ${ROLE_LABEL[role]}`, { subjectId: u.id });
-      flash(req, `${u.name} ist jetzt ${ROLE_LABEL[role]}.`);
+      let left = [];
+      db.tx(() => {
+        db.run('UPDATE users SET role = ? WHERE id = ?', role, u.id);
+        // A student account has no teacher rights anywhere - also not in the classes where it was a
+        // teacher: those entries go (they would still open the class's results, saves and feedback).
+        if (role === 'student') {
+          left = db.all("SELECT c.id, c.name FROM class_members m JOIN classes c ON c.id = m.class_id WHERE m.user_id = ? AND m.role = 'teacher'", u.id);
+          db.run("DELETE FROM class_members WHERE user_id = ? AND role = 'teacher'", u.id);
+        }
+        services.audit(req.user, 'rolle_geaendert', u.name, `${ROLE_LABEL[u.role]} → ${ROLE_LABEL[role]}${left.length ? `, als Lehrkraft aus ${plural(left.length, 'Klasse', 'Klassen')} entfernt` : ''}`, { subjectId: u.id });
+      });
+      const orphaned = left.filter((c) => !db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND role = 'teacher'", c.id));
+      flash(req, `${u.name} ist jetzt ${ROLE_LABEL[role]}.${left.length ? ` Als Lehrkraft aus ${plural(left.length, 'Klasse', 'Klassen')} entfernt.` : ''}${orphaned.length ? ` Ohne Lehrkraft: ${orphaned.map((c) => `„${c.name}“`).join(', ')}.` : ''}`);
     }
     // Someone who just gave away their own admin role cannot see the admin area any more.
     res.redirect(303, u.id === req.user.id && role !== 'admin' ? '/start' : `/admin/konten/${u.id}`);

@@ -233,3 +233,69 @@ test('Konto löschen: jede Spalte, die eine Personen-ID halten kann, ist bedacht
     await h.stop();
   }
 });
+
+test('Rolle zu Schüler/in: die Rechte als Lehrkraft enden in jeder Klasse – Ergebnisse, Spielstände und Rückmeldungen sind sofort zu', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Anna Admin', 'admin');
+    const lehrer = h.addUser('Paul Praktikant', 'teacher');
+    const kollegin = h.addUser('Frau Yilmaz', 'teacher');
+    const mia = h.addUser('Mia Schmidt', 'student');
+    const [A, P, Y, M] = await Promise.all([admin, lehrer, kollegin, mia].map((u) => h.browser().login(u)));
+    // Paul teaches 7b alone and 9c together with Frau Yilmaz; Mia is in both, with a result in 7b.
+    await P.post('/klassen', { name: '7b' });
+    const k7b = teacherClass(h, lehrer.id, '7b');
+    await Y.post('/klassen', { name: '9c' });
+    const k9c = teacherClass(h, kollegin.id, '9c');
+    await Y.post(`/klassen/${k9c}/einladung`, {});
+    const invite = h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'teacher'", k9c).code;
+    await P.post(`/beitreten/${invite}`);
+    for (const k of [k7b, k9c]) await M.post(`/beitreten/${joinCode(h, k)}`);
+    const app = await h.makeApp(P, 'Rechentrainer');
+    await P.post(`/klassen/${k7b}/apps`, { app: app.id });
+    const t = await h.token(M, app, k7b);
+    await M.api(app, t.token, 'results.add', { title: 'Runde 1', score: 3, maxScore: 5 });
+    assert.equal((await P.get(`/klassen/${k7b}/apps/${app.id}/ergebnisse`)).status, 200, 'before: Paul sees the results');
+
+    await A.page(`/admin/konten/${lehrer.id}`);
+    const changed = await A.post(`/admin/nutzer/${lehrer.id}/rolle`, { rolle: 'student' });
+    assert.equal(changed.status, 303);
+    const flashText = (await A.page(changed.headers.location)).text;
+    assert.match(flashText, /Als Lehrkraft aus 2 Klassen entfernt/);
+    assert.match(flashText, /Ohne Lehrkraft: „7b“/, 'the admin learns which class has no teacher now');
+
+    // Paul's session is the same, his rights are not.
+    for (const url of [`/klassen/${k7b}`, `/klassen/${k7b}/apps/${app.id}/ergebnisse`, `/klassen/${k7b}/apps/${app.id}/ergebnisse.csv`, `/klassen/${k7b}/apps/${app.id}/ergebnisse/${mia.id}`, `/klassen/${k9c}/mitglieder`]) {
+      assert.equal((await P.get(url)).status, 404, url);
+    }
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM class_members WHERE user_id = ? AND role = 'teacher'", lehrer.id).n, 0);
+    // 9c keeps its other teacher; 7b has none now - the admin still manages it.
+    assert.ok(h.db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'teacher'", k9c, kollegin.id));
+    assert.equal((await A.get(`/klassen/${k7b}`)).status, 200);
+    // The audit log says what happened.
+    assert.match(h.db.get("SELECT detail FROM audit_log WHERE action = 'rolle_geaendert' ORDER BY id DESC LIMIT 1").detail, /als Lehrkraft aus 2 Klassen entfernt/);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Archivieren durch die Lehrkraft nimmt die Beitrittscodes mit – nach dem Zurückholen gilt kein alter QR-Code mehr', async () => {
+  const h = await startHub();
+  try {
+    const lehrer = h.addUser('Herr Lehmann', 'teacher');
+    const ben = h.addUser('Ben Hoffmann', 'student');
+    const [L, B] = await Promise.all([lehrer, ben].map((u) => h.browser().login(u)));
+    await L.post('/klassen', { name: '8a' });
+    const k = teacherClass(h, lehrer.id, '8a');
+    const old = joinCode(h, k);
+    await L.post(`/klassen/${k}/archivieren`, {});
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM join_codes WHERE class_id = ?', k).n, 0, 'the codes go with the archive');
+    await L.post(`/klassen/${k}/wiederherstellen`, {});
+    assert.ok(!h.db.get('SELECT archived_at FROM classes WHERE id = ?', k).archived_at);
+    const joined = await B.post(`/beitreten/${old}`);
+    assert.notEqual(joined.status, 303, 'the old QR code does not work again');
+    assert.equal(h.db.get('SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ?', k, ben.id), undefined);
+  } finally {
+    await h.stop();
+  }
+});
