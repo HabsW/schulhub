@@ -257,3 +257,25 @@ test('Aufbewahrung: AUDIT_RETENTION_DAYS außerhalb von 30 bis 3650 Tagen lösch
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });
+
+test('Aufbewahrung: eine längere Frist für inaktive Konten gilt auch für schon markierte', async () => {
+  const { settings, services } = h.hub.ctx;
+  const quiet = h.addUser('Olaf Ruhig', 'student');
+  h.db.run('UPDATE users SET last_login_at = ? WHERE id = ?', Date.now() - 200 * DAY, quiet.id);
+  await A.page('/admin/aufbewahrung');
+  const save = (days) => A.post('/admin/aufbewahrung', { 'retention.auditDays': '365', 'retention.archivedClassDays': '365', 'retention.inactiveFlagDays': String(days) });
+  try {
+    assert.equal((await save(90)).status, 303);
+    services.maintenance();
+    assert.ok(h.db.get('SELECT flagged_inactive_at FROM users WHERE id = ?', quiet.id).flagged_inactive_at, 'flagged after 90 days');
+
+    // The school decides: only after 15 months. Olaf (200 days) is not "lange nicht benutzt" any more.
+    assert.equal((await save(456)).status, 303);
+    services.maintenance();
+    assert.equal(h.db.get('SELECT flagged_inactive_at FROM users WHERE id = ?', quiet.id).flagged_inactive_at, null, 'the flag follows the period the admin set');
+    const page = (await A.get('/admin/aufbewahrung')).text;
+    assert.ok(!page.includes('Olaf Ruhig'), 'not listed as inactive for 456 days');
+  } finally {
+    await save(settings.DEFS['retention.inactiveFlagDays'].def());
+  }
+});

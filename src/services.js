@@ -81,10 +81,11 @@ function createServices(ctx) {
     for (const c of db.all('SELECT * FROM classes WHERE archived_at IS NOT NULL AND archived_at < ?', now - s.get('retention.archivedClassDays') * DAY)) {
       deleteClass(null, c, 'automatisch nach Ablauf der Aufbewahrungsfrist');
     }
-    db.run(
-      'UPDATE users SET flagged_inactive_at = ? WHERE flagged_inactive_at IS NULL AND COALESCE(last_login_at, created_at) < ?',
-      now, now - s.get('retention.inactiveFlagDays') * DAY
-    );
+    const inactiveBefore = now - s.get('retention.inactiveFlagDays') * DAY;
+    db.run('UPDATE users SET flagged_inactive_at = ? WHERE flagged_inactive_at IS NULL AND COALESCE(last_login_at, created_at) < ?', now, inactiveBefore);
+    // The flag means "no sign-in for the period the admin set NOW": after the admin made it longer, an account
+    // flagged under the shorter one is not "lange nicht benutzt" any more (signing in also clears it).
+    db.run('UPDATE users SET flagged_inactive_at = NULL WHERE flagged_inactive_at IS NOT NULL AND COALESCE(last_login_at, created_at) >= ?', inactiveBefore);
     db.run('DELETE FROM notices WHERE created_at < ?', now - 180 * DAY);
     db.run('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?', now - 30 * DAY);
     db.run('DELETE FROM app_usage WHERE day < ?', dayKey(now - 400 * DAY));
