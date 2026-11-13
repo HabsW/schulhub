@@ -294,3 +294,84 @@ test('Meine Daten: der Export enthält jeden Protokolleintrag, den die Seite zä
   assert.equal(ex.protokoll.length, total, 'the download has every entry the page counts');
   assert.ok(ex.protokoll.every((p) => Object.keys(p).join() === 'vorgang,zeitpunkt'), 'still only what and when');
 });
+
+// ------------------------------------------------- the account while a form is sent
+
+/**
+ * A form POST whose body arrives only when `release()` is called (a slow connection): the headers -
+ * cookie and all - reach the Hub first. Resolves to the response.
+ */
+async function slowPost(hub, b, url, fields, pageUrl = url.replace(/\/[^/]+$/, '').replace('/admin/nutzer/', '/admin/konten/')) {
+  const http = require('node:http');
+  const page = await b.get(pageUrl);
+  const csrf = /<meta name="csrf" content="([^"]*)"/.exec(page.text)[1];
+  const body = new URLSearchParams({ _csrf: csrf, ...fields }).toString();
+  let release;
+  const response = new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1', port: hub.config.publicPort, method: 'POST', path: url,
+      headers: {
+        host: hub.config.hubHost, cookie: [...b.jar].map(([k, v]) => `${k}=${v}`).join('; '),
+        'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body),
+      },
+    }, (res) => {
+      res.resume();
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.flushHeaders();
+    release = () => req.end(body);
+  });
+  await new Promise((r) => setTimeout(r, 50)); // the Hub has read the headers and is waiting for the body
+  return { release, response };
+}
+
+test('Verwaltung: wer gesperrt oder gelöscht wird, während sein Formular unterwegs ist, handelt nicht mehr als Admin', async () => {
+  const hub = await startHub();
+  try {
+    const anna = hub.addUser('Anna Admin', 'admin');
+    const bernd = hub.addUser('Bernd Admin', 'admin');
+    const [AA, BB] = await Promise.all([anna, bernd].map((u) => hub.browser().login(u)));
+    const activeAdmins = () => hub.db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND disabled = 0").n;
+
+    // Bernd blocks Anna; his form is on its way while Anna blocks him.
+    const slow = await slowPost(hub, BB, `/admin/nutzer/${anna.id}/sperren`, { an: '1' });
+    await AA.page(`/admin/konten/${bernd.id}`);
+    assert.equal((await AA.post(`/admin/nutzer/${bernd.id}/sperren`, { an: '1' })).status, 303);
+    slow.release();
+    const late = await slow.response;
+    assert.notEqual(late.status, 303, 'a blocked admin\'s late form is not carried out');
+    assert.equal(hub.db.get('SELECT disabled FROM users WHERE id = ?', anna.id).disabled, 0, 'Anna is not blocked by a blocked admin');
+    assert.equal(activeAdmins(), 1, 'there is always an active admin');
+
+    // The same with deleting: Carla deletes Anna while Anna deletes her.
+    const carla = hub.addUser('Carla Admin', 'admin');
+    const CC = await hub.browser().login(carla);
+    const slow2 = await slowPost(hub, CC, `/admin/nutzer/${anna.id}/loeschen`, {});
+    await AA.page(`/admin/konten/${carla.id}`);
+    assert.equal((await AA.post(`/admin/nutzer/${carla.id}/loeschen`)).status, 303);
+    slow2.release();
+    await slow2.response;
+    assert.ok(hub.db.get('SELECT 1 AS ok FROM users WHERE id = ?', anna.id), 'a deleted admin deletes nobody');
+    assert.equal(activeAdmins(), 1);
+    assert.equal(hub.db.get('SELECT COUNT(*) AS n FROM audit_log WHERE actor_label LIKE ?', 'Carla%').n, 0, 'and her name does not come back into the audit log');
+  } finally {
+    await hub.stop();
+  }
+});
+
+test('Abmelden, während in einem anderen Tab ein Formular unterwegs ist: die Sitzung bleibt beendet', async () => {
+  const student = h.addUser('Tom Tabs', 'student');
+  const S = await h.browser().login(student);
+  const sessions = () => h.db.get('SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?', student.id).n;
+  const slow = await slowPost(h, S, '/einstellungen', { farbschema: 'light' }, '/einstellungen');
+  const oldCookie = S.jar.get('hub_sid');
+  await S.page('/start');
+  assert.equal((await S.post('/auth/logout')).status, 303, 'signed out in the other tab');
+  assert.equal(sessions(), 0);
+  slow.release();
+  const late = await slow.response;
+  assert.equal(sessions(), 0, 'the late form does not store the ended session again');
+  assert.ok(!String(late.headers['set-cookie'] || '').includes(`hub_sid=${oldCookie}`), 'and does not hand the browser its cookie back');
+  assert.equal(h.db.get('SELECT pref_theme FROM users WHERE id = ?', student.id).pref_theme, 'dark', 'nothing was changed after the logout');
+});

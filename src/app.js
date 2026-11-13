@@ -11,7 +11,7 @@ const session = require('express-session');
 
 const { openDb } = require('./db');
 const { createTokens, createLimiter, csrfProtect, hubHeaders } = require('./security');
-const { createSessionStore } = require('./sessions');
+const { createSessionStore, sidHash } = require('./sessions');
 const { createAccess } = require('./access');
 const { createUploads } = require('./uploads');
 const { createServices } = require('./services');
@@ -55,7 +55,8 @@ function createHubApp(ctx) {
 
   // Who is asking? Loaded fresh from the database on EVERY request, so role
   // changes, blocks and deletions take effect immediately.
-  app.use((req, res, next) => {
+  function loadUser(req, res, next) {
+    req.user = undefined;
     const s = req.session;
     if (!s.userId) return next();
     const user = db.get('SELECT * FROM users WHERE id = ?', s.userId);
@@ -67,10 +68,23 @@ function createHubApp(ctx) {
       return next();
     }
     s.regenerate(next);
-  });
+  }
+  app.use(loadUser);
 
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(express.json({ limit: '64kb' }));
+  // … and once more when the body of a form has arrived, which can be a while after its headers. Meanwhile
+  // the session may have ended (logout in another tab, a block or a deletion remove it) or the account may
+  // have been blocked, deleted or given another role: the form is decided as things are NOW - a blocked
+  // admin's late form blocks nobody, and an ended session does not come back when this request saves it.
+  app.use((req, res, next) => {
+    if (!req.user || req.method === 'GET' || req.method === 'HEAD') return next();
+    if (!db.get('SELECT 1 AS ok FROM sessions WHERE sid_hash = ?', sidHash(req.sessionID))) {
+      req.user = undefined;
+      return req.session.regenerate(next);
+    }
+    loadUser(req, res, next);
+  });
   app.use(csrfProtect(config));
 
   // Default deny + a general limit on state-changing requests.
