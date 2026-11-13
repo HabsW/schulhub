@@ -93,6 +93,12 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
     problems.push('STUDENT_EMAIL_DOMAINS und/oder STAFF_EMAIL_DOMAINS müssen gesetzt sein.');
   }
   if (!dev && !env.APPS_DOMAIN) problems.push('APPS_DOMAIN fehlt (eine eigene Domain für die Apps, z. B. meine-schule-apps.de mit Wildcard-DNS *.meine-schule-apps.de).');
+  // The range the admin can choose in the Hub (src/settings.js). The daily maintenance (and the one at every
+  // start) deletes older audit entries: "0" - often meant as "keep forever" - would delete all of them.
+  const auditRetentionDays = env.AUDIT_RETENTION_DAYS === undefined || String(env.AUDIT_RETENTION_DAYS).trim() === '' ? 365 : Number(env.AUDIT_RETENTION_DAYS);
+  if (!Number.isInteger(auditRetentionDays) || auditRetentionDays < 30 || auditRetentionDays > 3650) {
+    problems.push(`AUDIT_RETENTION_DAYS muss eine ganze Zahl von 30 bis 3650 sein (Tage, wie lange das Protokoll bleibt; jetzt: „${String(env.AUDIT_RETENTION_DAYS).slice(0, 40)}“).`);
+  }
   if (!dev) problems.push(...addressProblems(base, env));
   if (problems.length) throw new Error(`Konfiguration unvollständig oder unsicher (siehe .env.example):\n - ${problems.join('\n - ')}`);
 
@@ -119,7 +125,7 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
     sessionMs: 8 * 60 * 60 * 1000,
     sdkTokenSeconds: 10 * 60,
     fileTokenSeconds: 12 * 60 * 60,
-    auditRetentionDays: Number(env.AUDIT_RETENTION_DAYS || 365),
+    auditRetentionDays,
     extraExtensions: list(env.EXTRA_FILE_EXTENSIONS),
     limits: {
       maxFileBytes: 25 * MB, // one file

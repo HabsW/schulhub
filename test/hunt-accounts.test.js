@@ -222,3 +222,38 @@ test('Mitteilungen: eine gelöschte Ankündigung oder Aufgabe nimmt ihre Mitteil
   assert.equal((await A.post(`/admin/klassen/${cls}/loeschen`)).status, 303);
   assert.deepEqual([...mine('Elternabend'), ...mine('Kopfrechnen')], [], 'no notice of the deleted class is left');
 });
+
+// ---------------------------------------------------------------- retention
+
+test('Aufbewahrung: AUDIT_RETENTION_DAYS außerhalb von 30 bis 3650 Tagen löscht das Protokoll nicht beim Start', async () => {
+  const { loadConfig } = require('../src/config');
+  const { createHub } = require('../src/app');
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schulhub-hunt-audit-'));
+  const configWith = (value) => loadConfig({ env: { BASE_URL: 'http://localhost:3000', ...(value === undefined ? {} : { AUDIT_RETENTION_DAYS: value }) }, dev: true, overrides: { dataDir, listenPort: 0 } });
+  try {
+    const first = createHub(configWith(undefined));
+    first.ctx.services.audit(null, 'anmeldung_abgelehnt');
+    first.ctx.db.run('UPDATE audit_log SET at = ?', Date.now() - DAY); // yesterday
+    await first.stop();
+
+    // "0" often means "keep forever" - here it would mean "delete everything", at every start and daily.
+    for (const value of ['0', '7', 'ein Jahr', '99999']) {
+      let hub = null;
+      try {
+        hub = createHub(configWith(value));
+      } catch (err) {
+        assert.match(err.message, /AUDIT_RETENTION_DAYS/, `${value}: the message names the setting`);
+      }
+      const kept = hub ? hub.ctx.db.get('SELECT COUNT(*) AS n FROM audit_log').n : 1;
+      const days = hub ? hub.ctx.settings.get('retention.auditDays') : 365;
+      if (hub) await hub.stop();
+      assert.equal(kept, 1, `AUDIT_RETENTION_DAYS=${value} must not wipe the audit log`);
+      assert.ok(Number.isInteger(days) && days >= 30 && days <= 3650, `${value}: only an allowed value is used (got ${days})`);
+    }
+    const ok = createHub(configWith('30'));
+    assert.equal(ok.ctx.settings.get('retention.auditDays'), 30, 'an allowed value is used');
+    await ok.stop();
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
