@@ -177,3 +177,48 @@ test('Wiederherstellung: Dateien, auf die die Datenbank nicht verweist, kommen n
     fs.rmSync(work, { recursive: true, force: true });
   }
 });
+
+// ------------------------------------------------------------------- notices
+
+test('Mitteilungen: eine gelöschte Ankündigung oder Aufgabe nimmt ihre Mitteilung mit – auch mit der ganzen Klasse', async () => {
+  const teacher = h.addUser('Frau Kern', 'teacher');
+  const student = h.addUser('Ida Kern', 'student');
+  const [T, S] = await Promise.all([teacher, student].map((u) => h.browser().login(u)));
+  const mine = (text) => h.db.all('SELECT text, href FROM notices WHERE user_id = ?', student.id).filter((n) => n.text.includes(text));
+
+  await T.post('/klassen', { name: '5a' });
+  const cls = teacherClass(teacher.id, '5a');
+  await S.post(`/beitreten/${joinCode(cls)}`);
+  const app = await h.makeApp(T, 'Rechenkönig');
+  await T.post(`/klassen/${cls}/apps`, { app: app.id });
+
+  // A title written by mistake (it names a child) - the teacher deletes the announcement at once.
+  await T.page('/ankuendigungen');
+  assert.equal((await T.post('/ankuendigungen', { ziel: cls, titel: 'Anna hat Läuse, bitte Köpfe kontrollieren' })).status, 303);
+  assert.equal(mine('Läuse').length, 1, 'the class got a notice quoting the title');
+  const an = h.db.get("SELECT id FROM announcements WHERE title LIKE 'Anna hat%'");
+  assert.equal((await T.post(`/ankuendigungen/${an.id}/loeschen`)).status, 303);
+  assert.equal(h.db.get('SELECT 1 AS ok FROM announcements WHERE id = ?', an.id), undefined);
+  assert.deepEqual(mine('Läuse'), [], 'the notice with the deleted title is gone');
+  assert.ok(!(await S.get('/mitteilungen')).text.includes('Läuse'));
+  assert.ok(!(await S.get('/meine-daten/export')).text.includes('Läuse'));
+
+  // An assignment deleted by its teacher: its notice would quote the title and lead to a dead page.
+  await T.page(`/klassen/${cls}/aufgaben/neu`);
+  assert.equal((await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Einmaleins bis Freitag' })).status, 303);
+  const x = h.db.get("SELECT id FROM assignments WHERE title = 'Einmaleins bis Freitag'");
+  assert.equal(mine('Einmaleins').length, 1);
+  await T.page(`/aufgaben/${x.id}`);
+  assert.equal((await T.post(`/aufgaben/${x.id}/loeschen`)).status, 303);
+  assert.deepEqual(mine('Einmaleins'), [], 'the notice of the deleted assignment is gone');
+
+  // The whole class deleted: what pointed into it goes with it.
+  await T.page('/ankuendigungen');
+  await T.post('/ankuendigungen', { ziel: cls, titel: 'Elternabend am Dienstag' });
+  await T.page(`/klassen/${cls}/aufgaben/neu`);
+  await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Kopfrechnen üben' });
+  assert.equal(mine('Elternabend').length + mine('Kopfrechnen').length, 2);
+  await A.page('/admin/klassen');
+  assert.equal((await A.post(`/admin/klassen/${cls}/loeschen`)).status, 303);
+  assert.deepEqual([...mine('Elternabend'), ...mine('Kopfrechnen')], [], 'no notice of the deleted class is left');
+});

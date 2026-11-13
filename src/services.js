@@ -10,6 +10,8 @@ const { analyzeVersion } = require('./checks');
 const DAY = 86_400_000;
 /** The first string after every string that starts with `prefix` (ASCII prefixes: ids and paths). */
 const prefixEnd = (prefix) => prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+/** Where the notice about an announcement points: one link per announcement, so its notices can go with it. */
+const announcementLink = (id) => `/start#ankuendigung-${id}`;
 
 /**
  * Columns that keep a person's id WITHOUT a foreign key to users (foreign keys cascade or are set
@@ -114,9 +116,21 @@ function createServices(ctx) {
     return code;
   }
 
+  /**
+   * Notices that point into one class - its assignments, its announcements, its review requests - would
+   * lead nowhere and quote titles that are gone. Call while the class's rows still exist.
+   */
+  function deleteClassNotices(classId) {
+    for (const { id } of db.all('SELECT id FROM assignments WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
+    for (const { id } of db.all('SELECT id FROM announcements WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', announcementLink(id));
+    const review = `/pruefen/${classId}/`;
+    db.run('DELETE FROM notices WHERE href >= ? AND href < ?', review, prefixEnd(review));
+  }
+
   /** Delete a class and what belongs only to it (cascades: members, codes, apps in it, assignments, feedback, settings, announcements). */
   function deleteClass(actor, cls, detail = '') {
     db.tx(() => {
+      deleteClassNotices(cls.id);
       db.run('DELETE FROM shared_data WHERE class_id = ?', cls.id);
       db.run('DELETE FROM classes WHERE id = ?', cls.id);
       audit(actor, 'klasse_geloescht', cls.name, detail);
@@ -344,6 +358,7 @@ function createServices(ctx) {
         user.id, user.id
       );
       for (const c of orphaned) {
+        deleteClassNotices(c.id);
         db.run('DELETE FROM shared_data WHERE class_id = ?', c.id);
         db.run('DELETE FROM classes WHERE id = ?', c.id);
       }
@@ -403,6 +418,7 @@ function createServices(ctx) {
   }
 
   return {
+    announcementLink,
     audit, pruneAudit, notify, recordPlay, maintenance,
     createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser,
   };

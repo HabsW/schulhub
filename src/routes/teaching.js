@@ -342,7 +342,11 @@ module.exports = (app, ctx) => {
 
   app.post('/aufgaben/:id/loeschen', (req, res) => {
     const x = manageAssignment(req);
-    db.run('DELETE FROM assignments WHERE id = ?', x.id);
+    db.tx(() => {
+      db.run('DELETE FROM assignments WHERE id = ?', x.id);
+      // Its notice quotes the title and would lead to a page that is gone (like deleting the app does).
+      db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
+    });
     services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
     flash(req, `Die Aufgabe „${x.title}“ ist gelöscht.`);
     res.redirect(303, `/klassen/${x.class_id}/aufgaben`);

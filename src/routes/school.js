@@ -401,13 +401,14 @@ module.exports = (app, ctx) => {
     const text = cleanText(req.body.text, 5000, { multiline: true });
     if (text.length > 1000) throw bad('Der Text darf höchstens 1000 Zeichen lang sein.');
     const expires = parseEnd(req.body.bis);
+    const id = newId();
     db.tx(() => {
-      db.run('INSERT INTO announcements (id, class_id, author_id, title, body, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)', newId(), cls ? cls.id : null, u.id, title, text, Date.now(), expires);
+      db.run('INSERT INTO announcements (id, class_id, author_id, title, body, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)', id, cls ? cls.id : null, u.id, title, text, Date.now(), expires);
       services.audit(u, 'ankuendigung_erstellt', title, cls ? cls.name : 'Ganze Schule');
       // Class members get an in-Hub notice; a school-wide one is on every start page anyway.
       if (cls) {
         const members = db.all('SELECT user_id FROM class_members WHERE class_id = ? AND user_id <> ?', cls.id, u.id).map((r) => r.user_id);
-        services.notify(members, 'ankuendigung', `Neue Ankündigung in ${cls.name}: ${title}`, '/start');
+        services.notify(members, 'ankuendigung', `Neue Ankündigung in ${cls.name}: ${title}`, services.announcementLink(id));
       }
     });
     flash(req, cls ? `Veröffentlicht. Die Ankündigung steht jetzt auf der Startseite von „${cls.name}“.` : 'Veröffentlicht. Die Ankündigung steht jetzt auf allen Startseiten.');
@@ -417,7 +418,11 @@ module.exports = (app, ctx) => {
   app.post('/ankuendigungen/:id/loeschen', (req, res) => {
     const an = db.get('SELECT an.*, c.name AS class_name FROM announcements an LEFT JOIN classes c ON c.id = an.class_id WHERE an.id = ?', String(req.params.id));
     if (!an || !access.canDeleteAnnouncement(req.user, an)) throw deny();
-    db.run('DELETE FROM announcements WHERE id = ?', an.id);
+    db.tx(() => {
+      db.run('DELETE FROM announcements WHERE id = ?', an.id);
+      // Its notice quotes the title: a title written by mistake must not stay in every member's Mitteilungen.
+      db.run('DELETE FROM notices WHERE href = ?', services.announcementLink(an.id));
+    });
     services.audit(req.user, 'ankuendigung_geloescht', an.title, an.class_name || 'Ganze Schule');
     flash(req, `Die Ankündigung „${an.title}“ wurde gelöscht.`);
     res.redirect(303, '/ankuendigungen');
