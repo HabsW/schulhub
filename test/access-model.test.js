@@ -512,12 +512,13 @@ function createModel(w) {
   };
 
   // ----- leaving, results, removing
-  // "a student may always leave an active class; a teacher only while another teacher remains ... Archived
-  // classes are read-only."
+  // "a student may always leave an active class; a teacher only while another teacher remains who can sign
+  // in ... a blocked account teaches nobody. Archived classes are read-only."
   m.canLeaveClass = (user, classId) => {
     const role = m.classRole(user, classId);
     if (!role || !activeClass(classId)) return false;
-    return role === 'student' || w.members.some((x) => x.class_id === classId && x.role === 'teacher' && x.user_id !== uid(user));
+    const canSignIn = (id) => w.users.some((u) => u.id === id && !u.disabled);
+    return role === 'student' || w.members.some((x) => x.class_id === classId && x.role === 'teacher' && x.user_id !== uid(user) && canSignIn(x.user_id));
   };
   // "the class's teachers (and the admin), while the app is approved there - or after it was removed."
   m.canSeeClassResults = (user, classId, appId) => m.canManageClass(user, classId) && usedIn(classId, appId);
