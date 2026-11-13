@@ -293,3 +293,47 @@ test('Archivierte Klasse: Rückmeldungen löscht die Lehrkraft dort nicht mehr �
   assert.equal((await M.post(`/rueckmeldungen/${toMia}/loeschen`)).status, 303);
   assert.equal(id('FUER-MIA'), undefined);
 });
+
+// ------------------------------------------------------------------ "done" stays done
+// PROPOSED, not fixed: "done" is derived from today's progress row and today's results, so it can
+// fall back to "open" (progress lowered by the app, results pruned beyond limits.resultsPerUser).
+// Keeping it needs the moment of completion stored (schema change) - a product decision.
+
+test('Erledigt bleibt erledigt: sinkt der volle Fortschritt danach wieder, ist die Aufgabe nicht plötzlich offen', { todo: 'Vorschlag: Zeitpunkt des Erledigens speichern (siehe Bericht)' }, async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ user: kid, b: K }] = kids;
+  const x = idOf(await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Alles schaffen' }));
+  const t = await h.token(K, app, cls);
+  await K.api(app, t.token, 'progress.set', { value: 1 });
+  assert.equal(h.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done', 'precondition: full progress after the start');
+  // Next week the app lowers her progress (new words, a card she got wrong) - she did the task.
+  await K.api(app, t.token, 'progress.set', { value: 0.8 });
+  assert.equal(h.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done', '"sobald voller Fortschritt erreicht ist" (README)');
+});
+
+test('Erledigt bleibt erledigt: viele neue Ergebnisse (auch aus einer anderen Klasse) machen eine alte Aufgabe nicht wieder offen', { todo: 'Vorschlag: Zeitpunkt des Erledigens speichern (siehe Bericht)' }, async () => {
+  // limits.resultsPerUser keeps the newest results per person and app - across all classes.
+  const small = await startHub({ limits: { resultsPerUser: 3 } });
+  try {
+    const [lehrer, kollegin, kid] = [small.addUser('Herr A', 'teacher'), small.addUser('Frau B', 'teacher'), small.addUser('Kim', 'student')];
+    const [T, T2, K] = await Promise.all([lehrer, kollegin, kid].map((u) => small.browser().login(u)));
+    const code = (c) => small.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", c).code;
+    const c1 = idOf(await T.post('/klassen', { name: '7a' }));
+    const c2 = idOf(await T2.post('/klassen', { name: 'AG' }));
+    for (const c of [c1, c2]) await K.post(`/beitreten/${code(c)}`);
+    const app = await small.makeApp(T, 'Spiel', { 'index.html': 'x' });
+    small.db.run('UPDATE apps SET shared = 1 WHERE id = ?', app.id);
+    await T.post(`/klassen/${c1}/apps`, { app: app.id });
+    await T2.post(`/klassen/${c2}/apps`, { app: app.id });
+    const x = idOf(await T.post(`/klassen/${c1}/aufgaben`, { app: app.id, titel: 'Eine Runde' }));
+    const t1 = await small.token(K, app, c1);
+    await K.api(app, t1.token, 'results.add', { title: 'Runde in 7a', score: 1 });
+    assert.equal(small.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done', 'precondition');
+    // Later she plays a lot in the AG.
+    const t2 = await small.token(K, app, c2);
+    for (let i = 0; i < 3; i++) await K.api(app, t2.token, 'results.add', { title: `AG ${i}`, score: 1 });
+    assert.equal(small.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done', 'the 7a task stays done');
+  } finally {
+    await small.stop();
+  }
+});
