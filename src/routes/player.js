@@ -4,6 +4,11 @@
 //
 // What may run is decided by access.resolvePlay (or canManageApp for the
 // owner's editor draft). The iframe never shares an origin with the Hub.
+//
+// The app's frame waits in a <template>: public/player.js first points it at
+// the Hub's start page on the app's origin, which clears what an earlier
+// person left in that origin's browser storage (sdk/hub-start.js), and loads
+// the app only when that page says so.
 
 const { html, page, icon, appIcon, appClass, badge, csrfField } = require('../html');
 const { deny } = require('../util');
@@ -42,9 +47,11 @@ module.exports = (app, ctx) => {
     if (!play) throw deny();
     const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ? AND archived_at IS NULL', play.classId) : null;
     // The file token unlocks exactly this version's static files - or the owner's draft.
+    // r: 1 - this page opens the app's start page itself before the app (see below), so the app
+    // origin does not need to send the frame there first (appsHost.js).
     const fileToken = play.draft
-      ? tokens.sign('files', { a: a.id, d: 1, u: req.user.id }, 60 * 60)
-      : tokens.sign('files', { a: a.id, v: play.version.id, u: req.user.id }, config.fileTokenSeconds);
+      ? tokens.sign('files', { a: a.id, d: 1, u: req.user.id, r: 1 }, 60 * 60)
+      : tokens.sign('files', { a: a.id, v: play.version.id, u: req.user.id, r: 1 }, config.fileTokenSeconds);
     const origin = config.appOrigin(a.origin_key);
     const back = play.draft ? `/studio/${a.id}` : play.preview ? `/apps/${a.id}` : cls ? `/klassen/${cls.id}` : '/start';
     const favourite = Boolean(db.get('SELECT 1 AS ok FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id));
@@ -63,7 +70,7 @@ module.exports = (app, ctx) => {
       </div>
       <div class="stage" id="stage" data-origin="${origin}" data-token-url="/apps/${a.id}/token"
            data-class="${play.classId || ''}" data-version="${play.preview && !play.draft ? play.version.id : ''}" data-draft="${play.draft ? '1' : ''}">
-        <iframe id="appframe" title="${a.name}" src="${origin}/~${fileToken}/index.html" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe>
+        <template id="appframe-hold" data-start="${origin}/~${fileToken}/_hub/start"><iframe id="appframe" title="${a.name}" src="${origin}/~${fileToken}/index.html" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe></template>
         <div class="loading ${appClass(a)}" aria-hidden="true">${appIcon(a, 'lg')}</div>
         ${play.preview ? html`<section class="console" id="console" aria-label="Konsole" hidden>
           <div class="console-head"><strong>Konsole</strong><span>Meldungen deiner App (nur in der Vorschau)</span>

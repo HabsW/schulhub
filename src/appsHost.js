@@ -1,15 +1,21 @@
 'use strict';
 // Everything served from an app's own origin (<key>.<apps domain>):
 //
-//   GET  /~<file token>/<path>   static files of one version (uploaded, untrusted)
-//   GET  /_hub/info              tells the SDK that it runs inside the Hub
-//   POST /_hub/api               the data API behind the SDK (Bearer token)
+//   GET  /~<file token>/<path>       static files of one version (uploaded, untrusted)
+//   GET  /~<file token>/_hub/start   the Hub's start page: runs before the app and clears what an
+//                                    earlier person left in this origin's browser storage
+//   GET  /_hub/start.js              its script (sdk/hub-start.js)
+//   GET  /_hub/info                  tells the SDK that it runs inside the Hub
+//   POST /_hub/api                   the data API behind the SDK (Bearer token)
+//   GET|PUT /_hub/files/<name>       hub.files content
 //
 // No Hub cookies ever reach this host, and uploaded files are only ever sent
 // as static bytes with strict headers - nothing uploaded runs on the server.
+// Uploads can never create a "_hub/" path (uploads.js), so these never collide with app files.
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { appHeaders } = require('./security');
 const { cleanText } = require('./util');
 const { ApiError, liveStore, createPreviewStores } = require('./sdkStore');
@@ -36,6 +42,16 @@ function createAppsHost(ctx) {
     return assetCache.get(file);
   };
 
+  const startScript = path.join(config.root, 'sdk', 'hub-start.js');
+  let startCache = null;
+  /** The start page's script and a short hash of it (part of its address, so browsers may keep it). */
+  const startAsset = () => {
+    const body = hubAsset(startScript);
+    if (!body) return null;
+    if (!startCache || startCache.body !== body) startCache = { body, hash: crypto.createHash('sha256').update(body).digest('hex').slice(0, 16) };
+    return startCache;
+  };
+
   const clientIp = (req) => (config.trustProxy && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : req.socket.remoteAddress);
 
   function send(res, status, body, headers = {}) {
@@ -53,7 +69,8 @@ function createAppsHost(ctx) {
     // requests with a valid file token count against the PERSON it was issued to; requests with
     // an invalid token count in their own per-address bucket, which only ever blocks invalid requests.
     const slash = rest.indexOf('/');
-    const payload = tokens.verify('files', slash < 0 ? rest : rest.slice(0, slash));
+    const tokenText = slash < 0 ? rest : rest.slice(0, slash);
+    const payload = tokens.verify('files', tokenText);
     if (!payload || payload.a !== appRow.id) {
       if (!limiter.hit('appFilesBad', clientIp(req))) return sendText(res, 429, 'Zu viele Anfragen.');
       return sendText(res, 403, 'Der Link ist abgelaufen. Bitte öffne die App neu im Hub.');
@@ -66,6 +83,18 @@ function createAppsHost(ctx) {
       return sendText(res, 400, 'Ungültige Adresse.');
     }
     if (rel === '' || rel.endsWith('/')) rel += 'index.html';
+
+    // The Hub's own pages under the reserved "_hub/" folder (never an uploaded file).
+    if (rel === '_hub/start') return serveStart(req, res, payload, tokenText);
+    if (rel.toLowerCase().startsWith('_hub/')) return sendText(res, 404, 'Datei nicht gefunden.');
+    // A page that frames an app with a plain token is sent through the start page first, so the
+    // app's code never runs before an earlier person's browser storage is gone. Tokens marked
+    // r: 1 come from that page itself or from the player, which opens it before the app.
+    const dest = req.headers['sec-fetch-dest'];
+    if (payload.r !== 1 && (dest === 'iframe' || dest === 'frame')) {
+      res.writeHead(303, { ...appHeaders(config), 'Cache-Control': 'no-store', Location: `/~${tokenText}/_hub/start?n=${encodeURIComponent(rel)}` });
+      return res.end();
+    }
 
     // The Hub always provides its own, current SDK and UI kit - whatever was uploaded under those names.
     const base = rel.slice(rel.lastIndexOf('/') + 1);
@@ -111,6 +140,54 @@ function createAppsHost(ctx) {
     const stream = fs.createReadStream(uploads.blobPath(file.sha256), { start, end });
     stream.on('error', () => res.destroy());
     stream.pipe(res);
+  }
+
+  // ---------- the start page (shared school PCs) ----------
+  // An app's localStorage, IndexedDB, caches, service workers and cookies belong to its origin, not
+  // to a person: the next pupil on a shared PC would find what the previous one left. This page of
+  // the Hub runs on the app's origin before the app (sdk/hub-start.js): it compares the marker kept
+  // in localStorage with the one for the person this file token was issued to, removes everything
+  // if they differ, and then tells the Hub page where the app is. Nothing uploaded runs here.
+  const attr = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  // Stricter than the apps' policy: only its own script, nothing inline, only inside the Hub.
+  const startCsp = () =>
+    ["default-src 'none'", "script-src 'self'", "base-uri 'none'", "form-action 'none'", `frame-ancestors ${config.hubOrigin}`, 'sandbox allow-scripts allow-same-origin'].join('; ');
+
+  /** The app file the start page leads to: a plain relative path, otherwise index.html. */
+  function entryPath(n) {
+    if (typeof n !== 'string' || n.length > 512) return 'index.html';
+    const parts = n.split('/');
+    if (parts.some((p) => p === '' || p === '.' || p === '..' || /[\u0000-\u001f\\]/.test(p)) || parts[0].toLowerCase() === '_hub') return 'index.html';
+    return n;
+  }
+
+  function serveStart(req, res, payload, tokenText) {
+    if (typeof payload.u !== 'string') return sendText(res, 403, 'Der Link ist abgelaufen. Bitte öffne die App neu im Hub.');
+    const script = startAsset();
+    if (!script) return sendText(res, 500, 'Da ist etwas schiefgegangen.');
+    // The app itself is loaded with a copy of the token marked r: 1 (same content, same end).
+    const checked = payload.r === 1 ? tokenText : tokens.sign('files', { ...payload, r: 1 }, Math.max(1, Math.ceil((payload.exp - Date.now()) / 1000)));
+    const entry = entryPath(new URLSearchParams(String(req.url).split('?')[1] || '').get('n'));
+    const next = `/~${checked}/${entry.split('/').map(encodeURIComponent).join('/')}`;
+    // Who the app is opened for: an HMAC of app and person - never a name, e-mail or id, and
+    // different in every app. The same person gets the same marker in every session.
+    const person = tokens.pseudonym('storage', `${payload.a}:${payload.u}`);
+    const body =
+      `<!doctype html>\n<html lang="de" data-hub="${attr(config.hubOrigin)}" data-person="${attr(person)}" data-next="${attr(next)}">\n` +
+      `<head><meta charset="utf-8"><title>App wird gestartet</title><script src="/_hub/start.js?v=${script.hash}"></script></head>\n<body></body>\n</html>\n`;
+    send(res, 200, req.method === 'HEAD' ? undefined : body, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': startCsp() });
+  }
+
+  function serveStartScript(req, res) {
+    if (req.headers['sec-fetch-dest'] === 'document') return sendText(res, 403, 'Diese Seite kann nur im Hub geöffnet werden.');
+    const script = startAsset();
+    if (!script) return sendText(res, 404, 'Datei nicht gefunden.');
+    // Its address carries the content hash, so a browser may keep it (one request less per start).
+    const current = new URLSearchParams(String(req.url).split('?')[1] || '').get('v') === script.hash;
+    send(res, 200, req.method === 'HEAD' ? undefined : script.body, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': current ? 'max-age=31536000, immutable' : 'no-cache',
+    });
   }
 
   // ---------- data API ----------
@@ -168,11 +245,11 @@ function createAppsHost(ctx) {
   const decode = (json) => (json === null || json === undefined ? null : JSON.parse(json));
   const number = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-  /** Key-value data shared by all users of the app (scope '') or of one class (scope = class id). */
-  function sharedApi(store, scope, mayWrite) {
-    const write = () => {
-      if (!mayWrite) throw new ApiError('forbidden', 'Das dürfen nur die Lehrkraft bzw. die Besitzerin oder der Besitzer der App.');
-    };
+  /**
+   * Key-value data shared by all users of the app (scope '') or of one class (scope = class id).
+   * `write` throws when this caller may not write it.
+   */
+  function sharedApi(store, scope, write) {
     return {
       get: (p) => decode(store.sharedGet(scope, key(p))),
       keys: () => store.sharedKeys(scope),
@@ -210,10 +287,22 @@ function createAppsHost(ctx) {
    * always limited to this app (live tables, or memory during a preview).
    */
   function methods(appRow, user, classId, store, versionId) {
-    const shared = sharedApi(store, '', appRow.owner_id === user.id || access.isAdmin(user));
+    const forbidden = () => new ApiError('forbidden', 'Das dürfen nur die Lehrkraft bzw. die Besitzerin oder der Besitzer der App.');
+    // App-wide data reaches everyone who opens the app, and nobody reviews it. So only apps of
+    // teachers (or the admin) can write it - their owner or the admin. In an app of a student it
+    // is read-only for everybody, in previews too: after approval the owner could otherwise show
+    // the whole class anything.
+    const shared = sharedApi(store, '', () => {
+      if (!access.isStaff(db.get('SELECT role FROM users WHERE id = ?', appRow.owner_id))) {
+        throw new ApiError('read_only', 'Daten für alle (hub.shared) können nur Apps von Lehrkräften speichern – so sieht niemand Texte, die keine Lehrkraft geprüft hat. Eigene Daten speicherst du mit hub.save.');
+      }
+      if (!access.canManageApp(user, appRow)) throw forbidden();
+    });
     const needClass = () => {
       if (!classId) throw new ApiError('no_class', 'Die App wurde nicht aus einer Klasse heraus geöffnet.');
-      return sharedApi(store, classId, access.canManageClass(user, classId));
+      return sharedApi(store, classId, () => {
+        if (!access.canManageClass(user, classId)) throw forbidden();
+      });
     };
     let manifestCache = null;
     const manifest = () => (manifestCache = manifestCache || manifestFor(appRow, versionId));
@@ -413,6 +502,7 @@ function createAppsHost(ctx) {
       if (!appRow) return sendText(res, 404, 'Nicht gefunden.');
       const pathname = String(req.url).split('?')[0];
       if (pathname === '/_hub/info' && req.method === 'GET') return sendJson(res, 200, { hub: true, hubOrigin: config.hubOrigin });
+      if (pathname === '/_hub/start.js' && (req.method === 'GET' || req.method === 'HEAD')) return serveStartScript(req, res);
       if (pathname === '/_hub/api' && req.method === 'POST') return void api(req, res, appRow);
       if (pathname.startsWith('/_hub/files/') && (req.method === 'GET' || req.method === 'PUT')) return void filesApi(req, res, appRow, pathname.slice(12));
       if (pathname.startsWith('/~') && (req.method === 'GET' || req.method === 'HEAD')) return serveFile(req, res, appRow, pathname.slice(2));
