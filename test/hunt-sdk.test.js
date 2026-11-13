@@ -222,3 +222,18 @@ test('CSV: negative Punkte bleiben Zahlen – der Formelschutz gilt für Text', 
   assert.ok(csv.includes('"\'=HYPERLINK(""x"")"'), 'a formula in text is still guarded');
   assert.ok(csv.includes(`"'-2+3+cmd|' /C calc'!A0";"-1e-7"`), 'text that starts like a negative number is guarded; a tiny score stays a number');
 });
+
+// ===================================================================== saved lists as tables
+
+test('Gespeicherte Listen als Tabelle zeigen nie etwas aus dem JavaScript-Prototyp – bei der Person selbst und bei der Lehrkraft', async () => {
+  const rows = [{ constructor: 'eigener Wert', wort: 'Hund' }, { wort: 'Katze', toString: 'auch eigen' }];
+  const qt = await h.token(Q, G, c1);
+  assert.equal((await call(Q, G, qt, 'save.set', { key: 'liste', value: rows })).ok, true);
+  assert.equal((await call(Q, G, qt, 'results.add', { title: 'LISTE', details: rows })).ok, true);
+  const mine = (await Q.get(`/meine-daten/app/${G.id}`)).text;
+  const teacher = (await T.get(`/klassen/${c1}/apps/${G.id}/ergebnisse/${quinn.id}`)).text;
+  for (const [who, text] of [['Meine Daten', mine], ['Lehrkraft', teacher]]) {
+    assert.ok(text.includes('eigener Wert') && text.includes('auch eigen'), `${who}: the saved values`);
+    assert.ok(!/native code|\[object Object\]/.test(text), `${who}: nothing from Object.prototype in an empty cell`);
+  }
+});

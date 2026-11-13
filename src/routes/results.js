@@ -72,7 +72,8 @@ function detailView(value, labels, depth = 0) {
   if (depth > 2) return html`<pre class="code">${JSON.stringify(value, null, 2)}</pre>`;
   if (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(flat)) {
     const cols = [...new Set(value.flatMap((o) => Object.keys(o)))].slice(0, 12);
-    return dataTable({ cls: 'teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });
+    // Own properties only: a row without a column like 'constructor' gets an empty cell, never Object.prototype's.
+    return dataTable({ cls: 'teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(Object.hasOwn(o, c) ? o[c] : null) })), rows: value });
   }
   if (Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')) {
     if (value.length > 40) return html`<pre class="code">${JSON.stringify(value)}</pre>`;
