@@ -434,3 +434,12 @@ test('Verwaltung: die Speicher-Rangliste wird nicht bei jedem Aufruf neu summier
     await h.stop();
   }
 });
+
+test('Datenbank: die WAL-Datei schrumpft nach großen Löschungen wieder (journal_size_limit 64 MB)', async () => {
+  const h = await startHub();
+  try {
+    assert.equal(h.db.get('PRAGMA journal_size_limit').journal_size_limit, 64 * 1024 * 1024);
+  } finally {
+    await h.stop();
+  }
+});

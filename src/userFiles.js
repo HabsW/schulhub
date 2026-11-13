@@ -63,7 +63,14 @@ function createUserFiles(ctx) {
     if (!fs.existsSync(file)) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const t = path.join(tmp, `uf-${crypto.randomBytes(8).toString('hex')}`);
-      fs.writeFileSync(t, buffer, { mode: 0o640 });
+      // On the disk before the database names it (see uploads.writeBlob).
+      const fd = fs.openSync(t, 'w', 0o640);
+      try {
+        fs.writeSync(fd, buffer);
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
       fs.renameSync(t, file);
     }
     return sha;

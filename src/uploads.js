@@ -105,7 +105,15 @@ function createUploads(ctx) {
     if (!fs.existsSync(file)) {
       fs.mkdirSync(path.dirname(file), { recursive: true });
       const tmp = path.join(tmpDir, `blob-${crypto.randomBytes(8).toString('hex')}`);
-      fs.writeFileSync(tmp, buffer, { mode: 0o640 });
+      // On the disk before the database names it: with synchronous=NORMAL a power cut may keep the row
+      // but must never leave it pointing at a file whose content was still only in memory.
+      const fd = fs.openSync(tmp, 'w', 0o640);
+      try {
+        fs.writeSync(fd, buffer);
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
       fs.renameSync(tmp, file);
     }
     return sha;

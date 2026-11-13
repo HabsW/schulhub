@@ -47,7 +47,12 @@ function createAuth(ctx) {
     if (query.error || !flow || typeof query.state !== 'string' || query.state !== flow.state || typeof query.code !== 'string') throw failed;
     let result;
     try {
-      result = await client.acquireTokenByCode({ code: query.code, scopes: SCOPES, redirectUri: redirectUri(), codeVerifier: flow.verifier });
+      // MSAL keeps tokens and the account in memory unless told not to: the Hub keeps nothing of Microsoft's.
+      result = await client.acquireTokenByCode({
+        code: query.code, scopes: SCOPES, redirectUri: redirectUri(), codeVerifier: flow.verifier,
+        storeInCache: { idToken: false, accessToken: false, refreshToken: false },
+      });
+      if (result && result.account) client.getTokenCache().removeAccount(result.account).catch(() => {});
     } catch (err) {
       console.warn('Token exchange failed:', err.errorCode || err.message);
       throw failed;

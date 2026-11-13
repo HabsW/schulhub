@@ -503,7 +503,9 @@ function openDb(file) {
   // the database consistent in every case and loses nothing when the process crashes or is killed;
   // only a power cut or an operating-system crash can undo the last commits before the checkpoint.
   // Deleting data must survive even that: those transactions are flushed (tx with { durable: true }).
-  raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+  // journal_size_limit: after a checkpoint the WAL file shrinks back to at most 64 MB (it kept the size of
+  // its biggest moment - e.g. a large deletion - for good).
+  raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_size_limit = 67108864;');
   migrate(raw);
   // Statistics for the query planner (cheap: SQLite only looks at tables that need it, with a row limit).
   raw.exec('PRAGMA optimize = 0x10002;');
