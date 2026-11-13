@@ -6,6 +6,9 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
 const { startHub } = require('./helpers');
 
 let h;
@@ -253,4 +256,87 @@ test('Anfragen ohne Inhalt (Token, „Meine Daten“): eine normale Antwort, nie
   assert.equal(h.db.get('SELECT anonymous_scores FROM users WHERE id = ?', pia.id).anonymous_scores, 0, 'nothing switched on');
   // Without the CSRF token it is still refused.
   assert.equal((await P.raw('POST', `/apps/${G.id}/token`, { headers: { accept: 'application/json' } })).status, 403);
+});
+
+// =============================================================== the SDK in the browser (hub-sdk.js)
+
+/**
+ * Runs sdk/hub-sdk.js in a frame-like sandbox: the Hub page answers the handshake (with `token`),
+ * and `api` answers every POST /_hub/api ({ method, params } -> { status, body }) - or `fetch`
+ * answers every request of the SDK.
+ */
+function sdkInFrame(api, { token = 'T', fetch = null } = {}) {
+  const HUB = 'http://hub.example';
+  const listeners = [];
+  const quiet = () => {};
+  const win = {
+    console: { log: quiet, info: quiet, warn: quiet, error: quiet },
+    location: { protocol: 'http:', search: '', pathname: '/~t/index.html' },
+    addEventListener: (type, fn) => type === 'message' && listeners.push(fn),
+    removeEventListener: quiet,
+    setTimeout, clearTimeout, setInterval: () => 0, clearInterval: quiet,
+    fetch: async (url, init = {}) => {
+      if (url === '/_hub/info') return { ok: true, status: 200, json: async () => ({ hub: true, hubOrigin: HUB }) };
+      if (fetch) return fetch(url, init);
+      const { status, body } = await api(JSON.parse(init.body));
+      return { ok: status === 200, status, json: async () => body };
+    },
+  };
+  win.parent = {
+    postMessage(msg) {
+      const answer = msg.hub === 'hello'
+        ? { hub: 'welcome', id: msg.id, token, expiresIn: 600, mode: 'live', user: { id: 'u', name: 'Pia' }, class: null, app: { name: 'A', version: 1 }, theme: 'auto' }
+        : { hub: 'token', id: msg.id, token, expiresIn: 600 };
+      setImmediate(() => listeners.forEach((fn) => fn({ origin: HUB, source: win.parent, data: answer })));
+    },
+  };
+  win.window = win;
+  vm.createContext(win);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'sdk', 'hub-sdk.js'), 'utf8'), win);
+  return win.Hub.connect();
+}
+
+/** sdk/hub-sdk.js in a frame of `app`, talking to the real Hub with the SDK token `tok` of browser b. */
+function sdkAgainstHub(b, app, tok) {
+  const host = h.appHost(app);
+  const adapt = (r) => ({ status: r.status, ok: r.status >= 200 && r.status < 300, json: async () => JSON.parse(r.text), blob: async () => r.buffer });
+  return sdkInFrame(null, {
+    token: tok.token,
+    fetch: async (url, init = {}) => {
+      const headers = Object.fromEntries(Object.entries(init.headers || {}).map(([k, v]) => [k.toLowerCase(), v]));
+      return adapt(await b.raw(init.method || 'GET', url, { host, headers, body: init.body === undefined ? null : init.body }));
+    },
+  });
+}
+
+test('SDK: hub.files.get mit ungültigem Namen endet mit bad_key – nie mit der Fehlermeldung als Dateiinhalt', async () => {
+  const tok = await h.token(Q, G, c1);
+  const hub = await sdkAgainstHub(Q, G, tok);
+  assert.deepEqual(await hub.files.put('notiz.txt', 'Hallo'), { name: 'notiz.txt', type: 'text/plain', size: 5 });
+  assert.equal(String(await hub.files.get('notiz.txt')), 'Hallo');
+  assert.equal(await hub.files.get('gibt-es-nicht'), null);
+  await assert.rejects(hub.files.put('kein gültiger name', 'x'), (e) => e.code === 'bad_key');
+  await assert.rejects(
+    hub.files.get('kein gültiger name').then((got) => {
+      throw new Error(`resolved with ${String(got)}`);
+    }),
+    (e) => e.code === 'bad_key'
+  );
+});
+
+test('SDK: nach einem gescheiterten Laden der Klasseneinstellungen fragt hub.settings beim nächsten Mal neu', async () => {
+  let calls = 0;
+  const hub = await sdkInFrame(async ({ method }) => {
+    assert.equal(method, 'settings.all');
+    calls++;
+    // The first call meets a busy moment (too many requests at once); later ones work.
+    return calls === 1
+      ? { status: 429, body: { ok: false, error: { code: 'rate_limited', message: 'Zu viele gleichzeitige Anfragen.' } } }
+      : { status: 200, body: { ok: true, result: { woerter: [['Hund', 'dog']] } } };
+  });
+  await assert.rejects(hub.settings.get('woerter'), (e) => e.code === 'rate_limited');
+  assert.deepEqual(await hub.settings.get('woerter'), [['Hund', 'dog']], "the class's words, not the error again");
+  assert.equal(calls, 2);
+  assert.deepEqual(await hub.settings.all(), { woerter: [['Hund', 'dog']] }, 'and then from the cache');
+  assert.equal(calls, 2);
 });
