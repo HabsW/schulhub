@@ -10,6 +10,8 @@ const { analyzeVersion } = require('./checks');
 const DAY = 86_400_000;
 /** The first string after every string that starts with `prefix` (ASCII prefixes: ids and paths). */
 const prefixEnd = (prefix) => prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
+/** Where the notice about an announcement points: one link per announcement, so its notices can go with it. */
+const announcementLink = (id) => `/start#ankuendigung-${id}`;
 
 /**
  * Columns that keep a person's id WITHOUT a foreign key to users (foreign keys cascade or are set
@@ -79,10 +81,11 @@ function createServices(ctx) {
     for (const c of db.all('SELECT * FROM classes WHERE archived_at IS NOT NULL AND archived_at < ?', now - s.get('retention.archivedClassDays') * DAY)) {
       deleteClass(null, c, 'automatisch nach Ablauf der Aufbewahrungsfrist');
     }
-    db.run(
-      'UPDATE users SET flagged_inactive_at = ? WHERE flagged_inactive_at IS NULL AND COALESCE(last_login_at, created_at) < ?',
-      now, now - s.get('retention.inactiveFlagDays') * DAY
-    );
+    const inactiveBefore = now - s.get('retention.inactiveFlagDays') * DAY;
+    db.run('UPDATE users SET flagged_inactive_at = ? WHERE flagged_inactive_at IS NULL AND COALESCE(last_login_at, created_at) < ?', now, inactiveBefore);
+    // The flag means "no sign-in for the period the admin set NOW": after the admin made it longer, an account
+    // flagged under the shorter one is not "lange nicht benutzt" any more (signing in also clears it).
+    db.run('UPDATE users SET flagged_inactive_at = NULL WHERE flagged_inactive_at IS NOT NULL AND COALESCE(last_login_at, created_at) >= ?', inactiveBefore);
     db.run('DELETE FROM notices WHERE created_at < ?', now - 180 * DAY);
     db.run('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?', now - 30 * DAY);
     db.run('DELETE FROM app_usage WHERE day < ?', dayKey(now - 400 * DAY));
@@ -117,10 +120,12 @@ function createServices(ctx) {
   /**
    * The rows of a class and what belongs only to it (cascades: members, codes, apps in it, assignments,
    * feedback, settings, announcements). In-Hub notices that lead into the class - to one of its
-   * assignments or to a review request in it - would lead nowhere: they go too. Call inside a transaction.
+   * assignments, its announcements or a review request in it - would lead nowhere and quote titles
+   * that are gone: they go too. Call inside a transaction.
    */
   function deleteClassRows(classId) {
-    for (const x of db.all('SELECT id FROM assignments WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
+    for (const { id } of db.all('SELECT id FROM assignments WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
+    for (const { id } of db.all('SELECT id FROM announcements WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', announcementLink(id));
     const review = `/pruefen/${classId}/`;
     db.run('DELETE FROM notices WHERE href >= ? AND href < ?', review, prefixEnd(review));
     db.run('DELETE FROM shared_data WHERE class_id = ?', classId);
@@ -434,6 +439,7 @@ function createServices(ctx) {
   }
 
   return {
+    announcementLink,
     audit, pruneAudit, notify, recordPlay, maintenance,
     createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData,
   };

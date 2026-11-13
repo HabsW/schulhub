@@ -182,16 +182,22 @@ async function createBackup(ctx) {
     };
     // No content file is deleted from step 1 until step 3 is done: the copy of step 2 may refer to
     // a file that arrives after step 1 and goes again before step 3 (deletions wait, see gcHold).
+    let used;
     holdGarbage(ctx);
     try {
       await pinAll(); // 1. the files that exist now
-      await dbJobs.snapshot(db.file, path.join(dir, 'hub.sqlite')); // 2. the database at one moment, in a worker thread
+      used = await dbJobs.snapshot(db.file, path.join(dir, 'hub.sqlite')); // 2. the database at one moment, in a worker thread
       await pinAll(); // 3. files that arrived while copying
     } finally {
       releaseGarbage(ctx);
     }
 
-    const keys = [...pinned].sort();
+    // Only the files the copy refers to. One pinned in step 1 whose rows were deleted before step 2
+    // (an account or app data deleted while the backup runs) belongs to nobody in the copy: it stays out.
+    const keys = [...pinned].filter((k) => {
+      const [store, , sha] = k.split('/');
+      return used[store].has(sha);
+    }).sort();
     const entries = [{ path: 'hub.sqlite', file: path.join(dir, 'hub.sqlite') }, ...keys.map((k) => ({ path: k, file: path.join(dir, k) }))];
     let bytes = 0;
     for (const e of entries) bytes += await statSize(e.file);
@@ -435,7 +441,8 @@ function checkDatabase(file, written, dir) {
       blobs: code.filter((s) => !written.has(`blobs/${String(s).slice(0, 2)}/${s}`)).length,
       userfiles: files.filter((s) => !written.has(`userfiles/${String(s).slice(0, 2)}/${s}`)).length,
     };
-    return { version, users: count('users'), classes: count('classes'), apps: count('apps'), missing };
+    const used = { blobs: new Set(code), userfiles: new Set(files) };
+    return { version, users: count('users'), classes: count('classes'), apps: count('apps'), missing, used };
   } catch (err) {
     if (err instanceof RestoreError) throw err;
     fail(`hub.sqlite lässt sich nicht als Datenbank öffnen (${String(err.message).slice(0, 160)}).`);
@@ -485,11 +492,22 @@ async function restoreBackup({ zipFile, dataDir, force = false, log = () => {} }
     const written = await extractArchive(zipFile, staging);
     log('Entpackt, alle Prüfsummen stimmen.');
     const dbFile = path.join(staging, 'hub.sqlite');
-    const info = checkDatabase(dbFile, written, staging);
+    const { used, ...info } = checkDatabase(dbFile, written, staging);
     log(`Datenbank geprüft (Version ${info.version}): ${plural(info.users, 'Konto', 'Konten')}, ${plural(info.classes, 'Klasse', 'Klassen')}, ${plural(info.apps, 'App', 'Apps')}.`);
     if (info.missing.blobs || info.missing.userfiles) {
       log(`Achtung: ${plural(info.missing.blobs, 'App-Datei', 'App-Dateien')} und ${plural(info.missing.userfiles, 'Nutzerdatei', 'Nutzerdateien')}, auf die die Datenbank verweist, fehlen in der Sicherung.`);
     }
+    // Only content the restored database refers to. A file without rows (deleted while an older backup
+    // was made) would lie on the disk for good - nothing ever deletes it - and go into every later backup.
+    let dropped = 0;
+    for (const name of written) {
+      const m = ENTRY.exec(name);
+      if (!m[1] || used[m[1]].has(m[3])) continue;
+      fs.rmSync(path.join(staging, ...name.split('/')));
+      counts[m[1]]--;
+      dropped++;
+    }
+    if (dropped) log(`${plural(dropped, 'Datei', 'Dateien')} ohne Bezug in der Datenbank nicht übernommen.`);
     // Sessions from the time of the backup must not come back to life.
     const w = new DatabaseSync(dbFile);
     try {

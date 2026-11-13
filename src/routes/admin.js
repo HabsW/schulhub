@@ -347,7 +347,8 @@ module.exports = (app, ctx) => {
     const u = target(req);
     const role = String(req.body.rolle);
     if (!Object.hasOwn(ROLE_LABEL, role)) throw bad('Unbekannte Rolle.');
-    if (u.role === 'admin' && role !== 'admin' && admins() <= 1) throw bad('Es muss mindestens einen Admin geben. Ernenne zuerst ein weiteres Konto zum Admin.');
+    // admins() counts ACTIVE admins only: a blocked admin is not one of them, so changing their role keeps the count.
+    if (u.role === 'admin' && !u.disabled && role !== 'admin' && admins() <= 1) throw bad('Es muss mindestens einen Admin geben. Ernenne zuerst ein weiteres Konto zum Admin.');
     if (u.role !== role) {
       let left = [];
       db.tx(() => {

@@ -114,14 +114,20 @@ module.exports = (app, ctx) => {
 
   /** Announcements this person should see now (school-wide and their classes), not dismissed. */
   function announcementsFor(user) {
+    // The SQL already keeps only announcements of classes the person can see (the rule of
+    // access.canViewClass): with a limit on ALL announcements of the school, those of other
+    // classes would push the person's own (and the school-wide ones) off the start page.
     return db
       .all(
         `SELECT an.*, c.name AS class_name, u.name AS author_name FROM announcements an
            LEFT JOIN classes c ON c.id = an.class_id LEFT JOIN users u ON u.id = an.author_id
-          WHERE (an.expires_at IS NULL OR an.expires_at > ?)
-            AND NOT EXISTS (SELECT 1 FROM announcement_dismissed d WHERE d.announcement_id = an.id AND d.user_id = ?)
+          WHERE (an.expires_at IS NULL OR an.expires_at > ?1)
+            AND (an.class_id IS NULL OR ?3 = 1 OR an.class_id IN (
+                  SELECT m.class_id FROM class_members m JOIN classes mc ON mc.id = m.class_id
+                   WHERE m.user_id = ?2 AND (m.role = 'teacher' OR mc.archived_at IS NULL)))
+            AND NOT EXISTS (SELECT 1 FROM announcement_dismissed d WHERE d.announcement_id = an.id AND d.user_id = ?2)
           ORDER BY an.created_at DESC LIMIT 20`,
-        Date.now(), user.id
+        Date.now(), user.id, access.isAdmin(user) ? 1 : 0
       )
       .filter((an) => access.canSeeAnnouncement(user, an))
       .slice(0, 3);

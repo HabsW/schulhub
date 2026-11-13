@@ -346,8 +346,8 @@ module.exports = (app, ctx) => {
     const x = manageAssignment(req);
     db.tx(() => {
       db.run('DELETE FROM assignments WHERE id = ?', x.id);
-      // "Neue Aufgabe" would now lead nowhere (404) and still quote its title.
-      db.run("DELETE FROM notices WHERE kind = 'aufgabe' AND href = ?", `/aufgaben/${x.id}`);
+      // "Neue Aufgabe" (and any other notice leading to it) would lead nowhere (404) and still quote its title.
+      db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${x.id}`);
       services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
     });
     flash(req, `Die Aufgabe „${x.title}“ ist gelöscht.`);
