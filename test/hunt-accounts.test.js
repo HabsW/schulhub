@@ -79,3 +79,24 @@ test('Rollen: ein gesperrtes Admin-Konto lässt sich herabstufen, das einzige ak
   assert.equal((await A.post(`/admin/nutzer/${admin.id}/rolle`, { rolle: 'teacher' })).status, 400);
   assert.equal(h.db.get('SELECT role FROM users WHERE id = ?', admin.id).role, 'admin');
 });
+
+test('Konto löschen: wer nicht mehr Lehrkraft ist, erfährt trotzdem, welche Klassen mit dem Konto verschwinden', async () => {
+  const teacher = h.addUser('Herr Brandt', 'teacher');
+  const student = h.addUser('Lina Brandt', 'student');
+  const [T, S] = await Promise.all([teacher, student].map((u) => h.browser().login(u)));
+  await T.post('/klassen', { name: 'Theater-AG' });
+  const cls = teacherClass(teacher.id, 'Theater-AG');
+  await S.post(`/beitreten/${joinCode(cls)}`);
+  assert.ok((await T.get('/meine-daten')).text.includes('„Theater-AG“, weil du dort die einzige Lehrkraft bist'), 'as a teacher he is told');
+
+  // The admin makes him a student; he stays the only teacher of the class (a known open question).
+  await A.page(`/admin/konten/${teacher.id}`);
+  assert.equal((await A.post(`/admin/nutzer/${teacher.id}/rolle`, { rolle: 'student' })).status, 303);
+  const page = (await T.page('/meine-daten')).text;
+  assert.ok(page.includes('„Theater-AG“, weil du dort die einzige Lehrkraft bist'), 'the deletion page names the class that will be deleted');
+
+  // What the page has to warn about really happens: the class goes with the account, and Lina loses it.
+  assert.equal((await T.post('/meine-daten/konto-loeschen', { bestaetigung: 'LÖSCHEN' })).status, 303);
+  assert.equal(h.db.get('SELECT 1 AS ok FROM classes WHERE id = ?', cls), undefined);
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM class_members WHERE user_id = ?', student.id).n, 0);
+});

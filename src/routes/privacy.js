@@ -160,7 +160,9 @@ module.exports = (app, ctx) => {
     const ownApps = db.all('SELECT id, name FROM apps WHERE owner_id = ? ORDER BY name COLLATE NOCASE LIMIT 6', u.id);
     const favourites = db.all('SELECT a.id, a.name FROM favorites f JOIN apps a ON a.id = f.app_id WHERE f.user_id = ? ORDER BY a.name COLLATE NOCASE LIMIT 6', u.id);
     const bytes = data.reduce((sum, a) => sum + a.save_bytes + a.file_bytes, 0);
-    const sole = access.isStaff(u) ? soleTeacherClasses(u.id) : [];
+    // By membership, like services.deleteUser - not by the account's role: a teacher made a student keeps
+    // their teacher memberships, and those classes still go with the account.
+    const sole = soleTeacherClasses(u.id);
     const staff = access.isStaff(u);
 
     const classRows = classes.map((c) => {
