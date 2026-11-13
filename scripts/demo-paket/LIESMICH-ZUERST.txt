@@ -1,26 +1,30 @@
 SchulHub – Demo
 ===============
 
-Die ausführliche Anleitung mit Bildern liegt als PDF neben dieser ZIP-Datei:
-"SchulHub-Demo-Anleitung-Mac-Windows.pdf". Alles über SchulHub steht in
-"SchulHub-Dokumentation.pdf".
+SchulHub läuft hier als ganz normales Programm auf diesem Rechner: ohne Installation,
+ohne Internet und ohne Microsoft-Konto – mit erfundenen Beispieldaten und Testpersonen.
+Die Anleitung mit Bildern: "SchulHub-Demo-Anleitung-Mac-Windows.pdf".
+Alles über SchulHub: "SchulHub-Dokumentation.pdf".
 
-Kurzfassung
------------
-1. Node.js installieren: die LTS-Version von https://nodejs.org (nur einmal nötig).
-2. Diese ZIP-Datei vollständig entpacken
-   (Windows: Rechtsklick auf die ZIP-Datei > "Alle extrahieren ...").
-3. Starten
-   Windows 11: "Start-Windows.cmd" doppelt anklicken.
-   Mac: das Programm "Terminal" öffnen, "cd " tippen (mit Leerzeichen danach),
-        diesen Ordner in das Terminal-Fenster ziehen, Enter drücken
-        und dann eingeben:  npm run demo
-4. Der Browser öffnet http://localhost:3000 – dort eine Testperson anklicken.
-   Am besten Chrome, Edge oder Firefox (Safari ist nicht getestet).
+Starten
+-------
+Windows 10/11:  "SchulHub starten.cmd" doppelt anklicken.
+    Warnt Windows ("Der Computer wurde durch Windows geschützt"):
+    "Weitere Informationen" > "Trotzdem ausführen".
 
-Beenden:      das Fenster mit dem Server schließen.
-Zurücksetzen: den Ordner "data" in diesem Ordner löschen; beim nächsten Start
-              entstehen die Beispieldaten neu.
+Mac (ab macOS 13.5):  "SchulHub starten.command" doppelt anklicken.
+    Beim ersten Mal sagt macOS, es könne die Datei nicht überprüfen: "Fertig" (oder "OK")
+    klicken, dann Systemeinstellungen > Datenschutz & Sicherheit > unten bei
+    "SchulHub starten.command": "Dennoch öffnen" > noch einmal "Dennoch öffnen"
+    (Passwort oder Touch ID). Danach genügt jedes Mal ein Doppelklick.
+
+Ein Fenster öffnet sich – das ist SchulHub – und kurz danach der Browser mit
+http://localhost:3000. Dort eine Testperson anklicken. Ein zweiter Doppelklick,
+während SchulHub läuft, öffnet einfach wieder den Browser.
+
+Beenden:      das Fenster von SchulHub schließen.
+Zurücksetzen: SchulHub beenden, hier den Ordner "data" löschen und neu starten –
+              die Beispieldaten entstehen frisch.
 
 Das ist der lokale Testmodus: ohne Microsoft-Anmeldung, nur auf diesem Rechner
-erreichbar, mit erfundenen Beispieldaten. So niemals ins Internet stellen.
+erreichbar, mit erfundenen Daten. So niemals ins Internet stellen.

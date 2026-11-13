@@ -28,7 +28,7 @@ npm run dev
 ```
 
 Dann <http://localhost:3000> öffnen. `npm run demo` macht dasselbe und öffnet den Browser von selbst,
-sobald der Hub bereit ist.
+sobald der Hub bereit ist – läuft er schon, öffnet es nur den Browser.
 
 `npm run dev` startet den **lokalen Testmodus**: ohne Microsoft, mit Beispieldaten und einer
 Anmeldung als Testperson (ein Klick auf der Startseite). Beim ersten Start mit leerer Datenbank:
@@ -373,7 +373,7 @@ public/              hub.css (Design-System), Seiten-CSS in public/css/, Skripte
 templates/           Vorlagen für neue Apps
 examples/            sechs Beispiel-Apps
 scripts/             restore.js; vendor/ (Bau von CodeMirror und Symbolen, nur für Maintainer);
-                     demo-paket/ (Demo-ZIP mit Startdateien für Mac und Windows bauen)
+                     demo-paket/ (die Demo als Programm für Windows und Mac bauen)
 test/                Tests, die die Regeln zu brechen versuchen
 licenses/            Lizenzen der eingebundenen Schriften und Symbole
 ```
@@ -418,9 +418,12 @@ Details und geprüfte Punkte: `scripts/vendor/README.md`.
 ## Entwicklung
 
 - Gestaltung und Bausteine: [DESIGN.md](DESIGN.md). Seiten-CSS gehört nach `public/css/<bereich>.css`.
-- Demo zum Weitergeben: `scripts/demo-paket/build.sh <zielordner>` baut `SchulHub-Demo.zip` aus dem
-  letzten Commit – mit allen npm-Paketen (kein `npm install` nötig) und Startdateien für Windows
-  (`Start-Windows.cmd`) und Mac (`Start-Mac.command`, oder im Terminal `npm run demo`).
+- Demo zum Weitergeben: `scripts/demo-paket/build.sh <zielordner>` baut `SchulHub-Demo-Windows.zip`
+  und `SchulHub-Demo-Mac.zip` aus dem letzten Commit – ein ganz normales Programm ohne Installation und
+  ohne Internet: mit allen npm-Paketen und dem offiziellen Node.js (Version und SHA-256 im Skript
+  festgelegt; Windows x64, Mac mit Apple silicon und Intel). Gestartet wird mit einem Doppelklick auf
+  `SchulHub starten.cmd` bzw. `SchulHub starten.command`; ein zweiter Doppelklick, während die Demo
+  läuft, öffnet nur den Browser.
 - Jede neue Funktion braucht eine Prüfung auf dem Server (`src/access.js`), einen Angriffstest in
   `test/` und einen Eintrag in [SECURITY.md](SECURITY.md).
 - `test/access-model.test.js` vergleicht jede Funktion von `src/access.js` in zufälligen Welten mit

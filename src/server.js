@@ -30,28 +30,55 @@ try {
   process.exit(1);
 }
 
-let hub;
-try {
-  hub = createHub(config);
-} catch (err) {
-  // A refusal whoever runs the Hub can act on (a data folder without its database): the message alone.
-  console.error(err.code === 'SCHULHUB_DATABASE_MISSING' ? err.message : err);
-  process.exit(1);
-}
-if (dev) seedDemo(hub.ctx);
+const open = dev && process.argv.includes('--open');
 
-hub.start().then(
-  () => {
-    console.log(`${config.hubName} läuft: ${config.hubOrigin}`);
-    console.log(`Apps laufen isoliert unter: ${config.appsOriginPattern}`);
-    if (dev) console.log('LOKALER TESTMODUS: Testpersonen-Anmeldung aktiv, Server nur auf diesem Rechner erreichbar.');
-    if (dev && process.argv.includes('--open')) openBrowser(config.hubOrigin);
-  },
-  (err) => {
-    console.error(err.code === 'EADDRINUSE' ? `Port ${config.listenPort} ist schon belegt.` : err.message);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
+
+async function main() {
+  // The demo started a second time (a double-click on its start file while it runs): like any program, it shows
+  // the one that runs - and this process never touches the data folder.
+  if (open && (await hubAnswers(config))) {
+    console.log(`${config.hubName} läuft schon: ${config.hubOrigin} – der Browser öffnet sich.`);
+    openBrowser(config.hubOrigin);
+    return;
+  }
+  let hub;
+  try {
+    hub = createHub(config);
+  } catch (err) {
+    // A refusal whoever runs the Hub can act on (a data folder without its database): the message alone.
+    console.error(err.code === 'SCHULHUB_DATABASE_MISSING' ? err.message : err);
     process.exit(1);
   }
-);
+  if (dev) seedDemo(hub.ctx);
+
+  hub.start().then(
+    () => {
+      console.log(`${config.hubName} läuft: ${config.hubOrigin}`);
+      console.log(`Apps laufen isoliert unter: ${config.appsOriginPattern}`);
+      if (dev) console.log('LOKALER TESTMODUS: Testpersonen-Anmeldung aktiv, Server nur auf diesem Rechner erreichbar.');
+      if (open) openBrowser(config.hubOrigin);
+    },
+    (err) => {
+      console.error(err.code === 'EADDRINUSE' ? `Port ${config.listenPort} ist schon belegt.` : err.message);
+      process.exit(1);
+    }
+  );
+}
+
+/** Local demo only: does this Hub already answer at its own address (on this computer)? */
+async function hubAnswers({ hubOrigin, hubName }) {
+  try {
+    const res = await fetch(`${hubOrigin}/`, { signal: AbortSignal.timeout(2000) });
+    const title = /<title>([^<]*)<\/title>/.exec(await res.text());
+    return res.ok && Boolean(title) && title[1].includes(hubName);
+  } catch {
+    return false; // nothing there (or something else): start normally
+  }
+}
 
 /** Local demo only (`npm run demo`): open the start page in the default browser once the Hub is ready. */
 function openBrowser(url) {

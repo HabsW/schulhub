@@ -1,2 +1,2 @@
 # Windows start file: keep CRLF line endings exactly as stored.
-scripts/demo-paket/Start-Windows.cmd -text
+"scripts/demo-paket/SchulHub starten.cmd" -text
