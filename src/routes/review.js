@@ -275,7 +275,9 @@ module.exports = (app, ctx) => {
     const { a, cls, version } = loadReview(req);
     const text = cleanText(req.body.text, 2000, { multiline: true });
     if (!text) throw bad('Der Kommentar ist leer.');
-    if (db.get('SELECT COUNT(*) AS n FROM comments WHERE app_id = ?', a.id).n >= L.commentsPerApp) throw bad('Hier gibt es schon sehr viele Kommentare.');
+    // Only plain comments count: decisions (submitted, approved, returned) can never be deleted, so a long review
+    // history would otherwise close the conversation for good.
+    if (db.get("SELECT COUNT(*) AS n FROM comments WHERE app_id = ? AND kind = 'comment'", a.id).n >= L.commentsPerApp) throw bad('Hier gibt es schon sehr viele Kommentare.');
     db.run(
       "INSERT INTO comments (id, app_id, author_id, body, created_at, kind, version_id, class_id) VALUES (?, ?, ?, ?, ?, 'comment', ?, ?)",
       newId(), a.id, req.user.id, text, Date.now(), version.id, cls.id

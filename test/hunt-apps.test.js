@@ -204,3 +204,30 @@ test('Konto gelöscht, während ein ZIP entpackt wird: kein Eintrag nennt danach
   const left = h.db.all('SELECT action, actor_label, target FROM audit_log WHERE actor_id = ? OR actor_label LIKE ? OR target LIKE ?', zoe.id, `%${name}%`, '%Zoes Zipspiel%');
   assert.deepEqual(left, [], 'the audit log names the deleted person and her app');
 });
+
+test('Kommentare: ein langer Prüf-Verlauf schließt das Gespräch nicht für immer', async () => {
+  const small = await startHub({ limits: { commentsPerApp: 6 } });
+  try {
+    const [teacher, owner] = [small.addUser('Herr Lehmann', 'teacher'), small.addUser('Mia Schmidt', 'student')];
+    const [T, O] = await Promise.all([teacher, owner].map((u) => small.browser().login(u)));
+    const c = (await T.post('/klassen', { name: '7b' })).headers.location.split('/').pop();
+    await O.post(`/beitreten/${small.db.get('SELECT code FROM join_codes WHERE class_id = ?', c).code}`);
+    const app = await small.makeApp(O, 'Mias App', { 'index.html': 'v1' });
+    await O.post(`/apps/${app.id}/einreichen`, { klasse: c });
+    // Mia keeps working: every new version she publishes waits in the class and adds a line to the history.
+    for (let i = 2; i <= 7; i++) {
+      const v = await small.uploadFolder(O, app.id, { 'index.html': `v${i}` });
+      assert.equal((await O.post(`/apps/${app.id}/veroeffentlichen`, { version: v })).status, 303);
+    }
+    assert.equal(small.db.get("SELECT COUNT(*) AS n FROM comments WHERE app_id = ? AND kind = 'comment'", app.id).n, 0, 'nobody has written anything yet');
+    await T.page(`/pruefen/${c}/${app.id}`);
+    assert.equal((await T.post(`/pruefen/${c}/${app.id}/kommentar`, { text: 'Eine Frage zur Anleitung' })).status, 303, 'the teacher cannot ask a question');
+    assert.equal((await O.post(`/apps/${app.id}/kommentare`, { text: 'Meine Antwort' })).status, 303, 'the owner cannot answer');
+    // The limit itself still holds for what people write.
+    for (let i = 0; i < 4; i++) await O.post(`/apps/${app.id}/kommentare`, { text: `Noch etwas ${i}` });
+    assert.equal((await O.post(`/apps/${app.id}/kommentare`, { text: 'zu viel' })).status, 400);
+    assert.equal(small.db.get("SELECT COUNT(*) AS n FROM comments WHERE app_id = ? AND kind = 'comment'", app.id).n, 6);
+  } finally {
+    await small.stop();
+  }
+});
