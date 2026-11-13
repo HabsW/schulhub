@@ -340,3 +340,51 @@ test('SDK: nach einem gescheiterten Laden der Klasseneinstellungen fragt hub.set
   assert.deepEqual(await hub.settings.all(), { woerter: [['Hund', 'dog']] }, 'and then from the cache');
   assert.equal(calls, 2);
 });
+
+// ================================================== limits one person can use up for others (decision open)
+
+// The limit "20 leaderboards per app" counts every board anybody ever used in the app, and nobody can
+// remove a board (no SDK call, no Hub page). A fix changes that documented limit (e.g. 20 boards per
+// person and app): a product decision - so this test is a todo until it is taken.
+test('Bestenlisten: eine einzelne Person kann die Bestenlisten einer App nicht für alle anderen aufbrauchen', { todo: 'Grenze „Bestenlisten pro App“ – Entscheidung offen (Vorschlag: pro Person und App)' }, async () => {
+  const app = await h.makeApp(T, uniq('Rennen'), { 'index.html': '<h1>Rennen</h1>' });
+  assert.equal((await T.post(`/klassen/${c1}/apps`, { app: app.id })).status, 303);
+  // Quinn holds her own SDK token (developer tools) and fills every board the app may have.
+  const qt = await h.token(Q, app, c1);
+  for (let i = 0; i < h.config.limits.boardsPerApp; i++) {
+    assert.equal((await call(Q, app, qt, 'scores.submit', { board: `quinn-${i}`, score: 1 })).ok, true);
+  }
+  // The app's real board, first used by Pia: refused for her - and for everybody, for good.
+  const pt = await h.token(P, app, c1);
+  const r = await call(P, app, pt, 'scores.submit', { board: 'punkte', score: 10 });
+  assert.equal(r.ok, true, `Pia's own score: ${JSON.stringify(r)}`);
+});
+
+// "The newest 500 results per person and app" are counted over all classes and over results without a
+// class: practice elsewhere deletes the results a class's teacher sees (and the assignment's "done").
+// A fix changes that documented limit (e.g. the newest 500 per person, app and class): a product
+// decision - so this test is a todo until it is taken.
+test('Ergebnisse: was in einer anderen Klasse oder ohne Klasse entsteht, verdrängt nie die Ergebnisse dieser Klasse', { todo: 'Grenze „Ergebnisse pro Person und App“ – Entscheidung offen (Vorschlag: pro Person, App und Klasse)' }, async () => {
+  const keep = h.config.limits.resultsPerUser;
+  h.config.limits.resultsPerUser = 5;
+  try {
+    const { assignments } = h.hub.ctx;
+    await T.page(`/klassen/${c1}/aufgaben/neu`);
+    const made = await T.post(`/klassen/${c1}/aufgaben`, { app: G.id, titel: uniq('Hausaufgabe') });
+    assert.equal(made.status, 303);
+    const x = h.db.get('SELECT * FROM assignments WHERE id = ?', idFrom(made));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Pia does the assignment in 7b ...
+    const t7 = await h.token(P, G, c1);
+    assert.equal((await call(P, G, t7, 'results.add', { title: 'HAUSAUFGABE-7B', score: 4, maxScore: 4 })).ok, true);
+    assert.equal(assignments.stateOf(x, pia.id), 'done');
+    // ... and then practises a lot in 8a.
+    const t8 = await h.token(P, G, c2);
+    for (let i = 0; i < 5; i++) assert.equal((await call(P, G, t8, 'results.add', { title: `UEBUNG-8A-${i}`, score: 1, maxScore: 4 })).ok, true);
+    const detail = (await T.get(`/klassen/${c1}/apps/${G.id}/ergebnisse/${pia.id}`)).text;
+    assert.ok(detail.includes('HAUSAUFGABE-7B'), "7b's teacher still sees the result made in 7b");
+    assert.equal(assignments.stateOf(x, pia.id), 'done', 'the assignment stays done');
+  } finally {
+    h.config.limits.resultsPerUser = keep;
+  }
+});

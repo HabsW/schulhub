@@ -384,6 +384,16 @@ Tests: *Alles von Nutzern Geschriebene…*, *unbekannte Host-Namen…*, *Hub-CSP
 - **Upload bodies are still buffered in memory**, at most 4 × 25 MB per person at a time. Many accounts
   at once can still add up; streaming file bodies to disk would remove this.
 - **Teachers see saves, best scores, progress and achievements made outside their class** (at home, in another class) in apps approved in their class – by decision, and the texts for students say so. Results stay per class.
+- **One person can use up an app's leaderboards** (decision open). The limit of 20 leaderboards counts every board anybody ever
+  used in the app, and nobody can remove one (no SDK call, no Hub page). One student with their own SDK token (developer tools) –
+  or an app that names a board per player, or renames its boards in a new version – uses them up, and from then on nobody can
+  enter a score on a new board of that app. Proposed: 20 boards per person and app. Test (todo): *Bestenlisten: eine einzelne
+  Person kann die Bestenlisten einer App nicht für alle anderen aufbrauchen* (`test/hunt-sdk.test.js`)
+- **Results are pruned across classes** (decision open). "The newest 500 results per person and app" counts the results of every
+  class and those made without a class: practising at home or in another class deletes the results a class's teacher sees, and
+  an assignment that counted as done is open again. Proposed: the newest 500 per person, app and class (and as many without a
+  class). Test (todo): *Ergebnisse: was in einer anderen Klasse oder ohne Klasse entsteht, verdrängt nie die Ergebnisse dieser
+  Klasse* (`test/hunt-sdk.test.js`)
 - **Text other people wrote about a deleted person** (feedback bodies, assignment titles they chose, announcements) is not rewritten when that account is deleted.
 - **A planned assignment brings no notice at its start**; students see it on their start page from then on. And a student app renamed while its class was archived shows the new name when the class is restored, without another review. The same holds when the owner takes an app out of a class, renames it, and the teacher brings it back ("Zurückholen"): the teacher sees the new name, but it is not reviewed in the workbench.
 - **Frame navigation blocking** was verified in Chromium only. Browsers that do not apply the parent's `frame-src` to later navigations would allow an app to navigate its own frame away (and leak what it knows about its own user).
