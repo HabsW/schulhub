@@ -257,3 +257,75 @@ node scripts/scale/crash.js --data data/scale --rounds 12            # kill -9 w
 Each run copies the seeded folder first and writes `report.md` / `report.json` to `data/scale-results/`.
 `--profile-sql` adds the time per SQL statement. The scripts never touch a real installation: the server
 they start refuses anything but localhost, and `seed.js` refuses a folder that already has a database.
+
+## Appendix: every bug found and fixed (13 November 2026)
+
+Found by the lead's review, the state × action matrix and race tests (`test/matrix.test.js`,
+`test/races.test.js`), the property-based tests of every permission rule (`test/access-model.test.js`),
+five independent bug hunts (`test/hunt-*.test.js`), the independent architecture review and the final
+independent review. Every fix has a test that fails without it (checked by undoing the fix); the tests
+and SECURITY.md name them. Severity as judged when found.
+
+**Reliability at school size**
+
+| | What went wrong | |
+|---|---|---|
+| 1 | Every save, result and sign-in waited for the disk on the Hub's only thread: ~900 requests/s and the whole school stalled | high |
+| 2 | 20 foreign keys without an index: deleting a person, app or class read whole tables | high |
+| 3 | Deleting a popular app or its owner's account stopped the Hub (0.6 s; 3.8 s with a year of feedback notices) | high |
+| 4 | Backup copy and database check ran on the Hub's thread | medium |
+| 5 | The backup download needed the database's size in memory and failed from 2 GiB | high |
+| 6 | Lowering the audit retention deleted months of entries in one statement (1.8 s), at any time of day | medium |
+| 7 | Upload bodies in memory were limited per person only; then the first school-wide cap could be filled by three students and blocked every save | high |
+| 8 | Admin overview summed every file and data row at every view | low |
+| 9 | Notices of a deleted app found by scanning all notices; teachers' start page read every result of each class | medium |
+| 10 | MSAL kept Microsoft tokens in memory; the WAL file never shrank; content files not flushed before the database named them; a short write could store a cut-off file under its full checksum | low–medium |
+| 11 | Files of a deleted user could come back with a backup restore and stay forever; deleted files were removed before the deletion was on the disk; nothing swept orphaned files | medium |
+
+**Permissions and review**
+
+| | What went wrong | |
+|---|---|---|
+| 12 | A slowly sent file landed in a version that was finished, published and **approved** meanwhile – the class ran code no teacher saw | high |
+| 13 | A student could show classmates unreviewed text through achievement titles of a newer, still waiting version | high |
+| 14 | A teacher made student kept every class-teacher right (results, saves, CSV, feedback) | high |
+| 15 | Forms, SDK calls and uploads acted on the permissions from before their body arrived (blocked, deleted, removed, archived meanwhile); a late form could bring back an ended session on a shared PC | high |
+| 16 | Two admins deleting each other could leave the school without an admin; a blocked admin could still download the backup | medium |
+| 17 | The school-wide release was not bound to the version the admin looked at | medium |
+| 18 | Going back to an older version left the newer one waiting for review | medium |
+| 19 | `canSeeVersion` answered yes for ids that were not versions of the app; a missing id matched a missing id | low |
+| 20 | A colleague who joined by QR code as a student could not become co-teacher with an invitation | medium |
+| 21 | A teacher could leave a class whose only other teacher was blocked | low |
+| 22 | Archiving by a teacher kept the join codes: an old QR code worked again after a restore | low |
+| 23 | A removed student walked straight back in with the code on the board | medium |
+| 24 | The author could delete feedback in an archived (read-only) class | low |
+
+**Data shown or kept wrongly**
+
+| | What went wrong | |
+|---|---|---|
+| 25 | A school-wide app opened from a class without it filed results into another class of the student – in the browser even after the first fix (the player asked for its token without the class) | medium |
+| 26 | A teacher lost a class's results when a removed app was submitted again | medium |
+| 27 | One student could use up an app's 20 leaderboards for everybody, for good | medium |
+| 28 | Practising at home or in another class pushed out a class's results – and turned done assignments back to open | medium |
+| 29 | Students stopped seeing their class's and the school's announcements once 20 newer ones existed elsewhere | medium |
+| 30 | Deleting an announcement, assignment, feedback or class left notices quoting it (and leading to 404) | medium |
+| 31 | `AUDIT_RETENTION_DAYS=0` wiped the whole audit log at every start | medium |
+| 32 | The data export stopped at 1,000 audit entries without saying so | low |
+| 33 | A deleted student's name reached the audit log through a ZIP upload during the deletion | low |
+| 34 | Saved lists showed JavaScript internals in empty cells; `hub.files.get` with a bad name returned the error as file content; `hub.settings` kept a failed first load | low |
+| 35 | Class average used raw values next to capped ones; a student page with over 200 results miscounted; negative points became text in the CSV | low |
+| 36 | Shared apps were a dead link in the catalogue and search | medium |
+| 37 | Counts capped at list lengths: teacher start page (classes 12, waiting 20, due 5), student tasks (6), classes over 300 students | low |
+| 38 | "Wartet auf dich" showed the wrong waiting time; "Heute aktiv" counted archived classes and other apps | low |
+| 39 | Notices stored "(morgen fällig)"; the admin list showed deletion dates without the year | low |
+| 40 | A comment limit that counted review decisions closed comments for good; renaming in the editor failed near the limits; a withdrawn update could not be submitted again from the UI | low |
+| 41 | A student could not close an assignment whose app was removed | low |
+| 42 | The inactive-account flag never cleared after the admin lengthened the period; a blocked admin could not be demoted; a role restored by `ADMIN_EMAILS` was not logged | low |
+| 43 | A stale join page counted as two wrong codes per click and could lock a student out of the new code; an expired link to one's own class said "ask for a new code" | low |
+| 44 | A failed backup download looked complete and counted as the last backup | medium |
+| 45 | POST requests without a body crashed with 500; uploads during an account deletion crashed with 500 and left files | low |
+
+**Open** (documented in SECURITY.md "Still open"): an app that lowers a student's progress can turn a done
+assignment back to open (test marked `todo`); a big upload by an owner with very many stored files costs
+~4 ms of the Hub's time per file.
