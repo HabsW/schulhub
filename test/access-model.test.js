@@ -1324,7 +1324,11 @@ async function httpWorld(seed, tally) {
     const decide = (u, app, klasse, version) => {
       if (!app) return null;
       const play = access.resolvePlay(u, app, { classId: klasse || null, versionId: version || null });
-      return !play && klasse && !version && app.schoolwide_version_id ? access.resolvePlay(u, app) : play;
+      if (play || !klasse || version || !app.schoolwide_version_id) return play;
+      // The fallback opens the app school-wide WITHOUT a class: the link named a class the app is not
+      // in, and no other class of the person may stand in for it (test/matrix.test.js, schulweitFremdeKlasse).
+      const open = access.resolvePlay(u, app);
+      return open && { ...open, classId: null };
     };
 
     // ----- page views
