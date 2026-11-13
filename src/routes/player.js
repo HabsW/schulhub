@@ -58,9 +58,10 @@ module.exports = (app, ctx) => {
       ? tokens.sign('files', { a: a.id, d: 1, u: req.user.id, r: 1 }, 60 * 60)
       : tokens.sign('files', { a: a.id, v: play.version.id, u: req.user.id, r: 1 }, config.fileTokenSeconds);
     const origin = config.appOrigin(a.origin_key);
-    const back = play.draft ? `/studio/${a.id}` : play.preview ? `/apps/${a.id}` : cls ? `/klassen/${cls.id}` : '/start';
-    const favourite = Boolean(db.get('SELECT 1 AS ok FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id));
     const manage = access.canReviewApp(req.user, a);
+    // A colleague trying a shared app has no app page to go back to (it would open the player again).
+    const back = play.draft ? `/studio/${a.id}` : play.preview ? (manage ? `/apps/${a.id}` : '/katalog') : cls ? `/klassen/${cls.id}` : '/start';
+    const favourite = Boolean(db.get('SELECT 1 AS ok FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id));
 
     const body = html`<div class="playerbar ${appClass(a)}">
         <a class="btn quiet icon sm" href="${back}" aria-label="Zurück" title="Zurück">${icon('arrowLeft')}</a>

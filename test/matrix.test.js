@@ -669,7 +669,7 @@ pruefliste             404      404      404      login    login    login    ohn
 sucheKlasse            ohne     mit      mit      login    login    login    mit      mit          ohne     ohne     mit          mit          ohne     mit          mit
 suchePerson            ohne     ohne     ohne     login    login    login    ohne     ohne         ohne     ohne     person       person       ohne     person       ohne
 spielenMitKlasse       404      klasse   klasse   login    login    login    klasse   klasse       404      404      klasse       klasse       404      ohne         klasse
-spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   klasse       404      404      klasse       klasse       404      404          ohne
+spielenOhneKlasse      404      klasse   klasse   login    login    login    klasse   klasse       ohne     ohne     klasse       klasse       404      ohne         ohne
 token                  404      klasse   klasse   403      401      403      klasse   klasse       404      404      klasse       klasse       404      ohne         klasse
 speichern              404      ok       ok       401      401      401      ok       ok           404      404      ok           ok           404      ok           ok
 bestenliste            404      namen    namen    401      401      401      namen    namen        404      404      namen        namen        404      anonym       anonym

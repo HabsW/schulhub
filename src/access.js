@@ -102,7 +102,9 @@ function createAccess(db) {
    * Returns { version, classId, preview } or null.
    *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin)
    *  - classId given: the version approved for that class
-   *  - neither: owner's published version, school-wide release, or any of the user's classes
+   *  - neither: owner's published version, school-wide release, or any of the user's classes -
+   *    or, for staff, a colleague's shared app: its published version as a preview (nothing is
+   *    stored), to try it before adding it to a class
    */
   function resolvePlay(user, app, { classId = null, versionId = null } = {}) {
     if (!user || !app) return null;
@@ -137,6 +139,7 @@ function createAccess(db) {
     }
     if (viaClass && ready(viaClass.version_id)) return { version: ready(viaClass.version_id), classId: viaClass.class_id, preview: false };
     if (ready(app.schoolwide_version_id)) return { version: ready(app.schoolwide_version_id), classId: null, preview: false };
+    if (isSharedWith(user, app) && ready(app.published_version_id)) return { version: ready(app.published_version_id), classId: null, preview: true };
     return null;
   }
 

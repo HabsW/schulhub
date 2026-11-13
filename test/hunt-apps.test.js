@@ -132,3 +132,20 @@ test('Zurück zur alten Version: die neuere wartet danach nirgends mehr auf eine
   assert.equal((await L.post(`/pruefen/${cls}/${app.id}/freigeben`, { version: v2 })).status, 404, 'the teacher could still approve Version 2');
   assert.equal(classApp(cls, app.id).version_id, v1, 'the class plays Version 1, which Mia publishes');
 });
+
+test('Von Kolleg/innen geteilt: der Link im Katalog öffnet die App (als Vorschau) statt einer 404', async () => {
+  const shared = await h.makeApp(K, uniq('Geteiltes Quiz'));
+  assert.equal((await K.post(`/apps/${shared.id}/bearbeiten`, { name: shared.name, emoji: '🎮', color: '0', shared_field: '1', shared: '1' })).status, 303);
+  for (const [who, b] of [['Frau Yilmaz (ohne Klasse)', Y], ['Herr Lehmann', L]]) {
+    const catalogue = (await b.get('/katalog?zeige=kollegium')).text;
+    assert.ok(catalogue.includes(`href="/apps/${shared.id}/spielen"`), `${who}: the catalogue offers the app`);
+    const res = await b.get(`/apps/${shared.id}/spielen`);
+    assert.equal(res.status, 200, `${who}: the catalogue link leads to a 404`);
+    assert.match(res.text, /Vorschau/, `${who}: a preview - nothing is stored`);
+    const t = await h.token(b, shared);
+    assert.equal(t && t.mode, 'preview');
+  }
+  // Students never: the app is shared with staff only.
+  assert.equal((await B.get(`/apps/${shared.id}/spielen`)).status, 404);
+  assert.equal(await h.token(B, shared), null);
+});
