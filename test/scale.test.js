@@ -250,3 +250,45 @@ test('Ein Konto mit einer viel genutzten App löschen (selbst oder durch die Ver
     await h.stop();
   }
 });
+
+test('Eine App löschen, zu der viele Rückmeldungen geschrieben wurden: ihre Mitteilungen gehen über den Index – keine Suche durch alle Mitteilungen aller Schüler/innen', async () => {
+  const h = await startHub();
+  try {
+    const teacher = h.addUser('Tilda Lehrerin', 'teacher');
+    const T = await h.browser().login(teacher);
+    await T.post('/klassen', { name: '9a' });
+    const cls = h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher'", teacher.id).id;
+    const app = await h.makeApp(T, 'Vokabeln');
+    await T.post(`/klassen/${cls}/apps`, { app: app.id });
+    const students = Array.from({ length: 40 }, (_, i) => h.addUser(`Kind ${i}`, 'student'));
+    h.db.tx(() => {
+      for (const s of students) h.db.run("INSERT INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, 'student', ?)", cls, s.id, Date.now());
+    });
+    // Feedback about the app to every student, as the teacher writes it (with its notice) …
+    await T.page(`/klassen/${cls}`);
+    for (const s of students) assert.equal((await T.post(`/klassen/${cls}/rueckmeldungen`, { schueler: s.id, app: app.id, text: 'Gut gemacht!' })).status, 303);
+    // … and many other notices per student (a school year of assignments and feedback).
+    h.db.tx(() => {
+      for (const s of students) for (let i = 0; i < 60; i++) h.db.run("INSERT INTO notices (user_id, kind, text, href, created_at) VALUES (?, 'aufgabe', ?, '/start', ?)", s.id, `Neue Aufgabe ${i}`, Date.now());
+    });
+    const told = h.db.get("SELECT COUNT(*) AS n FROM notices WHERE kind = 'rueckmeldung'").n;
+    assert.equal(told, 40);
+    const scans = [];
+    const run = h.db.run;
+    h.db.run = (sql, ...p) => {
+      if (/instr\((notices\.)?text/.test(sql)) scans.push(sql); // a search through the text of notices
+      return run(sql, ...p);
+    };
+    try {
+      await T.page(`/apps/${app.id}`);
+      assert.equal((await T.post(`/apps/${app.id}/loeschen`)).status, 303);
+    } finally {
+      h.db.run = run;
+    }
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE kind = 'rueckmeldung'").n, 0, 'the feedback notices quoting the app are gone');
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE kind = 'aufgabe'").n, 40 * 60, 'other notices stay');
+    assert.ok(scans.length <= 1, `${scans.length} text searches through notices (one per student and name before)`);
+  } finally {
+    await h.stop();
+  }
+});

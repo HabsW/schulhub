@@ -399,11 +399,13 @@ module.exports = (app, ctx) => {
     if (appId && !access.wasApprovedIn(cls.id, appId)) throw deny();
     const student = db.get('SELECT id, name FROM users WHERE id = ?', studentId);
     const appName = appId ? db.get('SELECT name FROM apps WHERE id = ?', appId).name : '';
+    const feedbackId = newId();
     db.run(
       'INSERT INTO feedback (id, class_id, student_id, author_id, app_id, assignment_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      newId(), cls.id, student.id, req.user.id, appId, x ? x.id : null, text, Date.now()
+      feedbackId, cls.id, student.id, req.user.id, appId, x ? x.id : null, text, Date.now()
     );
-    services.notify([student.id], 'rueckmeldung', `Neue Rückmeldung von ${req.user.name}${x ? ` zu „${x.title}“` : appName ? ` zu „${appName}“` : ''} (${cls.name})`, '/rueckmeldungen', { subjectId: req.user.id });
+    // The notice's own link: it goes with this feedback, with its app and with its assignment.
+    services.notify([student.id], 'rueckmeldung', `Neue Rückmeldung von ${req.user.name}${x ? ` zu „${x.title}“` : appName ? ` zu „${appName}“` : ''} (${cls.name})`, services.feedbackLink(feedbackId), { subjectId: req.user.id });
     flash(req, `Deine Rückmeldung an ${student.name} ist gesendet.`);
     res.redirect(303, kit.backTo(req.body.zurueck, `/klassen/${cls.id}`));
   });
@@ -467,7 +469,11 @@ module.exports = (app, ctx) => {
   app.post('/rueckmeldungen/:id/loeschen', (req, res) => {
     const f = loadFeedback(req);
     if (!access.canDeleteFeedback(req.user, f)) throw deny();
-    db.run('DELETE FROM feedback WHERE id = ?', f.id);
+    db.tx(() => {
+      db.run('DELETE FROM feedback WHERE id = ?', f.id);
+      // Its notice quotes the app or assignment and would lead to nothing.
+      db.run('DELETE FROM notices WHERE href = ?', services.feedbackLink(f.id));
+    });
     flash(req, 'Die Rückmeldung ist gelöscht.');
     res.redirect(303, kit.backTo(req.body.zurueck, '/rueckmeldungen'));
   });

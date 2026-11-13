@@ -12,6 +12,8 @@ const DAY = 86_400_000;
 const prefixEnd = (prefix) => prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
 /** Where the notice about an announcement points: one link per announcement, so its notices can go with it. */
 const announcementLink = (id) => `/start#ankuendigung-${id}`;
+/** The link of the notice about one private feedback: its own, so the notice goes with the feedback (and with its app). */
+const feedbackLink = (id) => `/rueckmeldungen#rueckmeldung-${id}`;
 
 /**
  * Columns that keep a person's id WITHOUT a foreign key to users (foreign keys cascade or are set
@@ -359,15 +361,24 @@ function createServices(ctx) {
    */
   function deleteFeedbackNotices(apps, assignments) {
     if (!apps.length) return;
-    const quoted = [...apps.map((a) => a.name), ...assignments.map((x) => x.title)].map((n) => `„${n}“`);
-    const ids = apps.map((a) => a.id);
-    const marks = ids.map(() => '?').join(', ');
-    const told = db.all(
-      `SELECT DISTINCT student_id FROM feedback
-        WHERE app_id IN (${marks}) OR assignment_id IN (SELECT id FROM assignments WHERE app_id IN (${marks}))`,
-      ...ids, ...ids
+    const ids = JSON.stringify(apps.map((a) => a.id));
+    const about = db.all(
+      `SELECT id, student_id FROM feedback
+        WHERE app_id IN (SELECT value FROM json_each(?)) OR assignment_id IN (SELECT id FROM assignments WHERE app_id IN (SELECT value FROM json_each(?)))`,
+      ids, ids
     );
-    for (const { student_id: sid } of told) for (const q of quoted) db.run("DELETE FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND instr(text, ?) > 0", sid, q);
+    // A feedback's notice carries the feedback's own link: one indexed delete each - never a search
+    // through every notice of every student told (that cost seconds for a popular app's owner).
+    for (const f of about) db.run('DELETE FROM notices WHERE href = ?', feedbackLink(f.id));
+    // Notices written before they carried that link quote the name: ONE statement for all of them,
+    // through the index on the old shared link.
+    if (!about.length) return;
+    const quoted = [...apps.map((a) => a.name), ...assignments.map((x) => x.title)].map((n) => `„${n}“`);
+    db.run(
+      `DELETE FROM notices WHERE href = '/rueckmeldungen' AND kind = 'rueckmeldung'
+          AND user_id IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM json_each(?) q WHERE instr(notices.text, q.value) > 0)`,
+      JSON.stringify([...new Set(about.map((f) => f.student_id))]), JSON.stringify(quoted)
+    );
   }
 
   /** Delete an account and everything that belongs to it. */
@@ -439,7 +450,7 @@ function createServices(ctx) {
   }
 
   return {
-    announcementLink,
+    announcementLink, feedbackLink,
     audit, pruneAudit, notify, recordPlay, maintenance,
     createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData,
   };

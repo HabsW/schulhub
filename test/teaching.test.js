@@ -182,7 +182,8 @@ test('Rückmeldungen: nur von der Lehrkraft an eigene Schüler/innen, privat, nu
   const f = h.db.get('SELECT * FROM feedback WHERE student_id = ?', mia.id);
   assert.equal(f.author_id, lehmann.id);
   assert.equal(f.app_id, quiz.id);
-  assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND href = '/rueckmeldungen'", mia.id), 'the student is told');
+  // The notice links to this one feedback, so it can go with it (and with its app or assignment).
+  assert.ok(h.db.get("SELECT 1 AS ok FROM notices WHERE user_id = ? AND kind = 'rueckmeldung' AND href = ?", mia.id, `/rueckmeldungen#rueckmeldung-${f.id}`), 'the student is told');
 
   // reading: the student and the class's teachers - nobody else; always escaped
   const mine = await M.page('/rueckmeldungen');
