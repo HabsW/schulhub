@@ -231,3 +231,31 @@ test('Kommentare: ein langer Prüf-Verlauf schließt das Gespräch nicht für im
     await small.stop();
   }
 });
+
+test('Editor: an der Grenze lässt sich eine Datei trotzdem umbenennen oder verschieben', async () => {
+  // Small limits stand for 2000 files, 100 MB per version and 500 MB per account.
+  const small = await startHub({ limits: { maxFiles: 3, maxVersionBytes: 1000, maxUserBytes: 1500 } });
+  try {
+    const owner = small.addUser('Mia Schmidt', 'student');
+    const O = await small.browser().login(owner);
+    const app = await small.makeApp(O, 'Volle App', { 'index.html': '<h1>x</h1>', 'spiel.js': 'x'.repeat(580), 'b.css': 'y' });
+    await O.page(`/studio/${app.id}`);
+    assert.equal((await O.post(`/studio/${app.id}/entwurf`, { version: app.published_version_id })).status, 303);
+    await O.page(`/studio/${app.id}`);
+    const rename = (von, nach) => O.send('POST', `/studio/${app.id}/datei/umbenennen`, { von, nach });
+    const paths = () => small.db.all('SELECT path FROM draft_files WHERE app_id = ? ORDER BY path', app.id).map((r) => r.path);
+    // Three of three files, and the draft and the account are nearly full: moving a file adds nothing.
+    let r = await rename('spiel.js', 'js/spiel.js');
+    assert.equal(r.status, 200, `moving a file is refused: ${r.text}`);
+    assert.deepEqual(paths(), ['b.css', 'index.html', 'js/spiel.js']);
+    r = await rename('js/spiel.js', 'JS/Spiel.js');
+    assert.equal(r.status, 200, r.text);
+    assert.deepEqual(paths(), ['JS/Spiel.js', 'b.css', 'index.html']);
+    // The limits themselves still hold.
+    const put = (p, body) => O.send('PUT', `/studio/${app.id}/datei?pfad=${encodeURIComponent(p)}`, Buffer.from(body), 'application/octet-stream');
+    assert.equal((await put('neu.js', 'z')).status, 400, 'a fourth file');
+    assert.equal((await put('b.css', 'y'.repeat(500))).status, 413, 'the draft would be too big');
+  } finally {
+    await small.stop();
+  }
+});
