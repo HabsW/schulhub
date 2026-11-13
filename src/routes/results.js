@@ -187,7 +187,8 @@ module.exports = (app, ctx) => {
       icon: 'archive',
       title: 'Nicht mehr in der Klasse',
       text: 'Die Klasse kann diese App nicht mehr öffnen. Die Ergebnisse bleiben für dich lesbar.',
-      actions: change ? postButton(req, `/klassen/${cls.id}/apps/${a.id}/zurueckholen`, 'Zurückholen', { size: 'sm', icon: 'undo' }) : '',
+      // Only a removed app comes back as it was; one its owner submitted again waits for the review.
+      actions: change && ca.status === 'removed' ? postButton(req, `/klassen/${cls.id}/apps/${a.id}/zurueckholen`, 'Zurückholen', { size: 'sm', icon: 'undo' }) : '',
       cls: 'mb-6',
     })}
     <div class="grid-2 even section">

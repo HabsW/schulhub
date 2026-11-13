@@ -142,6 +142,14 @@ function createAccess(db) {
 
   // ----- app data of other people -----
   /**
+   * The app is (or was) in use in this class: approved now, or approved once - then the row keeps
+   * the version the class used (version_id), whatever happened since: taken out ('removed'),
+   * submitted again by its owner ('pending') or that new submission given back ('rejected').
+   * Results made in the class stay readable for its teachers through all of these.
+   */
+  const usedInClass = (classId, appId) =>
+    Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND (status IN ('approved','removed') OR version_id IS NOT NULL)", classId, appId));
+  /**
    * A teacher may look at a student's data in an app only if the student is in
    * one of the teacher's classes AND the app is (or was, before it was removed)
    * in use in that same class. Owning an app does NOT give access to other
@@ -150,8 +158,7 @@ function createAccess(db) {
   function canSeeStudentData(user, classId, appId, studentId) {
     if (!canManageClass(user, classId)) return false;
     const inClass = db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId);
-    const appInClass = db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId);
-    return Boolean(inClass && appInClass);
+    return Boolean(inClass && usedInClass(classId, appId));
   }
   const isStudentOf = (classId, studentId) => Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId));
   const appApprovedIn = (classId, appId) => Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status = 'approved'", classId, appId));
@@ -259,10 +266,10 @@ function createAccess(db) {
   }
   /**
    * Results of one app in one class (lists, overview, CSV): the class's teachers
-   * (and the admin), while the app is approved there - or after it was removed.
+   * (and the admin), while the app is approved there - or once it was (usedInClass:
+   * removed, or removed and submitted again by its owner).
    */
-  const canSeeClassResults = (user, classId, appId) =>
-    canManageClass(user, classId) && Boolean(db.get("SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND status IN ('approved','removed')", classId, appId));
+  const canSeeClassResults = (user, classId, appId) => canManageClass(user, classId) && usedInClass(classId, appId);
   /** Only the student a feedback is for marks it as read. */
   const canMarkFeedbackRead = (user, f) => Boolean(user && f) && f.student_id === user.id;
   /**
@@ -331,7 +338,7 @@ function createAccess(db) {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
     canManageApp, canShareApp, isSharedWith, canReviewApp, canSeeVersion, reviewClasses, addToClassMode, resolvePlay,
-    canSeeStudentData, isStudentOf, appApprovedIn,
+    canSeeStudentData, isStudentOf, appApprovedIn, usedInClass,
     canAssign, canSeeAssignment, canManageAssignment, canMarkDone,
     canGiveFeedback, canReadFeedback, canDeleteFeedback,
     canEditAppSettings,

@@ -119,3 +119,53 @@ test('Player: wer die eigene App ohne Klasse öffnet, bekommt ein Token für gen
   const unlock = await call(R, app, tok, 'achievements.unlock', { id: 'neu' });
   assert.equal(unlock.ok, true, `an achievement of the running version: ${JSON.stringify(unlock)}`);
 });
+
+// =========================================================== results of a removed app, submitted again
+
+test('Ergebnisse: eine entfernte App bleibt für die Lehrkraft lesbar – auch wenn die Besitzerin sie neu einreicht oder sie zurückgegeben wird', async () => {
+  const app = await h.makeApp(R, uniq('Rosas Quiz'), { 'index.html': '<h1>Quiz</h1>' });
+  assert.equal((await R.post(`/apps/${app.id}/einreichen`, { klasse: c1 })).status, 303);
+  await T.page(`/pruefen/${c1}/${app.id}`);
+  assert.equal((await T.post(`/pruefen/${c1}/${app.id}/freigeben`, { version: app.published_version_id })).status, 303);
+  const qt = await h.token(Q, app, c1);
+  assert.equal((await call(Q, app, qt, 'results.add', { title: 'VOR-DEM-ENTFERNEN', score: 2, maxScore: 3 })).ok, true);
+
+  const base = `/klassen/${c1}/apps/${app.id}/ergebnisse`;
+  const readable = async (label) => {
+    for (const url of [base, `${base}/${quinn.id}`, `${base}.csv`]) assert.equal((await T.get(url)).status, 200, `${label}: ${url}`);
+    assert.ok((await T.get(`${base}/${quinn.id}`)).text.includes('VOR-DEM-ENTFERNEN'), label);
+    assert.ok((await T.get(`${base}.csv`)).text.includes('VOR-DEM-ENTFERNEN'), label);
+  };
+  /** The "Entfernte Apps" entry of this app on the class's Apps tab (its links), or null. */
+  const removedEntry = async () => {
+    const tab = (await T.get(`/klassen/${c1}/apps`)).text;
+    const part = tab.split('Entfernte Apps')[1] || '';
+    return part.includes(`/apps/${app.id}/ergebnisse`) ? { restore: part.includes(`/apps/${app.id}/zurueckholen`) } : null;
+  };
+  // The teacher takes it out of the class: the results stay readable (SECURITY.md: "ever approved").
+  await T.page(`/klassen/${c1}/apps`);
+  assert.equal((await T.post(`/klassen/${c1}/apps/${app.id}/entfernen`)).status, 303);
+  await readable('removed');
+  assert.ok((await T.get(base)).text.includes(`/apps/${app.id}/zurueckholen`), 'a removed app can be brought back from its results');
+  assert.deepEqual(await removedEntry(), { restore: true });
+
+  // Rosa improves her app and submits it again: it waits for the teacher.
+  assert.equal((await R.post(`/apps/${app.id}/einreichen`, { klasse: c1 })).status, 303);
+  assert.equal(classApp(c1, app.id).status, 'pending');
+  await readable('submitted again');
+  // The teacher still finds them, and nothing is offered that cannot work for a waiting app.
+  assert.deepEqual(await removedEntry(), { restore: false }, 'listed with its results, without "Zurückholen"');
+  assert.ok(!(await T.get(base)).text.includes('/zurueckholen'), 'no "Zurückholen" while it waits for review');
+  // The feedback form on the student's page works for this app, too.
+  await T.page(`${base}/${quinn.id}`);
+  assert.equal((await T.post(`/klassen/${c1}/rueckmeldungen`, { schueler: quinn.id, app: app.id, text: 'Gut gemacht!', zurueck: `${base}/${quinn.id}` })).status, 303);
+
+  // The teacher gives it back: still the class's results.
+  await T.page(`/pruefen/${c1}/${app.id}`);
+  assert.equal((await T.post(`/pruefen/${c1}/${app.id}/zurueckgeben`, { version: app.published_version_id, grund: 'Bitte noch den Ton aus' })).status, 303);
+  assert.equal(classApp(c1, app.id).status, 'rejected');
+  await readable('given back');
+  assert.deepEqual(await removedEntry(), { restore: false });
+  // Classmates still get nothing.
+  assert.equal((await Q.get(base)).status, 404);
+});
