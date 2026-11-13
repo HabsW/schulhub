@@ -32,6 +32,7 @@ const { pipeline } = require('node:stream/promises');
 const yauzl = require('yauzl');
 const { DatabaseSync } = require('node:sqlite');
 const { schemaForVersion, SCHEMA_VERSION } = require('./db');
+const dbJobs = require('./dbJobs');
 const { HttpError, plural } = require('./util');
 
 const STORES = ['blobs', 'userfiles'];
@@ -118,6 +119,21 @@ function setLastBackupAt(db, ts) {
 
 // --------------------------------------------------------------- backup
 
+/** Content files are not deleted while a backup copies the database (see app.js, ctx.gcHold). */
+function holdGarbage(ctx) {
+  if (ctx.gcHold) ctx.gcHold.count++;
+}
+function releaseGarbage(ctx) {
+  const hold = ctx.gcHold;
+  if (!hold || --hold.count > 0) return;
+  const blobs = [...hold.blobs];
+  const userfiles = [...hold.userfiles];
+  hold.blobs.clear();
+  hold.userfiles.clear();
+  if (blobs.length && ctx.uploads) ctx.uploads.collectGarbage(blobs);
+  if (userfiles.length && ctx.userFiles) ctx.userFiles.collectGarbage(userfiles);
+}
+
 /** Hard-link (or, where links are impossible, copy) every content file not pinned yet. */
 async function pinStore(store, src, dst, pinned) {
   for (const rel of await listStore(src)) {
@@ -148,7 +164,8 @@ async function pinStore(store, src, dst, pinned) {
  * are { path, file } items for uploads.writeZip. Call cleanup() when done
  * (it may be called more than once).
  */
-async function createBackup({ db, config }) {
+async function createBackup(ctx) {
+  const { db, config } = ctx;
   const tmpRoot = path.join(config.dataDir, 'tmp');
   await fsp.mkdir(tmpRoot, { recursive: true });
   const dir = await fsp.mkdtemp(path.join(tmpRoot, 'sicherung-'));
@@ -163,9 +180,16 @@ async function createBackup({ db, config }) {
     const pinAll = async () => {
       for (const store of STORES) await pinStore(store, path.join(config.dataDir, store), path.join(dir, store), pinned);
     };
-    await pinAll(); // 1. the files that exist now
-    db.snapshot(path.join(dir, 'hub.sqlite')); // 2. the database at one moment
-    await pinAll(); // 3. files that arrived while copying
+    // No content file is deleted from step 1 until step 3 is done: the copy of step 2 may refer to
+    // a file that arrives after step 1 and goes again before step 3 (deletions wait, see gcHold).
+    holdGarbage(ctx);
+    try {
+      await pinAll(); // 1. the files that exist now
+      await dbJobs.snapshot(db.file, path.join(dir, 'hub.sqlite')); // 2. the database at one moment, in a worker thread
+      await pinAll(); // 3. files that arrived while copying
+    } finally {
+      releaseGarbage(ctx);
+    }
 
     const keys = [...pinned].sort();
     const entries = [{ path: 'hub.sqlite', file: path.join(dir, 'hub.sqlite') }, ...keys.map((k) => ({ path: k, file: path.join(dir, k) }))];
@@ -496,6 +520,7 @@ async function restoreBackup({ zipFile, dataDir, force = false, log = () => {} }
 }
 
 module.exports = {
+  holdGarbage, releaseGarbage,
   createBackup, restoreBackup, RestoreError, storeStats, lastBackupAt, setLastBackupAt, isEntryName, listStore,
   ZIP_MAX_ENTRIES, ZIP_MAX_BYTES,
 };

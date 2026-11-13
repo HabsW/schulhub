@@ -70,6 +70,10 @@ function createUserFiles(ctx) {
   }
   /** Delete content no row references any more. */
   function collectGarbage(shas) {
+    if (ctx.gcHold && ctx.gcHold.count > 0) {
+      for (const sha of shas) ctx.gcHold.userfiles.add(sha);
+      return;
+    }
     for (const sha of new Set(shas)) {
       if (!db.get('SELECT 1 AS used FROM user_files WHERE sha256 = ? LIMIT 1', sha)) fs.rmSync(blobPath(sha), { force: true });
     }

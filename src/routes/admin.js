@@ -11,6 +11,7 @@ const { deny, bad, isLocalPath, formatDate, formatDay, formatAgo, formatBytes, p
 const { auditLabel, actorLabel } = require('../auditLabels');
 const { queryText, queryChoice, pageNumber, listUrl, pager, selectControl, segmented, filterPanel, likePattern, parseDay, dayStart, joinDe } = require('../formKit');
 const backup = require('../backup');
+const dbJobs = require('../dbJobs');
 
 const DAY = 86_400_000;
 const PER_PAGE = 50;
@@ -187,8 +188,9 @@ module.exports = (app, ctx) => {
     res.send(adminPage(req, { title: 'Übersicht', tab: 'start', body }));
   });
 
-  app.post('/admin/datenbank-pruefen', (req, res) => {
-    const rows = db.all('PRAGMA quick_check').map((r) => String(Object.values(r)[0]));
+  app.post('/admin/datenbank-pruefen', async (req, res) => {
+    // In a worker thread: on a big database the check takes seconds, and the Hub keeps answering.
+    const rows = await dbJobs.quickCheck(db.file);
     const ok = rows.length === 1 && rows[0] === 'ok';
     services.audit(req.user, 'datenbank_geprueft', '', ok ? 'in Ordnung' : rows.slice(0, 3).join('; '));
     flash(req, ok ? 'Die Datenbank ist in Ordnung.' : `Die Prüfung hat Probleme gefunden: ${rows.slice(0, 3).join('; ')}. Spiele die letzte Sicherung ein oder wende dich an die IT.`, ok ? 'ok' : 'error');

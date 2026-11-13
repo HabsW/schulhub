@@ -184,6 +184,9 @@ function keptFields(body) {
 function createHub(config) {
   const db = openDb(path.join(config.dataDir, 'hub.sqlite'));
   const ctx = { config, db };
+  // While a backup copies the database (in a worker thread, see dbJobs.js), no content file may be
+  // deleted: the copy may still refer to it. Deletions wait in here and run when the backup is done.
+  ctx.gcHold = { count: 0, blobs: new Set(), userfiles: new Set() };
   ctx.tokens = createTokens(config.sessionSecret);
   ctx.limiter = createLimiter(config.rate);
   ctx.access = createAccess(db);

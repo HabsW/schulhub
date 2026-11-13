@@ -8,6 +8,8 @@ const { EMOJIS, COLORS } = require('./html');
 const { analyzeVersion } = require('./checks');
 
 const DAY = 86_400_000;
+/** The first string after every string that starts with `prefix` (ASCII prefixes: ids and paths). */
+const prefixEnd = (prefix) => prefix.slice(0, -1) + String.fromCharCode(prefix.charCodeAt(prefix.length - 1) + 1);
 
 /**
  * Columns that keep a person's id WITHOUT a foreign key to users (foreign keys cascade or are set
@@ -84,6 +86,7 @@ function createServices(ctx) {
     db.run('DELETE FROM notices WHERE created_at < ?', now - 180 * DAY);
     db.run('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?', now - 30 * DAY);
     db.run('DELETE FROM app_usage WHERE day < ?', dayKey(now - 400 * DAY));
+    db.optimize();
   }
 
   // ---------- classes ----------
@@ -117,7 +120,7 @@ function createServices(ctx) {
       db.run('DELETE FROM shared_data WHERE class_id = ?', cls.id);
       db.run('DELETE FROM classes WHERE id = ?', cls.id);
       audit(actor, 'klasse_geloescht', cls.name, detail);
-    });
+    }, { durable: true });
   }
 
   // ---------- apps ----------
@@ -256,7 +259,7 @@ function createServices(ctx) {
       deleteAppNotices(app.id, assignments.map((x) => x.id));
       audit(actor, 'app_geloescht', app.name, '', { appId: app.id });
       return found;
-    });
+    }, { durable: true });
     uploads.collectGarbage(code);
     ctx.userFiles.collectGarbage(files);
   }
@@ -270,7 +273,7 @@ function createServices(ctx) {
       for (const table of ['saves', 'scores', 'results', 'plays', 'progress', 'achievements', 'user_files']) {
         db.run(`DELETE FROM ${table} WHERE app_id = ? AND user_id = ?`, appId, userId);
       }
-    });
+    }, { durable: true });
     ctx.userFiles.collectGarbage(files);
   }
 
@@ -301,9 +304,13 @@ function createServices(ctx) {
   /**
    * Other people's in-Hub notices about one app: pointing at the app, at its review, or at one of
    * its assignments. Ids are fixed-length random strings, so a prefix of the full id is exact.
+   * Links are compared as ranges ("starts with"), so the index on notices.href is used - never a
+   * pass over every notice of the school per app.
    */
   function deleteAppNotices(appId, assignmentIds) {
-    db.run("DELETE FROM notices WHERE instr(href, ?) = 1 OR (href LIKE '/pruefen/%' AND instr(href, ?) > 0)", `/apps/${appId}`, `/${appId}`);
+    const prefix = `/apps/${appId}`;
+    db.run('DELETE FROM notices WHERE href >= ? AND href < ?', prefix, prefixEnd(prefix));
+    db.run("DELETE FROM notices WHERE href >= '/pruefen/' AND href < '/pruefen0' AND instr(href, ?) > 0", `/${appId}`);
     for (const id of assignmentIds) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
   }
 
@@ -390,7 +397,7 @@ function createServices(ctx) {
       const roleLabel = { student: 'Schüler/in', teacher: 'Lehrkraft', admin: 'Admin' }[user.role] || '';
       audit(actor && actor.id !== user.id ? actor : null, 'konto_geloescht', `Konto (${roleLabel})`, actor && actor.id !== user.id ? 'durch Verwaltung' : 'durch Nutzer/in selbst');
       return list;
-    });
+    }, { durable: true });
     uploads.collectGarbage(shas);
     ctx.userFiles.collectGarbage(userFileShas);
   }
