@@ -71,6 +71,13 @@ function createHubApp(ctx) {
 
   app.use(express.urlencoded({ extended: false, limit: '64kb' }));
   app.use(express.json({ limit: '64kb' }));
+  // Express 5 leaves req.body undefined for a POST without a body (or of a type no parser reads), and the
+  // routes read their fields from it: such a request gets their usual answer instead of a 500.
+  // (Upload routes parse their own bodies later and accept only a Buffer.)
+  app.use((req, res, next) => {
+    if (req.body === undefined) req.body = {};
+    next();
+  });
   app.use(csrfProtect(config));
 
   // Default deny + a general limit on state-changing requests.

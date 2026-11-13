@@ -237,3 +237,20 @@ test('Gespeicherte Listen als Tabelle zeigen nie etwas aus dem JavaScript-Protot
     assert.ok(!/native code|\[object Object\]/.test(text), `${who}: nothing from Object.prototype in an empty cell`);
   }
 });
+
+// ======================================================================== the token route
+
+test('Anfragen ohne Inhalt (Token, „Meine Daten“): eine normale Antwort, nie 500', async () => {
+  const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await P.get('/start')).text)[1];
+  const bare = (url) => P.raw('POST', url, { headers: { 'x-csrf-token': csrf, accept: 'application/json' } });
+  // The token route asks without a class: like the start page's link.
+  const tok = await bare(`/apps/${G.id}/token`);
+  assert.equal(tok.status, 200, tok.text);
+  assert.equal(tok.json().class.name, '7b Mathe');
+  assert.equal(h.db.get('SELECT anonymous_scores FROM users WHERE id = ?', pia.id).anonymous_scores, 0);
+  const anon = await bare('/meine-daten/anonym');
+  assert.equal(anon.status, 303, anon.text);
+  assert.equal(h.db.get('SELECT anonymous_scores FROM users WHERE id = ?', pia.id).anonymous_scores, 0, 'nothing switched on');
+  // Without the CSRF token it is still refused.
+  assert.equal((await P.raw('POST', `/apps/${G.id}/token`, { headers: { accept: 'application/json' } })).status, 403);
+});
