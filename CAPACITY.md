@@ -253,8 +253,8 @@ lesson to see what memory really stays.
 - **A second start on the same data folder** (e.g. a second service by mistake) runs the migrations, the
   retention and the cleanup of unreferenced files on the live data before it fails on the port. Let the
   process manager run exactly one, and never put an older or foreign `hub.sqlite` there by hand (restore
-  with `npm run restore`): the cleanup at start trusts the SchulHub database it finds and removes the content
-  files it does not name (older than an hour). A missing or empty `hub.sqlite` next to content files stops
+  with `npm run restore`): the cleanup at start trusts the database it finds and removes the content files it
+  does not name (older than an hour). A missing or empty `hub.sqlite` next to content files stops
   the start with a message.
 
 ## Before go-live: the server

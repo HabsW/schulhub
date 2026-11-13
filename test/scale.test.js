@@ -778,6 +778,14 @@ test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist – nie o
     assert.equal(empty && empty.code, 'SCHULHUB_DATABASE_MISSING', 'an empty hub.sqlite is no database either');
     assert.equal(fs.statSync(dbFile).size, 0, 'the empty file stays empty');
     assert.deepEqual(filesIn(bare), before, 'not one file touched');
+    // The same with nothing but files that apps saved in the folder.
+    const onlyUserFiles = fs.mkdtempSync(pathMod.join(require('node:os').tmpdir(), 'schulhub-bare-'));
+    copies.push(onlyUserFiles);
+    fs.cpSync(pathMod.join(bare, 'userfiles'), pathMod.join(onlyUserFiles, 'userfiles'), { recursive: true });
+    const userFilesOnly = await startError(onlyUserFiles);
+    assert.equal(userFilesOnly && userFilesOnly.code, 'SCHULHUB_DATABASE_MISSING', 'files from apps alone count, too');
+    assert.match(userFilesOnly.message, /userfiles\//);
+    assert.equal(fs.existsSync(pathMod.join(onlyUserFiles, 'hub.sqlite')), false);
     // 2. Some other SQLite file named hub.sqlite (no SchulHub tables): the Hub starts with a new school there,
     //    touches none of the files and says so loudly; started again, it still touches none (its database names
     //    none of them).
