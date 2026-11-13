@@ -145,7 +145,7 @@ function commentForm(req, action, { label = 'Kommentar schreiben', hint = '' } =
 // ------------------------------------------------------- declared and stored
 
 const USE_LABELS = {
-  save: ['Spielstände', 'nur für die Person selbst, in ihrem Konto'],
+  save: ['Spielstände', 'im Konto der Person; Lehrkräfte ihrer Klassen sehen sie'],
   results: ['Ergebnisse', 'die Lehrkraft der Klasse sieht sie'],
   leaderboard: ['Punkte für eine Bestenliste', 'Namen sehen nur Personen aus derselben Klasse'],
   progress: ['Fortschritt', 'sichtbar für die Person und die Lehrkraft'],

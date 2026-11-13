@@ -384,7 +384,7 @@
       app: b.app,
       /** Darstellung, die die Person im Hub gewählt hat: 'dark', 'light' oder 'auto' (wie das Gerät). Mit hub-ui.css wird sie automatisch übernommen. */
       theme: b.theme,
-      /** Spielstand NUR für diese Person in dieser App. */
+      /** Spielstand pro Person in dieser App (andere Nutzer/innen lesen ihn nicht; Lehrkräfte ihrer Klassen sehen ihn im Hub). */
       save: kv('save'),
       /** Daten für ALLE, die die App nutzen. Lesen: alle. Schreiben: Besitzer/in der App. */
       shared: kv('shared'),

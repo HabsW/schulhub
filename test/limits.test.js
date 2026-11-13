@@ -439,3 +439,26 @@ test('Meine Daten: ein zweiter Export derselben Person während des ersten wird 
   assert.equal(res.status, 200);
   assert.equal(res.json().appDaten[0].ergebnisse.length, 800);
 });
+
+test('Eingaben: unsichtbare Richtungszeichen verschwinden aus Namen und Texten – Richtungsmarken bleiben', async () => {
+  const { cleanText } = require('../src/util');
+  const ch = (code) => String.fromCharCode(code);
+  const [RLO, LRI, PDI, RLM, LS] = [0x202e, 0x2066, 0x2069, 0x200f, 0x2028].map(ch);
+  assert.equal(cleanText(`Lea${RLO}tsi doof`, 80), 'Leatsi doof', 'an override never reaches the page');
+  assert.equal(cleanText(`a${LRI}b${PDI}c`, 80), 'abc', 'isolates neither');
+  const hebrew = `${ch(0x05e9)}${ch(0x05dc)}${ch(0x05d5)}${ch(0x05dd)}${RLM}!`;
+  assert.equal(cleanText(hebrew, 80), hebrew, 'direction marks in right-to-left text stay');
+  assert.equal(cleanText(`eins${LS}zwei`, 80), 'eins zwei');
+  assert.equal(cleanText(`eins${LS}zwei`, 80, { multiline: true }), 'eins\nzwei');
+  // Through a real form: the name of a new app.
+  const h = await startHub();
+  try {
+    const T = await h.browser().login(h.addUser('Herr Lehmann', 'teacher'));
+    const res = await T.post('/apps', { name: `Quiz${RLO}nretsO`, emoji: '🎮', color: '0' });
+    assert.equal(res.status, 303);
+    const id = res.headers.location.split('/').pop();
+    assert.equal(h.db.get('SELECT name FROM apps WHERE id = ?', id).name, 'QuiznretsO');
+  } finally {
+    await h.stop();
+  }
+});

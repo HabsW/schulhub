@@ -136,15 +136,15 @@ module.exports = (app, ctx) => {
         ${step('lehrkraefte', 'Was Lehrkräfte sehen', html`
           <ul>
             <li>Den <strong>Quelltext</strong> jeder Version, die bei ihnen eingereicht wurde, und den Prüfbericht.</li>
-            <li>In ihrer Klasse die <strong>Ergebnisse</strong> (<code>hub.results</code>), den <strong>Fortschritt</strong> (<code>hub.progress</code>) und die <strong>Erfolge</strong> ihrer Schüler/innen – ohne dass du dafür etwas bauen musst. Mit <code>results.labels</code> in <code>schulhub.json</code> bekommen die Felder lesbare Namen.</li>
+            <li>Die <strong>Ergebnisse</strong> (<code>hub.results</code>), die in ihrer Klasse entstanden sind, und den <strong>Fortschritt</strong> (<code>hub.progress</code>) und die <strong>Erfolge</strong> ihrer Schüler/innen – ohne dass du dafür etwas bauen musst. Fortschritt und Erfolge gehören der Person, nicht der Klasse: Die Lehrkraft sieht auch, was zu Hause oder in einer anderen Klasse entstanden ist. Mit <code>results.labels</code> in <code>schulhub.json</code> bekommen die Felder lesbare Namen.</li>
             <li>Die <strong>Einstellungen</strong> aus <code>schulhub.json</code> als Formular, zum Beispiel die Fragen eines Quiz für ihre Klasse.</li>
-            <li><strong>Nicht</strong> die Spielstände (<code>hub.save</code>) und Dateien (<code>hub.files</code>) – die gehören der Person, die die App benutzt.</li>
+            <li>Auch die <strong>Spielstände</strong> (<code>hub.save</code>) und <strong>Bestwerte</strong> (<code>hub.leaderboard</code>) ihrer Schüler/innen – auch die, die zu Hause oder in einer anderen Klasse entstanden sind. <strong>Nicht</strong> die Dateien (<code>hub.files</code>).</li>
           </ul>`)}
         ${step('datenschutz', 'Datenschutz für App-Autor/innen', html`
           <p>Die meisten, die deine App benutzen, sind minderjährig. Sammle deshalb nur, was deine App wirklich braucht.</p>
           <ul>
             <li>Deine App erfährt den <strong>Namen</strong> der Person und eine <strong>Kennung, die in jeder App anders ist</strong> – nie die E-Mail-Adresse.</li>
-            <li>Frag nicht nach Adresse, Telefonnummer, Geburtstag oder Fotos. Texte, die andere lesen, schreiben nur die Lehrkraft (<code>hub.classData</code>) und du als Besitzer/in (<code>hub.shared</code>).</li>
+            <li>Frag nicht nach Adresse, Telefonnummer, Geburtstag oder Fotos. Texte, die andere lesen, schreibt nur die Lehrkraft (<code>hub.classData</code>, in Apps von Lehrkräften auch <code>hub.shared</code>).</li>
             <li>Deine App kann nichts ins Internet schicken. Jede Person kann unter <a href="/meine-daten">Meine Daten</a> ansehen, herunterladen und löschen, was Apps über sie gespeichert haben.</li>
             <li>Als Besitzer/in siehst du keine Daten anderer in deiner App, nur wie oft sie pro Tag geöffnet wurde – ohne Namen.</li>
             <li>Bestenlisten zeigen Namen nur Personen aus derselben Klasse, alle anderen sehen „Anonym“.</li>

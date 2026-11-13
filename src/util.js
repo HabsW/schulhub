@@ -85,6 +85,10 @@ function cleanText(value, max, { multiline = false } = {}) {
   s = s.normalize('NFC');
   if (multiline) s = s.replace(/\r\n?/g, '\n');
   s = s.replace(multiline ? /[\u0000-\u0008\u000b-\u001f\u007f]/g : /[\u0000-\u001f\u007f]/g, ' ');
+  // Bidi embeddings, overrides and isolates make a name or comment LOOK different from what it is
+  // (reversed, reordered): they never belong in text typed here. Direction marks (LRM, RLM, ALM)
+  // stay - they are normal in right-to-left text. Line / paragraph separators become plain breaks.
+  s = s.replace(/[\u202A-\u202E\u2066-\u2069]/g, '').replace(/[\u2028\u2029]/g, multiline ? '\n' : ' ');
   return s.trim().slice(0, max);
 }
 
