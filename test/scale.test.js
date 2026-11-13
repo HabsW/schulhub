@@ -405,3 +405,32 @@ test('Uploads: was alle zusammen gerade im Speicher halten, ist begrenzt – ein
     await h.stop();
   }
 });
+
+test('Verwaltung: die Speicher-Rangliste wird nicht bei jedem Aufruf neu summiert – und nennt nie ein gelöschtes Konto', async () => {
+  const h = await startHub();
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const big = h.addUser('Gustav Großspeicher', 'teacher');
+    const A = await h.browser().login(admin);
+    const G = await h.browser().login(big);
+    await h.makeApp(G, 'Riesenapp', { 'index.html': '<h1>x</h1>', 'daten.bin': Buffer.alloc(200_000, 7) });
+    let sums = 0;
+    const all = h.db.all;
+    h.db.all = (sql, ...p) => {
+      if (/GROUP BY uid/.test(sql)) sums++;
+      return all(sql, ...p);
+    };
+    try {
+      assert.match((await A.get('/admin')).text, /Gustav Großspeicher/);
+      await A.get('/admin');
+      await A.get('/admin');
+      assert.equal(sums, 1, 'summed once for three views');
+      h.hub.ctx.services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', big.id));
+      assert.doesNotMatch((await A.get('/admin')).text, /Gustav Großspeicher/, 'a deleted account is never named');
+    } finally {
+      h.db.all = all;
+    }
+  } finally {
+    await h.stop();
+  }
+});

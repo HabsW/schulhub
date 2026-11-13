@@ -85,30 +85,49 @@ module.exports = (app, ctx) => {
     const classes = db.get('SELECT COALESCE(SUM(archived_at IS NULL), 0) AS active, COALESCE(SUM(archived_at IS NOT NULL), 0) AS archived FROM classes');
     const apps = db.get('SELECT COUNT(*) AS n, COALESCE(SUM(published_version_id IS NOT NULL), 0) AS published, COALESCE(SUM(schoolwide_version_id IS NOT NULL), 0) AS schoolwide FROM apps');
     const waiting = db.get("SELECT COUNT(*) AS n FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL WHERE ca.request_state = 'waiting'").n;
-    // Bytes per person: app code they own (versions + drafts, as counted for the quota) and their personal data.
-    const topUsers = db.all(
-      `SELECT u.id, u.name, u.role, t.code, t.data FROM (
-         SELECT uid, SUM(code) AS code, SUM(data) AS data FROM (
+    const { topUsers, topApps } = storageTops();
+    const store = await backup.storeStats(config.dataDir);
+    return { byRole, people, classes, apps, waiting, updates: pendingUpdates(), topUsers, topApps, store, last: backup.lastBackupAt(db) };
+  }
+
+  /**
+   * Who and what uses the most storage. Adding up every file and data row of the school takes 60 ms
+   * each on six months of data (measured), so the sums are kept for five minutes: the overview is opened
+   * often, and the ranking does not need to be exact to the second. Only ids and numbers are kept - names
+   * are read fresh at every view, and whoever was deleted meanwhile is simply not listed.
+   */
+  let storageCache = { at: 0, users: [], apps: [] };
+  function storageTops() {
+    if (Date.now() - storageCache.at >= 5 * 60_000) {
+      // Bytes per person: app code they own (versions + drafts, as counted for the quota) and their personal data.
+      const users = db.all(
+        `SELECT uid, SUM(code) AS code, SUM(data) AS data FROM (
            SELECT a.owner_id AS uid, f.size AS code, 0 AS data FROM app_files f JOIN app_versions v ON v.id = f.version_id JOIN apps a ON a.id = v.app_id
            UNION ALL SELECT a.owner_id, d.size, 0 FROM draft_files d JOIN apps a ON a.id = d.app_id
            UNION ALL SELECT user_id, 0, size FROM saves
            UNION ALL SELECT user_id, 0, size FROM user_files
-         ) GROUP BY uid ORDER BY SUM(code) + SUM(data) DESC LIMIT 10
-       ) t JOIN users u ON u.id = t.uid ORDER BY t.code + t.data DESC`
-    );
-    const topApps = db.all(
-      `SELECT a.id, a.name, a.emoji, a.color, o.name AS owner_name, t.code, t.data FROM (
-         SELECT aid, SUM(code) AS code, SUM(data) AS data FROM (
+         ) GROUP BY uid ORDER BY SUM(code) + SUM(data) DESC LIMIT 10`
+      );
+      const apps = db.all(
+        `SELECT aid, SUM(code) AS code, SUM(data) AS data FROM (
            SELECT v.app_id AS aid, f.size AS code, 0 AS data FROM app_files f JOIN app_versions v ON v.id = f.version_id
            UNION ALL SELECT app_id, size, 0 FROM draft_files
            UNION ALL SELECT app_id, 0, size FROM saves
            UNION ALL SELECT app_id, 0, size FROM shared_data
            UNION ALL SELECT app_id, 0, size FROM user_files
-         ) GROUP BY aid ORDER BY SUM(code) + SUM(data) DESC LIMIT 10
-       ) t JOIN apps a ON a.id = t.aid JOIN users o ON o.id = a.owner_id ORDER BY t.code + t.data DESC`
-    );
-    const store = await backup.storeStats(config.dataDir);
-    return { byRole, people, classes, apps, waiting, updates: pendingUpdates(), topUsers, topApps, store, last: backup.lastBackupAt(db) };
+         ) GROUP BY aid ORDER BY SUM(code) + SUM(data) DESC LIMIT 10`
+      );
+      storageCache = { at: Date.now(), users, apps };
+    }
+    const topUsers = storageCache.users
+      .map((t) => ({ t, u: db.get('SELECT id, name, role FROM users WHERE id = ?', t.uid) }))
+      .filter((x) => x.u)
+      .map(({ t, u }) => ({ ...u, code: t.code, data: t.data }));
+    const topApps = storageCache.apps
+      .map((t) => ({ t, a: db.get('SELECT a.id, a.name, a.emoji, a.color, o.name AS owner_name FROM apps a JOIN users o ON o.id = a.owner_id WHERE a.id = ?', t.aid) }))
+      .filter((x) => x.a)
+      .map(({ t, a }) => ({ ...a, code: t.code, data: t.data }));
+    return { topUsers, topApps };
   }
 
   app.get('/admin', async (req, res) => {
