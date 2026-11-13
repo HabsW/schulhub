@@ -261,7 +261,9 @@ module.exports = (app, ctx) => {
         WHERE ca.request_state = 'waiting' ORDER BY ca.created_at LIMIT 20`,
       user.id
     );
-    const classes = access.visibleClasses(user).filter((c) => c.my_role === 'teacher' || user.role === 'admin').slice(0, 12);
+    const teaching = access.visibleClasses(user).filter((c) => c.my_role === 'teacher' || user.role === 'admin');
+    // The list shows 12; the number and the way to the rest count all of them.
+    const classes = teaching.slice(0, 12);
     const now = Date.now();
     const days = [...Array(14)].map((_, i) => dayKey(now - (13 - i) * 86_400_000));
     const activity = (classId) => {
@@ -287,7 +289,7 @@ module.exports = (app, ctx) => {
     return html`
       ${classes.length ? stats([
         stat({ label: 'Warten auf Prüfung', value: waiting.length, tone: waiting.length ? 'wait' : '', href: '/pruefen', sub: waiting.length ? 'Apps von Schüler/innen' : 'Alles geprüft' }),
-        stat({ label: 'Klassen', value: classes.length, href: '/klassen' }),
+        stat({ label: 'Klassen', value: teaching.length, href: '/klassen' }),
         stat({ label: 'Heute aktiv', value: activeToday, sub: 'Schüler/innen in deinen Klassen' }),
         stat({ label: 'Aufgaben fällig', value: dueSoon.length, sub: 'in den nächsten Tagen' }),
       ]) : ''}
@@ -308,6 +310,7 @@ module.exports = (app, ctx) => {
             });
           }))
           : empty({ icon: 'school', title: 'Noch keine Klasse', text: 'Lege deine erste Klasse an. Deine Schüler/innen treten dann per QR-Code oder Link bei.', actions: linkButton('/klassen/neu', 'Erste Klasse anlegen', { kind: 'primary', icon: 'plus' }) })}
+          ${teaching.length > classes.length ? html`<p class="mt-2">${linkButton('/klassen', `Alle ${teaching.length} Klassen`, { kind: 'quiet', size: 'sm' })}</p>` : ''}
         </section>
       </div><div>
         ${dueSoon.length ? html`<section class="section" aria-labelledby="s-due">${sectionHead('Bald fällig', { id: 's-due' })}

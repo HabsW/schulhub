@@ -78,3 +78,20 @@ test('Einladung: eine Lehrkraft, die die Klasse vorher per QR-Code als Schüler/
   assert.equal((await BT.post(`/beitreten/${joinCode(c.id)}`)).status, 303);
   assert.equal(classRole(beta.id, c.id), 'teacher', 'the class code never turns a teacher back into a student');
 });
+
+// ------------------------------------------------------------- class lists
+
+test('Startseite: eine Lehrkraft mit mehr als 12 Klassen sieht die richtige Zahl und kommt zu allen', async () => {
+  const { user, b } = await person('Herr Viele', 'teacher');
+  const names = [];
+  for (let i = 0; i < 13; i++) names.push((await newClass(b, `Kurs ${String(i).padStart(2, '0')}`)).name);
+  await b.get('/klassen'); // the flash of the last "angelegt" is shown here, not on the start page
+  const start = (await b.get('/start')).text;
+  const stat = /<span class="stat-label">Klassen<\/span><span class="stat-value">(\d+)<\/span>/.exec(start);
+  assert.equal(stat && stat[1], '13', 'the number on the start page counts every class');
+  const main = start.split('<main')[1];
+  const listed = names.filter((n) => main.includes(`>${n}<`));
+  // At most 12 rows, but then the way to all of them is on the page.
+  assert.ok(listed.length === 13 || /href="\/klassen"[^>]*>(?:<svg[\s\S]*?<\/svg>)?<span>Alle 13 Klassen<\/span>/.test(main), `listed ${listed.length} of 13 and no link to all of them`);
+  assert.equal(h.db.get("SELECT COUNT(*) AS n FROM class_members WHERE user_id = ? AND role = 'teacher'", user.id).n, 13);
+});
