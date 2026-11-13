@@ -144,3 +144,20 @@ test('Klasse löschen: Mitteilungen, die in die Klasse führen, verschwinden mit
   // The other class keeps its notices.
   assert.equal(leading(keep).length, 2, 'notices of another class stay');
 });
+
+test('Verwaltung: archivierte Klassen nennen den Löschtag mit Jahr – „Sa., 13. Nov.“ läse sich wie morgen', async () => {
+  const { formatFullDate } = require('../src/util');
+  const { b: AD } = await person('Ada Admin', 'admin');
+  const c = await newClass(T);
+  await T.page(`/klassen/${c.id}/einstellungen`);
+  assert.equal((await T.post(`/klassen/${c.id}/archivieren`)).status, 303);
+  const archivedAt = h.db.get('SELECT archived_at FROM classes WHERE id = ?', c.id).archived_at;
+  const day = formatFullDate(archivedAt + h.hub.ctx.settings.get('retention.archivedClassDays') * 86_400_000);
+  assert.match(day, /\d{4}$/);
+  // The teacher's page already says it with the year ...
+  assert.ok((await T.get(`/klassen/${c.id}/einstellungen`)).text.includes(`Wird am ${day} gelöscht.`));
+  // ... the admin's list of archived classes says the same day.
+  const list = (await AD.get(`/admin/klassen?archiv=1&q=${encodeURIComponent(c.name)}`)).text;
+  const row = list.split(`>${c.name}</a>`)[1].split('</tr>')[0];
+  assert.ok(row.includes(`wird am ${day} gelöscht`), row.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 200));
+});
