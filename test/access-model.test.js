@@ -434,6 +434,7 @@ function createModel(w) {
   // ----- other people's data
   m.isStudentOf = (classId, studentId) => roleIn(classId, studentId) === 'student';
   m.appApprovedIn = (classId, appId) => placement(classId, appId)?.status === 'approved';
+  m.wasApprovedIn = (classId, appId) => usedIn(classId, appId);
   // "The app is or was approved in this class: its row keeps the version the class had, also after it was
   // removed - and while a new submission of the removed app waits or was given back."
   const usedIn = (classId, appId) => Boolean(placement(classId, appId)?.version_id);
@@ -457,7 +458,8 @@ function createModel(w) {
   // "The student it is for, and the teachers of that class." (the admin too: "die Schulverwaltung")
   m.canReadFeedback = (user, f) => Boolean(user) && Boolean(f) && (same(f.student_id, uid(user)) || m.canManageClass(user, f.class_id));
   // "The author, the student (it is their data), the admin."
-  m.canDeleteFeedback = (user, f) => Boolean(user) && Boolean(f) && (same(f.author_id, uid(user)) || same(f.student_id, uid(user)) || m.isAdmin(user));
+  // "The author while the class may change (an archived class is read-only), the student (it is their data), the admin."
+  m.canDeleteFeedback = (user, f) => Boolean(user) && Boolean(f) && ((same(f.author_id, uid(user)) && m.canChangeClass(user, f.class_id)) || same(f.student_id, uid(user)) || m.isAdmin(user));
   // "Only the student a feedback is for marks it as read."
   m.canMarkFeedbackRead = (user, f) => Boolean(user) && Boolean(f) && same(f.student_id, uid(user));
   // SECURITY.md: "Only canEditAppSettings (teacher of the active class, app approved there)."
@@ -565,7 +567,7 @@ function createModel(w) {
 
 const BOOLEAN = new Set([
   'isAdmin', 'isStaff', 'isArchived', 'canCreateClass', 'canViewClass', 'canManageClass', 'canChangeClass', 'canManageApp', 'canShareApp',
-  'isSharedWith', 'canReviewApp', 'canSeeVersion', 'canSeeStudentData', 'isStudentOf', 'appApprovedIn', 'canAssign', 'canSeeAssignment',
+  'isSharedWith', 'canReviewApp', 'canSeeVersion', 'canSeeStudentData', 'isStudentOf', 'appApprovedIn', 'wasApprovedIn', 'canAssign', 'canSeeAssignment',
   'canManageAssignment', 'canMarkDone', 'canGiveFeedback', 'canReadFeedback', 'canDeleteFeedback', 'canEditAppSettings', 'canAnnounce',
   'canSeeAnnouncement', 'canDeleteAnnouncement', 'canJoinRoom', 'canLeaveClass', 'canSeeClassResults', 'canMarkFeedbackRead',
   'canRemoveFromClass', 'isAppOwner', 'canDeleteComment', 'canEditAppText',
@@ -820,6 +822,7 @@ const RANDOM = {
   canJoinRoom: (g) => { const u = g.user(); const c = g.id('c', g.classesOf(u.v)); return [u, g.app(g.appsIn(c.v)), c]; },
   isStudentOf: (g) => { const c = g.id('c'); return [c, g.id('u', g.studentsIn(c.v))]; },
   appApprovedIn: (g) => { const c = g.id('c'); return [c, g.id('a', g.appsIn(c.v))]; },
+  wasApprovedIn: (g) => { const c = g.id('c'); return [c, g.id('a', g.appsIn(c.v))]; },
   canSeeStudentData: (g) => { const u = g.user(); const c = g.id('c', g.teaching(u.v)); return [u, c, g.id('a', g.appsIn(c.v)), g.id('u', g.studentsIn(c.v))]; },
   canSeeClassResults: (g) => { const u = g.user(); const c = g.id('c', g.teaching(u.v)); return [u, c, g.id('a', g.appsIn(c.v))]; },
   canAssign: (g) => { const u = g.user(); const c = g.id('c', g.teaching(u.v)); return [u, c, g.id('a', g.appsIn(c.v))]; },
@@ -877,7 +880,7 @@ function runGrid(w, check, r) {
   for (const c of classIds) {
     check('isArchived', [c]);
     for (const u of w.users) check('isStudentOf', [c, u.id]);
-    for (const a of w.apps) check('appApprovedIn', [c, a.id]);
+    for (const a of w.apps) for (const fn of ['appApprovedIn', 'wasApprovedIn']) check(fn, [c, a.id]);
   }
   for (const u of w.users) {
     for (const c of classIds) {

@@ -185,8 +185,9 @@ function createAccess(db) {
   const canGiveFeedback = (user, classId, studentId) => canChangeClass(user, classId) && isStudentOf(classId, studentId);
   /** The student it is for, and the teachers of that class. */
   const canReadFeedback = (user, f) => Boolean(user && f) && (sameId(f.student_id, user.id) || canManageClass(user, f.class_id));
-  /** The author, the student (it is their data), the admin. */
-  const canDeleteFeedback = (user, f) => Boolean(user && f) && (sameId(f.author_id, user.id) || sameId(f.student_id, user.id) || isAdmin(user));
+  /** The author while the class may change (an archived class is read-only), the student (it is their data), the admin. */
+  const canDeleteFeedback = (user, f) =>
+    Boolean(user && f) && ((sameId(f.author_id, user.id) && canChangeClass(user, f.class_id)) || sameId(f.student_id, user.id) || isAdmin(user));
 
   // ----- per-class app settings (declared in schulhub.json) -----
   const canEditAppSettings = (user, classId, appId) => canChangeClass(user, classId) && appApprovedIn(classId, appId);
@@ -276,7 +277,8 @@ function createAccess(db) {
   }
   /**
    * Results of one app in one class (lists, overview, CSV): the class's teachers
-   * (and the admin), while the app is approved there - or after it was removed.
+   * (and the admin), while the app is approved there - or after it was removed,
+   * also while it waits there again (wasApprovedIn).
    */
   const canSeeClassResults = (user, classId, appId) => canManageClass(user, classId) && wasApprovedIn(classId, appId);
   /** Only the student a feedback is for marks it as read. */
@@ -347,7 +349,7 @@ function createAccess(db) {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
     canManageApp, canShareApp, isSharedWith, canReviewApp, canSeeVersion, reviewClasses, addToClassMode, resolvePlay,
-    canSeeStudentData, isStudentOf, appApprovedIn,
+    canSeeStudentData, isStudentOf, appApprovedIn, wasApprovedIn,
     canAssign, canSeeAssignment, canManageAssignment, canMarkDone,
     canGiveFeedback, canReadFeedback, canDeleteFeedback,
     canEditAppSettings,

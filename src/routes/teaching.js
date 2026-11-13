@@ -152,7 +152,8 @@ module.exports = (app, ctx) => {
   /** "Neue Aufgabe" to every student of the class - only for an assignment that has started. Returns how many. */
   function notifyStart(cls, x) {
     const students = studentIds(cls.id);
-    const due = x.due_at ? ` (${formatDue(x.due_at).text})` : '';
+    // The notice is read later (tomorrow, after the weekend): the date itself, never "morgen fällig".
+    const due = x.due_at ? ` (fällig ${formatDay(x.due_at)}, ${kit.inputTime(x.due_at)} Uhr)` : '';
     services.notify(students, 'aufgabe', `Neue Aufgabe in ${cls.name}: „${x.title}“${due}`, `/aufgaben/${x.id}`);
     return students.length;
   }
@@ -270,8 +271,9 @@ module.exports = (app, ctx) => {
       eyebrow: `Aufgabe · ${x.class_name}`,
       title: x.title,
       meta: html`${state === 'done' ? badge('erledigt', 'ok') : state === 'started' ? badge('begonnen') : badge('offen', due.tone)}${x.author_name ? html`<span>von ${x.author_name}</span>` : ''}`,
-      actions: begun && playable
-        ? html`${linkButton(`/apps/${x.app_id}/spielen?klasse=${x.class_id}`, 'Öffnen', { kind: 'primary', icon: 'play', size: 'lg' })}
+      // Marking it done does not need the app: when it left the class, this is the student's way to close the task.
+      actions: begun && (playable || (state !== 'done' && canDone))
+        ? html`${playable ? linkButton(`/apps/${x.app_id}/spielen?klasse=${x.class_id}`, 'Öffnen', { kind: 'primary', icon: 'play', size: 'lg' }) : ''}
           ${state !== 'done' && canDone ? kit.headPostButton(req, `${here}/erledigt`, 'Als erledigt markieren', { icon: 'check', size: 'lg' }) : ''}`
         : '',
     })}
@@ -342,8 +344,12 @@ module.exports = (app, ctx) => {
 
   app.post('/aufgaben/:id/loeschen', (req, res) => {
     const x = manageAssignment(req);
-    db.run('DELETE FROM assignments WHERE id = ?', x.id);
-    services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
+    db.tx(() => {
+      db.run('DELETE FROM assignments WHERE id = ?', x.id);
+      // "Neue Aufgabe" would now lead nowhere (404) and still quote its title.
+      db.run("DELETE FROM notices WHERE kind = 'aufgabe' AND href = ?", `/aufgaben/${x.id}`);
+      services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
+    });
     flash(req, `Die Aufgabe „${x.title}“ ist gelöscht.`);
     res.redirect(303, `/klassen/${x.class_id}/aufgaben`);
   });
@@ -390,7 +396,7 @@ module.exports = (app, ctx) => {
     // The feedback (and its notice) would show the title of an assignment the student may not see yet.
     if (x && x.starts_at > Date.now()) throw bad('Diese Aufgabe hat noch nicht begonnen, die Schüler/innen sehen sie noch nicht. Schreib die Rückmeldung nach dem Start – oder ohne Bezug zur Aufgabe.');
     const appId = typeof req.body.app === 'string' && req.body.app ? req.body.app : x ? x.app_id : null;
-    if (appId && !db.get('SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND version_id IS NOT NULL', cls.id, appId)) throw deny(); // is or was approved here
+    if (appId && !access.wasApprovedIn(cls.id, appId)) throw deny();
     const student = db.get('SELECT id, name FROM users WHERE id = ?', studentId);
     const appName = appId ? db.get('SELECT name FROM apps WHERE id = ?', appId).name : '';
     db.run(
