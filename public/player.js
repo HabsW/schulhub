@@ -5,13 +5,27 @@
 // Messages are accepted only from the app's own origin AND only from our frame,
 // and answers are sent only to that origin. In a preview, the SDK also sends
 // its console messages here; they are shown as plain text (textContent).
+//
+// Before the app's own code runs, the frame shows the Hub's start page on the
+// app's origin (sdk/hub-start.js). It removes what an earlier person left in
+// that origin's browser storage and then says where the app is; only then is
+// the app loaded. The player keeps its frame in a <template> until this script
+// points it at the start page; pages that embed a plain frame (review, editor)
+// are sent to the start page by the app origin itself.
 (function () {
   'use strict';
   var stage = document.getElementById('stage');
+  var hold = document.getElementById('appframe-hold');
   var frame = document.getElementById('appframe');
   var note = document.getElementById('player-note');
   var appOrigin = stage.dataset.origin;
   var csrf = document.querySelector('meta[name="csrf"]').content;
+  // True while the frame shows the start page (the player knows it does; elsewhere it may).
+  var starting = Boolean(hold);
+  if (!frame && hold) {
+    frame = document.importNode(hold.content.firstElementChild, true);
+    frame.setAttribute('src', hold.getAttribute('data-start'));
+  }
 
   function fetchToken(first) {
     return fetch(stage.dataset.tokenUrl, {
@@ -82,11 +96,34 @@
     }
   }
 
+  // ------------------------------------------------------------ app start
+  // The start page reports once the browser storage is ready, with the app's address (and repeats
+  // that until the frame moves on). Only an address on this app's origin is loaded - the app could
+  // navigate its own frame there anyway. replace(): no extra history entry for the start page.
+  var startedBy = '';
+  function startApp(msg) {
+    if (msg.id === startedBy || typeof msg.next !== 'string') return;
+    var url;
+    try {
+      url = new URL(msg.next, appOrigin);
+    } catch (e) {
+      return;
+    }
+    if (url.origin !== appOrigin || url.pathname.indexOf('/~') !== 0) return;
+    startedBy = msg.id;
+    starting = false;
+    frame.contentWindow.location.replace(url.href);
+  }
+
   // ------------------------------------------------------------ messages
   window.addEventListener('message', function (event) {
     if (event.origin !== appOrigin || event.source !== frame.contentWindow) return;
     var msg = event.data;
     if (!msg || typeof msg !== 'object') return;
+    if (msg.hub === 'storage') {
+      if (typeof msg.id === 'string' && msg.id.length <= 64) startApp(msg);
+      return;
+    }
     // The app is talking to us, so it has loaded (the frame's load event can be missed behind big scripts).
     stage.classList.add('ready');
 
@@ -113,7 +150,8 @@
   });
   function reloadApp() {
     stage.classList.remove('ready');
-    frame.src = frame.src;
+    starting = Boolean(hold);
+    frame.src = frame.src; // the start page again (here or via the app origin)
   }
   window.HubPlayer = { reload: reloadApp };
 
@@ -138,8 +176,11 @@
   });
 
   // ------------------------------------------------------- loading, fullscreen
-  frame.addEventListener('load', function () { stage.classList.add('ready'); });
+  // The start page's own load does not count (the overlay fades anyway when it is missed).
+  frame.addEventListener('load', function () { if (!starting) stage.classList.add('ready'); });
   setTimeout(function () { stage.classList.add('ready'); }, 4000);
+  // Listeners are in place: now the player's frame may start (with the start page).
+  if (hold) hold.replaceWith(frame);
 
   // Pages that embed the stage (review, editor) may leave out the fullscreen button.
   var fs = document.getElementById('fullscreen');

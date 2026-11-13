@@ -12,6 +12,50 @@ const PLACEHOLDERS = ['00000000-0000-0000-0000-000000000000', 'paste-secret-valu
 
 const list = (v) => String(v || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
 
+// A plain host name: labels of letters, digits and hyphens - no scheme, port, path or wildcard.
+const HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/**
+ * Real mode: the addresses must keep uploaded apps away from the Hub's cookies.
+ * Cookies belong to a whole registrable domain. If the Hub and the apps share one
+ * (hub.schule.de + <key>.apps.schule.de), any app can set cookies that the Hub and
+ * every other app receive - forty 4 KB cookies lock a browser out of everything for
+ * months (HTTP 431), and planted cookies reach the Hub. So the Hub's host and
+ * APPS_DOMAIN must not share a parent domain of two or more labels, unless the
+ * operator names that suffix in APPS_PUBLIC_SUFFIX as a public suffix (like co.uk,
+ * which browsers already treat as a boundary). And without HTTPS there is no
+ * __Host- session cookie, so plain http is for localhost only.
+ */
+function addressProblems(base, env) {
+  const out = [];
+  if (base.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(base.hostname)) {
+    out.push(`BASE_URL muss mit https:// beginnen (jetzt: ${base.origin}). Ohne HTTPS ist die Anmeldung nicht geschützt; nur localhost und 127.0.0.1 dürfen http:// nutzen.`);
+  }
+  const appsDomain = String(env.APPS_DOMAIN || '').trim().toLowerCase();
+  if (!appsDomain) return out; // reported as missing
+  if (!HOSTNAME.test(appsDomain)) {
+    out.push(`APPS_DOMAIN muss ein reiner Domainname sein – ohne https://, ohne * und ohne Port, z. B. meine-schule-apps.de (jetzt: „${String(env.APPS_DOMAIN).slice(0, 80)}“).`);
+    return out;
+  }
+  const hubHost = base.hostname.replace(/\.$/, '');
+  const hub = hubHost.split('.').reverse();
+  const apps = appsDomain.split('.').reverse();
+  const common = [];
+  while (common.length < Math.min(hub.length, apps.length) && hub[common.length] === apps[common.length]) common.push(hub[common.length]);
+  const shared = common.reverse().join('.');
+  const allowed = String(env.APPS_PUBLIC_SUFFIX || '').trim().toLowerCase().replace(/^\.+|\.+$/g, '');
+  if (common.length >= 2 && allowed !== shared) {
+    const suggestion = [`${common[0]}-apps`, ...common.slice(1)].join('.');
+    out.push(
+      `Hub (${hubHost}) und Apps (${appsDomain}) liegen unter derselben Domain „${shared}“. Dann kann jede App Cookies setzen, ` +
+        'die der Hub und alle anderen Apps bekommen – und Browser damit monatelang aussperren. ' +
+        `Nimm für die Apps eine eigene Domain, z. B. APPS_DOMAIN=${suggestion} (Wildcard-DNS und Wildcard-Zertifikat für *.${suggestion}). ` +
+        `Nur wenn „${shared}“ eine öffentliche Endung wie co.uk ist, unter der viele fremde Domains liegen: APPS_PUBLIC_SUFFIX=${shared} setzen.`
+    );
+  }
+  return out;
+}
+
 function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
   const root = path.join(__dirname, '..');
   const problems = [];
@@ -48,8 +92,9 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
   if (!dev && studentDomains.length + staffDomains.length === 0) {
     problems.push('STUDENT_EMAIL_DOMAINS und/oder STAFF_EMAIL_DOMAINS müssen gesetzt sein.');
   }
-  if (!dev && !env.APPS_DOMAIN) problems.push('APPS_DOMAIN fehlt (z. B. apps.schule.example, mit Wildcard-DNS *.apps.schule.example).');
-  if (problems.length) throw new Error(`Konfiguration unvollständig (siehe .env.example):\n - ${problems.join('\n - ')}`);
+  if (!dev && !env.APPS_DOMAIN) problems.push('APPS_DOMAIN fehlt (eine eigene Domain für die Apps, z. B. meine-schule-apps.de mit Wildcard-DNS *.meine-schule-apps.de).');
+  if (!dev) problems.push(...addressProblems(base, env));
+  if (problems.length) throw new Error(`Konfiguration unvollständig oder unsicher (siehe .env.example):\n - ${problems.join('\n - ')}`);
 
   const config = {
     dev,
