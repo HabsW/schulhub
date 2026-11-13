@@ -75,9 +75,11 @@ function createAccess(db) {
    * Preview, source code, diff and download of ONE version. The owner sees all
    * of their versions. A teacher sees versions that were submitted to, returned
    * in or approved in one of their classes - never the owner's private drafts -
-   * and the published version of an app a colleague shared.
+   * and the published version of an app a colleague shared. Anything that is not a version of
+   * this app (null, another app's version) is seen by nobody.
    */
   function canSeeVersion(user, app, versionId) {
+    if (!app || typeof versionId !== 'string' || !db.get('SELECT 1 AS ok FROM app_versions WHERE id = ? AND app_id = ?', versionId, app.id)) return false;
     if (canManageApp(user, app)) return true;
     if (reviewClasses(user, app).some((c) => c.version_id === versionId || c.requested_version_id === versionId)) return true;
     return isSharedWith(user, app) && app.published_version_id === versionId;
