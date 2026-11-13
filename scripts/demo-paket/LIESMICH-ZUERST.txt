@@ -3,8 +3,8 @@ SchulHub – Demo
 
 SchulHub läuft hier als ganz normales Programm auf diesem Rechner: ohne Installation,
 ohne Internet und ohne Microsoft-Konto – mit erfundenen Beispieldaten und Testpersonen.
-Die Anleitung mit Bildern: "SchulHub-Demo-Anleitung-Mac-Windows.pdf".
-Alles über SchulHub: "SchulHub-Dokumentation.pdf".
+Die Anleitung mit Bildern liegt als PDF neben der ZIP-Datei:
+"SchulHub-Demo-Anleitung-Mac-Windows.pdf"; alles über SchulHub: "SchulHub-Dokumentation.pdf".
 
 Starten
 -------
