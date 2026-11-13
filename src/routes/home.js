@@ -127,6 +127,22 @@ module.exports = (app, ctx) => {
       .slice(0, 3);
   }
 
+  /**
+   * The version whose schulhub.json names this person's achievements in an app: the one they can
+   * open now (approved in their class, school-wide, or their own), else the one a class of theirs
+   * used (the app was removed since, or the class is archived). Never just the newest published
+   * version: in a class it may still wait for the teacher, with titles nobody has reviewed.
+   */
+  function reviewedVersion(user, a) {
+    const play = access.resolvePlay(user, a);
+    if (play) return play.version;
+    return db.get(
+      `SELECT v.manifest FROM class_apps ca JOIN class_members m ON m.class_id = ca.class_id AND m.user_id = ?
+         JOIN app_versions v ON v.id = ca.version_id WHERE ca.app_id = ? ORDER BY ca.decided_at DESC LIMIT 1`,
+      user.id, a.id
+    ) || null;
+  }
+
   /** Apps the person used recently and can still open, with how to open them. */
   function recentApps(user, limit) {
     const out = [];
@@ -181,11 +197,11 @@ module.exports = (app, ctx) => {
       user.id, user.id
     );
     const unlocked = db.all(
-      `SELECT ach.achievement, ach.unlocked_at, a.id AS app_id, a.name AS app_name, a.published_version_id, a.schoolwide_version_id
+      `SELECT ach.achievement, ach.unlocked_at, a.id AS app_id, a.name AS app_name, a.owner_id, a.published_version_id, a.schoolwide_version_id
          FROM achievements ach JOIN apps a ON a.id = ach.app_id WHERE ach.user_id = ? ORDER BY ach.unlocked_at DESC LIMIT 8`,
       user.id
     ).map((r) => {
-      const v = db.get('SELECT manifest FROM app_versions WHERE id = ?', r.published_version_id || r.schoolwide_version_id || '');
+      const v = reviewedVersion(user, { id: r.app_id, owner_id: r.owner_id, published_version_id: r.published_version_id, schoolwide_version_id: r.schoolwide_version_id });
       const def = manifestOf(v).achievements.find((x) => x.id === r.achievement);
       return { ...r, title: def ? def.title : r.achievement, emoji: def ? def.emoji : '🏅' };
     });
