@@ -103,10 +103,34 @@ module.exports = (app, ctx) => {
       <label for="f-grade_min">von</label><select id="f-grade_min" name="grade_min">${options(a)}</select>
       <label for="f-grade_max">bis</label><select id="f-grade_max" name="grade_max">${options(b)}</select></div></fieldset>`;
   }
-  /** Name, description, symbol, colour, subject, grades - for "Neue App" and the settings. */
-  function appFormFields(req, a) {
-    return html`${field(req, { label: 'Name', name: 'name', value: a ? a.name : '', required: true, attrs: 'minlength="2" maxlength="60" autocomplete="off"' })}
-      ${field(req, { label: 'Kurze Beschreibung', name: 'description', type: 'textarea', value: a ? a.description : '', hint: 'Ein, zwei Sätze: Worum geht es? Was übt man? (freiwillig)', attrs: 'maxlength="500" rows="3"' })}
+  /** Why the name and description cannot change right now, and what to do (lock: access.appTextLock). */
+  function lockText(lock) {
+    const parts = [];
+    if (lock.approved.length) parts.push(`In ${names(lock.approved)} ist die App freigegeben – alle dort sehen ihren Namen.`);
+    if (lock.waiting.length) parts.push(`In ${names(lock.waiting)} wartet sie auf die Prüfung.`);
+    // A waiting request is withdrawn first; only then can an approved app be taken out of the class.
+    const steps = [
+      lock.waiting.length ? `zieh die Einreichung in ${names(lock.waiting)} zurück` : '',
+      lock.approved.length ? `nimm die App aus ${names(lock.approved)} heraus` : '',
+    ].filter(Boolean).join(' und ');
+    if (steps) parts.push(`So änderst du Name oder Beschreibung: ${steps[0].toUpperCase()}${steps.slice(1)}, ändere sie und reiche die App wieder ein. Deine Lehrkraft sieht das Neue dann bei der Prüfung.`);
+    if (lock.schoolwide) parts.push('Für die ganze Schule ist die App freigegeben: Name und Beschreibung ändert dann nur die Verwaltung – frag dort nach.');
+    return parts.join(' ');
+  }
+
+  /**
+   * Name, description, symbol, colour, subject, grades - for "Neue App" and the settings.
+   * With a lock, name and description are shown as text (the form does not send them) and the
+   * notice says why and what to do.
+   */
+  function appFormFields(req, a, { lock = null } = {}) {
+    const text = lock
+      ? html`${notice({ tone: 'wait', icon: 'lock', title: 'Name und Beschreibung sind gerade gesperrt', text: `${lockText(lock)} Symbol, Farbe, Fach und Klassenstufen kannst du weiter ändern.` })}
+        <dl class="kv"><div><dt>Name</dt><dd>${a.name}</dd></div>
+          <div><dt>Kurze Beschreibung</dt><dd>${a.description ? html`<span class="pre">${a.description}</span>` : html`<span class="faint">keine</span>`}</dd></div></dl>`
+      : html`${field(req, { label: 'Name', name: 'name', value: a ? a.name : '', required: true, attrs: 'minlength="2" maxlength="60" autocomplete="off"' })}
+        ${field(req, { label: 'Kurze Beschreibung', name: 'description', type: 'textarea', value: a ? a.description : '', hint: 'Ein, zwei Sätze: Worum geht es? Was übt man? (freiwillig)', attrs: 'maxlength="500" rows="3"' })}`;
+    return html`${text}
       ${emojiPicker(req, a ? a.emoji : EMOJIS[0])}
       ${colorPicker(req, a ? a.color : 0)}
       <div class="form-row">${categoryField(req, a ? a.category : '')}${gradeField(req, a ? a.grade_min : null, a ? a.grade_max : null)}</div>`;
@@ -534,7 +558,7 @@ module.exports = (app, ctx) => {
     // ----- settings and danger zone -----
     const settingsSection = html`<section class="section" id="einstellungen" aria-labelledby="h-einstellungen">
       ${sectionHead('Einstellungen', { id: 'h-einstellungen' })}
-      <form method="post" action="/apps/${a.id}/bearbeiten" class="form apps-form">${csrfField(req)}${appFormFields(req, a)}
+      <form method="post" action="/apps/${a.id}/bearbeiten" class="form apps-form">${csrfField(req)}${appFormFields(req, a, { lock: access.appTextLock(user, a) })}
         ${access.canShareApp(user, a) ? html`<input type="hidden" name="shared_field" value="1">
           <label class="switch apps-switch"><span><strong>Mit Kolleg/innen teilen</strong><small>Andere Lehrkräfte können die veröffentlichte Version ansehen und in ihre Klassen holen.</small></span>
           <input type="checkbox" name="shared" value="1"${a.shared ? raw(' checked') : ''}></label>` : ''}
@@ -624,7 +648,19 @@ module.exports = (app, ctx) => {
 
   app.post('/apps/:id/bearbeiten', (req, res) => {
     const a = manageApp(req);
-    const f = services.appFields(req.body);
+    // Name and description of a student's app that classmates (or the school) already see stay as
+    // they were approved (access.appTextLock). The form leaves them out; a request that changes them
+    // is refused with what to do instead. Symbol, colour, subject and grades come from fixed lists.
+    const lock = access.appTextLock(req.user, a);
+    const sent = (key) => (Object.hasOwn(req.body, key) ? req.body[key] : a[key]);
+    const f = services.appFields(lock ? { ...req.body, name: sent('name'), description: sent('description') } : req.body);
+    if (lock) {
+      if (f.name !== cleanText(a.name, 60) || f.description !== cleanText(a.description, 500, { multiline: true })) {
+        throw bad(`Name und Beschreibung kannst du gerade nicht ändern. ${lockText(lock)}`);
+      }
+      f.name = a.name;
+      f.description = a.description;
+    }
     // Forms without these fields (older clients) leave them as they are.
     const cat = Object.hasOwn(req.body, 'category') || Object.hasOwn(req.body, 'grade_min') ? catalogFields(req.body) : { category: a.category, gradeMin: a.grade_min, gradeMax: a.grade_max };
     // Only staff owners may share with colleagues (students' apps always go through review).

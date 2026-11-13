@@ -14,6 +14,7 @@ const {
 const { deny, bad, cleanText, formatDate, formatDay, formatAgo, formatDue, plural, safeEqual, HttpError } = require('../util');
 const { CATEGORIES, manifestOf } = require('../manifest');
 const kit = require('../teachingKit');
+const { teachersSee } = require('../teacherView');
 
 /** QR code as SVG, built from our own URL (no user input, no inline styles). */
 function qrSvg(text, label = 'QR-Code zum Beitreten') {
@@ -430,7 +431,7 @@ module.exports = (app, ctx) => {
           : change
             ? empty({ icon: 'tasks', title: 'Keine laufende Aufgabe', text: 'Eine Aufgabe sagt der Klasse, welche App sie bis wann bearbeiten soll. Die Schüler/innen sehen sie auf ihrer Startseite.', actions: linkButton(`${base}/aufgaben/neu`, 'Aufgabe stellen', { icon: 'plus' }) })
             : html`<p class="muted">Keine laufende Aufgabe.</p>`}</section>
-      ${planned.length ? html`<section class="section" aria-labelledby="s-plan">${sectionHead('Geplant', { id: 's-plan', count: String(planned.length), sub: 'Diese Aufgaben sehen die Schüler/innen erst ab dem Start.' })}
+      ${planned.length ? html`<section class="section" aria-labelledby="s-plan">${sectionHead('Geplant', { id: 's-plan', count: String(planned.length), sub: 'Diese Aufgaben sehen die Schüler/innen erst ab dem Start – dann stehen sie auf ihrer Startseite. Eine Mitteilung bekommen sie dafür nicht.' })}
         ${list(planned.map((x) => assignmentRow(x, now, { counts: true })))}</section>` : ''}
       ${past.length ? html`<details class="disclosure teach-past"${all ? raw(' open') : ''}><summary><span class="teach-sumtitle">Abgelaufen</span><span class="teach-count">${all ? past.length : past.length > 10 ? 'mehr als 10' : past.length}</span></summary>
         <div class="disclosure-body">${list(pastShown.map((x) => assignmentRow(x, now, { counts: true })))}
@@ -959,9 +960,10 @@ module.exports = (app, ctx) => {
           <div><dt>${invite ? 'Bisher unterrichtet von' : 'Lehrkraft'}</dt><dd>${teachers.map((t) => t.name).join(', ') || '–'}</dd></div>
           ${kit.classEyebrow(cls) ? html`<div><dt>Fach</dt><dd>${kit.classEyebrow(cls)}</dd></div>` : ''}
         </dl>
-        <p class="muted">${role === 'teacher'
-          ? 'Als Lehrkraft siehst du dann die Schüler/innen dieser Klasse und ihre Ergebnisse und kannst die Klasse mitverwalten.'
-          : 'Deine Lehrkraft sieht dann deinen Namen und deine Ergebnisse in den Apps dieser Klasse – sonst nichts. Du kannst die Klasse jederzeit wieder verlassen.'}</p>
+        ${role === 'teacher'
+          ? html`<p class="muted">Als Lehrkraft siehst du dann die Schüler/innen dieser Klasse und ihre Ergebnisse und kannst die Klasse mitverwalten.</p>`
+          : html`<div class="prose muted">${teachersSee('Die Lehrkräfte dieser Klasse sehen in den Apps, die hier freigegeben sind:')}
+              <p>Deine E-Mail-Adresse sehen sie nie. Du kannst die Klasse jederzeit wieder verlassen.</p></div>`}
         <form method="post" action="/beitreten/${req.params.code}" class="actions stack-phone">${csrfField(req)}
           <button class="btn primary lg">${icon(role === 'teacher' ? 'userPlus' : 'check')}<span>${role === 'teacher' ? 'Als Lehrkraft beitreten' : 'Ja, beitreten'}</span></button>
           ${linkButton('/start', 'Abbrechen', { kind: 'quiet', size: 'lg' })}</form>

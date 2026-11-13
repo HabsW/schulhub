@@ -159,7 +159,12 @@ function createAccess(db) {
   // ----- assignments -----
   /** Create an assignment: a teacher of an active class, for an app approved in that class. */
   const canAssign = (user, classId, appId) => canChangeClass(user, classId) && appApprovedIn(classId, appId);
-  const canSeeAssignment = (user, a) => Boolean(a) && canViewClass(user, a.class_id);
+  /**
+   * The class's teachers (and the admin) see every assignment of it. Students see one only
+   * from its start: before that, nothing of a planned assignment (title, note, link) reaches them.
+   */
+  const canSeeAssignment = (user, a) =>
+    Boolean(a) && canViewClass(user, a.class_id) && (canManageClass(user, a.class_id) || a.starts_at <= Date.now());
   const canManageAssignment = (user, a) => Boolean(a) && canChangeClass(user, a.class_id);
   /** Only the student themself marks an assignment as done. */
   const canMarkDone = (user, a) => Boolean(user && a) && isStudentOf(a.class_id, user.id) && !isArchived(a.class_id);
@@ -298,6 +303,30 @@ function createAccess(db) {
   const canDeleteComment = (user, comment) =>
     Boolean(user && comment) && comment.kind === 'comment' && (comment.author_id === user.id || isAdmin(user));
 
+  // ----- package P2 -----
+  /**
+   * Name and description of a student's app are part of what was approved: while the app is
+   * approved or waiting in an active class, released school-wide or waiting for a school-wide
+   * update, classmates (or the whole school) see that text without another review - so its
+   * owner cannot change it. Staff owners and the admin are not bound by this.
+   * Returns null (free to change) or where it is held:
+   * { approved: [class names], waiting: [class names with a waiting request], schoolwide }.
+   */
+  function appTextLock(user, app) {
+    if (!user || !app || isAdmin(user) || ownerIsStaff(app)) return null;
+    const rows = db.all(
+      `SELECT c.name, ca.status, ca.request_state FROM class_apps ca JOIN classes c ON c.id = ca.class_id AND c.archived_at IS NULL
+        WHERE ca.app_id = ? AND (ca.status = 'approved' OR ca.request_state = 'waiting') ORDER BY c.name COLLATE NOCASE`,
+      app.id
+    );
+    const approved = rows.filter((r) => r.status === 'approved').map((r) => r.name);
+    const waiting = rows.filter((r) => r.request_state === 'waiting').map((r) => r.name);
+    const schoolwide = Boolean(app.schoolwide_version_id || app.schoolwide_requested_version_id);
+    return approved.length || waiting.length || schoolwide ? { approved, waiting, schoolwide } : null;
+  }
+  /** Change an app's name and description: whoever manages it, unless appTextLock holds the text. */
+  const canEditAppText = (user, app) => canManageApp(user, app) && !appTextLock(user, app);
+
   return {
     isAdmin, isStaff, classRole, isArchived,
     canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
@@ -311,6 +340,7 @@ function createAccess(db) {
     visibleApps, visibleClasses,
     canLeaveClass, canSeeClassResults, canMarkFeedbackRead, canRemoveFromClass, // package A
     reviewRequest, isAppOwner, canDeleteComment, // package B
+    appTextLock, canEditAppText, // package P2
   };
 }
 
