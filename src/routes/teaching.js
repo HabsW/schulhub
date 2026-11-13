@@ -152,7 +152,8 @@ module.exports = (app, ctx) => {
   /** "Neue Aufgabe" to every student of the class - only for an assignment that has started. Returns how many. */
   function notifyStart(cls, x) {
     const students = studentIds(cls.id);
-    const due = x.due_at ? ` (${formatDue(x.due_at).text})` : '';
+    // The notice is read later (tomorrow, after the weekend): the date itself, never "morgen fällig".
+    const due = x.due_at ? ` (fällig ${formatDay(x.due_at)}, ${kit.inputTime(x.due_at)} Uhr)` : '';
     services.notify(students, 'aufgabe', `Neue Aufgabe in ${cls.name}: „${x.title}“${due}`, `/aufgaben/${x.id}`);
     return students.length;
   }
@@ -342,8 +343,12 @@ module.exports = (app, ctx) => {
 
   app.post('/aufgaben/:id/loeschen', (req, res) => {
     const x = manageAssignment(req);
-    db.run('DELETE FROM assignments WHERE id = ?', x.id);
-    services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
+    db.tx(() => {
+      db.run('DELETE FROM assignments WHERE id = ?', x.id);
+      // "Neue Aufgabe" would now lead nowhere (404) and still quote its title.
+      db.run("DELETE FROM notices WHERE kind = 'aufgabe' AND href = ?", `/aufgaben/${x.id}`);
+      services.audit(req.user, 'aufgabe_geloescht', x.title, x.class_name, { appId: x.app_id });
+    });
     flash(req, `Die Aufgabe „${x.title}“ ist gelöscht.`);
     res.redirect(303, `/klassen/${x.class_id}/aufgaben`);
   });

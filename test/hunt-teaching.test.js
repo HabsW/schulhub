@@ -124,3 +124,30 @@ test('Schüler-App herausgenommen und neu eingereicht: Ergebnisse und Rückmeldu
   assert.equal((await L.post(`/klassen/${cls}/rueckmeldungen`, { schueler: ben.id, text: 'zu früh', app: fresh.id })).status, 404);
   assert.equal(h.db.get("SELECT COUNT(*) AS n FROM feedback WHERE body = 'zu früh'").n, 0);
 });
+
+// ------------------------------------------------------------------ notices
+
+test('Aufgabe gelöscht: die Mitteilung „Neue Aufgabe“ geht mit – kein Link ins Leere', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ user: kid, b: K }] = kids;
+  const x = idOf(await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Wird gleich gelöscht' }));
+  const notice = () => h.db.get("SELECT id FROM notices WHERE user_id = ? AND kind = 'aufgabe' AND href = ?", kid.id, `/aufgaben/${x}`);
+  assert.ok(notice(), 'precondition: the student was told');
+  assert.equal((await T.post(`/aufgaben/${x}/loeschen`)).status, 303);
+  assert.equal((await K.get(`/aufgaben/${x}`)).status, 404, 'precondition: the assignment page is gone');
+  assert.equal(notice(), undefined, 'the notice that led there went with it');
+  assert.ok(!(await K.get('/mitteilungen')).text.includes('Wird gleich gelöscht'), 'not in her Mitteilungen');
+});
+
+test('Mitteilung „Neue Aufgabe“: der Termin steht als Datum drin – „morgen fällig“ stimmt schon am nächsten Tag nicht mehr', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ user: kid }] = kids;
+  const { formatDay } = require('../src/util');
+  const { inputDate } = require('../src/teachingKit');
+  const due = Date.now() + DAY;
+  const x = idOf(await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Vokabeln', faellig: inputDate(due) }));
+  const { text } = h.db.get("SELECT text FROM notices WHERE user_id = ? AND href = ?", kid.id, `/aufgaben/${x}`);
+  const dueAt = h.db.get('SELECT due_at FROM assignments WHERE id = ?', x).due_at;
+  assert.ok(!/heute|morgen|in \d+ Tagen/.test(text), `no words that are only true on the day it was sent: ${text}`);
+  assert.ok(text.includes(formatDay(dueAt)), `the date itself: ${text}`);
+});
