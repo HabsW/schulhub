@@ -83,12 +83,13 @@ function createUserFiles(ctx) {
     }
     const doomed = [...new Set(shas)].filter((sha) => !db.get('SELECT 1 AS used FROM user_files WHERE sha256 = ? LIMIT 1', sha));
     if (!doomed.length) return;
-    db.checkpoint(); // the commit that freed them is on the disk first (see uploads.collectGarbage)
+    // The transactions that free files are durable (see uploads.collectGarbage).
     for (const sha of doomed) fs.rmSync(blobPath(sha), { force: true });
   }
 
-  /** At start: files no row refers to are removed (see uploads.sweep). */
+  /** At start: files no row refers to are removed - with the same guards as uploads.sweep. */
   function sweep() {
+    if (db.createdNow) return 0;
     let entries;
     try {
       entries = fs.readdirSync(dir);
@@ -96,14 +97,26 @@ function createUserFiles(ctx) {
       return 0;
     }
     const used = new Set(db.all('SELECT DISTINCT sha256 FROM user_files').map((r) => r.sha256));
-    let removed = 0;
+    const candidates = [];
+    let present = 0;
     for (const sub of entries) {
       if (!/^[0-9a-f]{2}$/.test(sub)) continue;
       for (const name of fs.readdirSync(path.join(dir, sub))) {
-        if (/^[0-9a-f]{64}$/.test(name) && name.startsWith(sub) && !used.has(name)) {
-          fs.rmSync(path.join(dir, sub, name), { force: true });
-          removed++;
-        }
+        if (!/^[0-9a-f]{64}$/.test(name) || !name.startsWith(sub)) continue;
+        present++;
+        if (!used.has(name)) candidates.push(path.join(dir, sub, name));
+      }
+    }
+    if (present && !used.size) return 0; // files, but a database that names none of them
+    let removed = 0;
+    const hourAgo = Date.now() - 60 * 60_000;
+    for (const file of candidates) {
+      try {
+        if (fs.statSync(file).mtimeMs > hourAgo) continue;
+        fs.rmSync(file, { force: true });
+        removed++;
+      } catch {
+        // gone meanwhile
       }
     }
     return removed;
@@ -130,18 +143,19 @@ function createUserFiles(ctx) {
       }
       const old = db.get('SELECT sha256 FROM user_files WHERE app_id = ? AND user_id = ? AND name = ?', appId, userId, name);
       const sha = writeBlob(buffer);
-      db.run(
+      // Durable when it replaces a file: the old content is deleted right after (see collectGarbage).
+      db.tx(() => db.run(
         `INSERT INTO user_files (app_id, user_id, name, type, size, sha256, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (app_id, user_id, name) DO UPDATE SET type = excluded.type, size = excluded.size, sha256 = excluded.sha256, updated_at = excluded.updated_at`,
         appId, userId, name, t, buffer.length, sha, Date.now()
-      );
+      ), { durable: Boolean(old && old.sha256 !== sha) });
       if (old && old.sha256 !== sha) collectGarbage([old.sha256]);
       return { name, type: t, size: buffer.length };
     },
     remove(appId, userId, name) {
       const old = db.get('SELECT sha256 FROM user_files WHERE app_id = ? AND user_id = ? AND name = ?', appId, userId, name);
       if (!old) return false;
-      db.run('DELETE FROM user_files WHERE app_id = ? AND user_id = ? AND name = ?', appId, userId, name);
+      db.tx(() => db.run('DELETE FROM user_files WHERE app_id = ? AND user_id = ? AND name = ?', appId, userId, name), { durable: true });
       collectGarbage([old.sha256]);
       return true;
     },

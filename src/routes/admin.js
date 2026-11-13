@@ -405,11 +405,17 @@ module.exports = (app, ctx) => {
     // Decided now, in the same step as the checks above (the acting admin was loaded again after the form
     // arrived): the account is blocked and signed out at once. Two admins deleting each other: whichever
     // comes first wins, the other one's request finds its own session gone.
-    services.markForDeletion(u.id);
-    // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
-    await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', u.id).map((r) => r.id));
-    const now = db.get('SELECT * FROM users WHERE id = ?', u.id);
-    if (now) services.deleteUser(req.user, now);
+    services.markForDeletion(u.id, req.user.id);
+    try {
+      // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
+      await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', u.id).map((r) => r.id));
+      const now = db.get('SELECT * FROM users WHERE id = ?', u.id);
+      // Named in the log as who they are now - not at all if their own account went meanwhile.
+      if (now) services.deleteUser(db.get('SELECT * FROM users WHERE id = ?', req.user.id) || null, now);
+    } catch (err) {
+      services.unmarkForDeletion(u.id);
+      throw err;
+    }
     flash(req, `Das Konto von ${u.name} wurde gelöscht.`);
     res.redirect(303, back(req, '/admin/konten'));
   });
@@ -784,8 +790,11 @@ module.exports = (app, ctx) => {
       if (!res.writableFinished) res.emit('drain');
     });
     try {
-      services.audit(req.user, 'sicherung_heruntergeladen', '', `${plural(b.counts.blobs + b.counts.userfiles, 'Datei', 'Dateien')}, ${formatBytes(b.bytes)}`);
-      res.once('finish', () => backup.setLastBackupAt(db, Date.now()));
+      // Only a download that was sent completely counts - as the last backup and in the log.
+      res.once('finish', () => {
+        backup.setLastBackupAt(db, Date.now());
+        services.audit(req.user, 'sicherung_heruntergeladen', '', `${plural(b.counts.blobs + b.counts.userfiles, 'Datei', 'Dateien')}, ${formatBytes(b.bytes)}`);
+      });
       res.setHeader('Content-Type', 'application/zip');
       res.setHeader('Content-Disposition', `attachment; filename="${backupName()}"`);
       res.setHeader('Cache-Control', 'no-store');

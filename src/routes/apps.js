@@ -686,7 +686,8 @@ module.exports = (app, ctx) => {
     // as it is now (it may have changed or gone meanwhile, e.g. with its owner's account).
     await services.trimAppData([a.id]);
     const now = db.get('SELECT * FROM apps WHERE id = ?', a.id);
-    if (now) services.deleteApp(req.user, now);
+    // Named in the log as who they are now - not at all if their own account went meanwhile.
+    if (now) services.deleteApp(db.get('SELECT * FROM users WHERE id = ?', req.user.id) || null, now);
     flash(req, `„${a.name}“ wurde gelöscht.`);
     res.redirect(303, '/apps');
   });

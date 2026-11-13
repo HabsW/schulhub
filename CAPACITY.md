@@ -204,9 +204,9 @@ again. After every kill the database file is opened and checked before the next 
 - **Measured on a fast desktop CPU and NVMe disk.** A small VM is slower per core and its disk flushes take
   2–10 ms. The margin (66× at saturation, 8 % busy at 3×) is large, but it was not measured on such a VM.
 - **Power cuts / operating-system crashes:** with `synchronous=NORMAL` the last commits before a checkpoint
-  can be lost (the database stays consistent). Deletions are flushed (accounts, apps, classes, app data),
-  and a content file is removed only after the commit that freed it is on the disk – so deleted data does
-  not come back and no row points at a removed file. A process crash or `kill -9` loses nothing – tested.
+  can be lost (the database stays consistent). Deletions and every change that frees a content file are
+  flushed before the file is removed – so deleted data does not come back and no row points at a removed
+  file. A process crash or `kill -9` loses nothing – tested.
 - **Microsoft sign-in itself** was replaced by a stand-in; Microsoft's own latency and limits are not part
   of these numbers.
 - **One process, one server:** no failover. A restart takes about a second; sessions survive it.
@@ -221,8 +221,9 @@ again. After every kill the database file is opened and checked before the next 
 - **Data grows every school year:** results are only deleted with their app, their owner or by a teacher's
   reset; the database grows by roughly 300 MB per 90 days of this school. Plan disk space, and keep the
   backup below the browser download's limit (3.5 GB; beyond, copy `data/` on the server).
-- **A second start on the same data folder** (e.g. a second service by mistake) runs the migrations and
-  the retention on the live database before it fails on the port. Let the process manager run exactly one.
+- **A second start on the same data folder** (e.g. a second service by mistake) runs the migrations, the
+  retention and the cleanup of unreferenced files on the live data before it fails on the port. Let the
+  process manager run exactly one, and never start the Hub without its `hub.sqlite` in place.
 
 ## Before go-live: the server
 

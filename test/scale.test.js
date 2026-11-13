@@ -377,7 +377,8 @@ test('Aufbewahrung: viele alte Protokolleinträge gehen in Schritten – der Hub
 });
 
 test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine Person bekommt höchstens ein Viertel – Speichern aus Apps wird dadurch nie abgewiesen', async () => {
-  const h = await startHub({ limits: { uploadMemoryBytes: 2 * 1024 * 1024 } });
+  // In the test, bodies over 100 KB count against a pool of 2 MB (one person: 512 KB).
+  const h = await startHub({ limits: { uploadMemoryBytes: 2 * 1024 * 1024, pooledBodyBytes: 100 * 1024 } });
   const http = require('node:http');
   const held = [];
   try {
@@ -404,6 +405,19 @@ test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine
       return { req, status: () => status };
     }
     const put = (i, file, bytes) => B[i].send('PUT', `/apps/${apps[i].id}/versionen/${versions[i].id}/datei?pfad=${file}`, Buffer.alloc(bytes), 'application/octet-stream');
+    /** Eve holds a pooled body of `bytes` (over 100 KB) - so the pool is full exactly. */
+    async function hold4(bytes) {
+      const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await B[4].page('/apps')).text)[1];
+      const req = http.request({
+        host: '127.0.0.1', port: h.config.publicPort, method: 'PUT', path: `/apps/${apps[4].id}/versionen/${versions[4].id}/datei?pfad=fuell.bin`,
+        headers: { host: h.config.hubHost, cookie: [...B[4].jar].map(([k, v]) => `${k}=${v}`).join('; '), 'content-type': 'application/octet-stream', 'content-length': bytes, 'x-csrf-token': csrf },
+      });
+      req.on('error', () => {});
+      req.write(Buffer.alloc(10));
+      held.push(req);
+      await new Promise((r) => setTimeout(r, 80));
+      return { req };
+    }
     // One person: at most a quarter of the 2 MB (512 KB) - Anna's second big file waits.
     const first = await hold(0, 'a1.bin');
     assert.equal((await put(0, 'a2.bin', 500 * 1024)).status, 429, 'one person gets at most a quarter');
@@ -411,6 +425,15 @@ test('Uploads: große Dateien im Speicher sind für alle zusammen begrenzt, eine
     // Everybody together: Ben, Carl and Dora fill the 2 MB with Anna; Eve's big file has to wait.
     for (const i of [1, 2, 3]) await hold(i, 'gross.bin');
     assert.equal((await put(4, 'gross.bin', 500 * 1024)).status, 429, 'the pool is full');
+    // With the pool full to the last byte, small bodies still pass: an ordinary file and an editor save.
+    const free = 2 * 1024 * 1024 - 4 * 500 * 1024;
+    const filler = await hold4(free);
+    assert.equal((await put(4, 'klein.js', 90 * 1024)).status, 200, 'a small file is never part of the pool');
+    await B[4].page(`/studio/${apps[4].id}`);
+    assert.equal((await B[4].post(`/studio/${apps[4].id}/entwurf`, { version: h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', apps[4].id).v })).status, 303, 'the editor draft starts');
+    await B[4].page(`/studio/${apps[4].id}`);
+    assert.equal((await B[4].send('PUT', `/studio/${apps[4].id}/datei?pfad=app.js`, Buffer.from('let gespeichert = true;'), 'application/octet-stream')).status, 200, 'an editor save is never refused because others upload');
+    filler.req.destroy();
     // A save, a file of an app and a small upload still go through: they are never part of the pool.
     const t = await h.token(B[4], apps[4]);
     assert.equal((await B[4].api(apps[4], t.token, 'save.set', { key: 'stand', value: { x: 1 } })).json().ok, true);
@@ -684,27 +707,51 @@ test('Aus der Klasse genommen: die Beitrittsseite bietet den alten Code nicht me
   }
 });
 
-test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist (z. B. Löschungen, die auf eine Sicherung warteten, als der Hub stoppte)', async () => {
-  const h = await startHub();
+test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist – nie ohne die eigene Datenbank, nie frisch geschriebene', async () => {
+  const pathMod = require('node:path');
+  const crypto = require('node:crypto');
+  const h1 = await startHub();
+  const dataDir = h1.config.dataDir;
+  const copies = [];
   try {
-    const { uploads, userFiles } = h.hub.ctx;
-    const orphan = require('node:crypto').createHash('sha256').update('niemand').digest('hex');
-    const blob = uploads.blobPath(orphan);
-    fs.mkdirSync(require('node:path').dirname(blob), { recursive: true });
-    fs.writeFileSync(blob, 'niemand');
-    const userBlob = userFiles.blobPath(orphan);
-    fs.mkdirSync(require('node:path').dirname(userBlob), { recursive: true });
-    fs.writeFileSync(userBlob, 'niemand');
-    const teacher = h.addUser('Tim Bleibt', 'teacher');
-    const T = await h.browser().login(teacher);
-    const app = await h.makeApp(T, 'Bleibt');
-    const kept = h.db.get("SELECT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ? AND f.path = 'index.html'", app.id).sha256;
-    assert.equal(uploads.sweep(), 1);
-    assert.equal(userFiles.sweep(), 1);
-    assert.ok(!fs.existsSync(blob) && !fs.existsSync(userBlob), 'the files nobody refers to are gone');
-    assert.ok(fs.existsSync(uploads.blobPath(kept)), 'files in use stay');
+    const teacher = h1.addUser('Tim Bleibt', 'teacher');
+    const T = await h1.browser().login(teacher);
+    const app = await h1.makeApp(T, 'Bleibt');
+    const kept = h1.db.get("SELECT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ? AND f.path = 'index.html'", app.id).sha256;
+    const place = (root, text, hoursAgo) => {
+      const sha = crypto.createHash('sha256').update(text).digest('hex');
+      const file = pathMod.join(dataDir, root, sha.slice(0, 2), sha);
+      fs.mkdirSync(pathMod.dirname(file), { recursive: true });
+      fs.writeFileSync(file, text);
+      const t = new Date(Date.now() - hoursAgo * 3_600_000);
+      fs.utimesSync(file, t, t);
+      return file;
+    };
+    const oldBlob = place('blobs', 'verwaist', 2);
+    const oldUserFile = place('userfiles', 'verwaist', 2);
+    // One file an app saved for Tim, in use: so the database names files of this folder.
+    const inUse = place('userfiles', 'Tims Bild', 2);
+    h1.db.run("INSERT INTO user_files (app_id, user_id, name, type, size, sha256, updated_at) VALUES (?, ?, 'bild', 'image/png', 9, ?, ?)", app.id, teacher.id, pathMod.basename(inUse), Date.now());
+    const freshBlob = place('blobs', 'gerade geschrieben', 0);
+    await h1.hub.stop();
+    // A copy of the folder WITHOUT its database: a start there must not touch a single file.
+    const bare = fs.mkdtempSync(pathMod.join(require('node:os').tmpdir(), 'schulhub-bare-'));
+    copies.push(bare);
+    fs.cpSync(pathMod.join(dataDir, 'blobs'), pathMod.join(bare, 'blobs'), { recursive: true, preserveTimestamps: true });
+    const h0 = await startHub({ dataDir: bare });
+    await h0.hub.stop();
+    assert.ok(fs.existsSync(pathMod.join(bare, 'blobs', kept.slice(0, 2), kept)), 'no database of its own: every file stays');
+    // The real folder starts again: what nothing refers to and is older than an hour goes.
+    const h2 = await startHub({ dataDir });
+    try {
+      assert.ok(!fs.existsSync(oldBlob) && !fs.existsSync(oldUserFile), 'old files nobody refers to are gone');
+      assert.ok(fs.existsSync(freshBlob), 'a file written just now stays (another process may be about to name it)');
+      assert.ok(fs.existsSync(h2.hub.ctx.uploads.blobPath(kept)) && fs.existsSync(inUse), 'files in use stay');
+    } finally {
+      await h2.stop();
+    }
   } finally {
-    await h.stop();
+    for (const c of copies) fs.rmSync(c, { recursive: true, force: true });
   }
 });
 
@@ -780,6 +827,161 @@ test('App löschen: nach der Pause zählt die App, wie sie jetzt ist – ein neu
     await T.page(`/apps/${app.id}`);
     assert.equal((await T.post(`/apps/${app.id}/loeschen`)).status, 303);
     assert.equal(h.db.get("SELECT target FROM audit_log WHERE action = 'app_geloescht' ORDER BY id DESC LIMIT 1").target, 'Neuer Name');
+  } finally {
+    services.trimAppData = trim;
+    await h.stop();
+  }
+});
+
+test('Sicherung: wer während der Kopie zur Lehrkraft gemacht wird (Sitzung bleibt), bekommt sie nicht; nur eine vollständige zählt im Protokoll', async () => {
+  const h = await startHub();
+  const dbJobs = require('../src/dbJobs');
+  const snapshot = dbJobs.snapshot;
+  try {
+    const a = h.addUser('Ada Admin', 'admin');
+    h.addUser('Bob Admin', 'admin');
+    const A = await h.browser().login(a);
+    await A.page('/admin/sicherung');
+    dbJobs.snapshot = async (...args) => {
+      const made = await snapshot(...args);
+      h.db.run("UPDATE users SET role = 'teacher' WHERE id = ?", a.id); // demoted; the session stays
+      return made;
+    };
+    assert.equal((await A.post('/admin/sicherung')).status, 404);
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM audit_log WHERE action = 'sicherung_heruntergeladen'").n, 0, 'no backup in the log');
+  } finally {
+    dbJobs.snapshot = snapshot;
+    await h.stop();
+  }
+});
+
+test('Dateien aus Apps kommen ganz auf die Platte – auch wenn ein einzelner Schreibaufruf weniger schreibt', async () => {
+  const h = await startHub();
+  const fsReal = require('node:fs');
+  const writeSync = fsReal.writeSync;
+  try {
+    const t = h.addUser('Tim Teil', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Bilder');
+    const tok = await h.token(T, app);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), require('node:crypto').randomBytes(50_000)]);
+    fsReal.writeSync = (fd, buf, off, len, ...rest) => (typeof off === 'number' && typeof len === 'number'
+      ? writeSync(fd, buf, off, Math.min(len, 1000), ...rest)
+      : writeSync(fd, Buffer.isBuffer(buf) ? buf.subarray(0, 1000) : buf));
+    const res = await T.raw('PUT', '/_hub/files/bild', { host: h.appHost(app), headers: { authorization: `Bearer ${tok.token}`, 'content-type': 'image/png' }, body: png });
+    fsReal.writeSync = writeSync;
+    assert.equal(res.status, 200, res.text);
+    const row = h.db.get("SELECT sha256, size FROM user_files WHERE app_id = ? AND name = 'bild'", app.id);
+    assert.equal(fsReal.readFileSync(h.hub.ctx.userFiles.blobPath(row.sha256)).length, png.length, 'the whole file is on the disk');
+  } finally {
+    fsReal.writeSync = writeSync;
+    await h.stop();
+  }
+});
+
+test('Dateien werden erst gelöscht, wenn die Änderung, die sie freigibt, auf der Platte ist – beim Ersetzen, im Editor, beim Löschen einer Version', async () => {
+  const h = await startHub();
+  const fsReal = require('node:fs');
+  const rmSync = fsReal.rmSync;
+  try {
+    const t = h.addUser('Tilda Lehrerin', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Frei', { 'index.html': '<h1>eins</h1>', 'alt.js': 'let alt = 1;' });
+    const events = [];
+    const tx = h.db.tx;
+    h.db.tx = (fn, options) => {
+      const out = tx(fn, options);
+      events.push(options && options.durable ? 'durable commit' : 'commit');
+      return out;
+    };
+    fsReal.rmSync = (file, ...rest) => {
+      if (/[/\\](blobs|userfiles)[/\\]/.test(String(file))) events.push('file removed');
+      return rmSync(file, ...rest);
+    };
+    try {
+      // a file an app saves for a person, replaced and then removed
+      const tok = await h.token(T, app);
+      const png = (n) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(n, n)]);
+      for (const n of [10, 20]) await T.raw('PUT', '/_hub/files/bild', { host: h.appHost(app), headers: { authorization: `Bearer ${tok.token}`, 'content-type': 'image/png' }, body: png(n) });
+      await T.api(app, tok.token, 'files.remove', { name: 'bild' });
+      // the editor: a file replaced, then deleted
+      await T.post(`/studio/${app.id}/entwurf`, { version: h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', app.id).v });
+      await T.page(`/studio/${app.id}`);
+      await T.send('PUT', `/studio/${app.id}/datei?pfad=neu.js`, Buffer.from('let a = 1;'), 'application/octet-stream');
+      await T.send('PUT', `/studio/${app.id}/datei?pfad=neu.js`, Buffer.from('let a = 2;'), 'application/octet-stream');
+      // a version deleted, with a file only it has
+      const v3 = await h.uploadFolder(T, app.id, { 'index.html': '<h1>drei</h1>', 'nur-hier.js': 'let nurHier = 3;' });
+      h.hub.ctx.services.deleteVersion(t, app, h.db.get('SELECT * FROM app_versions WHERE id = ?', v3));
+    } finally {
+      h.db.tx = tx;
+      fsReal.rmSync = rmSync;
+    }
+    const removals = events.map((e, i) => [e, events.slice(0, i).reverse().find((x) => x !== 'file removed')]).filter(([e]) => e === 'file removed');
+    assert.ok(removals.length >= 4, `files removed: ${removals.length}`);
+    for (const [, before] of removals) assert.equal(before, 'durable commit', `a file was removed after a commit that had not reached the disk: ${events.join(' > ')}`);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Konto löschen: bricht die Löschung nach dem ersten Schritt ab, ist das Konto wie vorher; hält der Hub dazwischen an, wird sie beim Start zu Ende geführt', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const A = await h.browser().login(admin);
+    const kid = h.addUser('Kim Kind', 'student');
+    // 1. The deletion fails after the mark: the account is as it was (not blocked), and nothing is pending.
+    const deleteUser = services.deleteUser;
+    services.deleteUser = () => {
+      throw new Error('Platte voll');
+    };
+    await A.page(`/admin/konten/${kid.id}`);
+    const failed = await A.post(`/admin/nutzer/${kid.id}/loeschen`);
+    services.deleteUser = deleteUser;
+    assert.equal(failed.status, 500);
+    assert.equal(h.db.get('SELECT disabled FROM users WHERE id = ?', kid.id).disabled, 0, 'not left blocked');
+    assert.equal(h.db.get("SELECT value FROM hub_settings WHERE key = 'accounts.deleting'"), undefined, 'nothing pending');
+    // 2. The Hub stops after the mark (simulated: marked, never finished) - the next start finishes it.
+    services.markForDeletion(kid.id, admin.id);
+    const dataDir = h.config.dataDir;
+    await h.hub.stop();
+    const h2 = await startHub({ dataDir });
+    try {
+      assert.equal(h2.db.get('SELECT 1 AS x FROM users WHERE id = ?', kid.id), undefined, 'the decided deletion is done');
+      assert.equal(h2.db.get("SELECT value FROM hub_settings WHERE key = 'accounts.deleting'"), undefined);
+      assert.match(h2.db.get("SELECT detail FROM audit_log WHERE action = 'konto_geloescht' ORDER BY id DESC LIMIT 1").detail, /Verwaltung/);
+    } finally {
+      await h2.stop();
+    }
+  } catch (err) {
+    await h.stop().catch(() => {});
+    throw err;
+  }
+});
+
+test('Konto löschen durch die Verwaltung: nach der Pause zählt das Konto, wie es jetzt ist – auch sein neuer Name verschwindet aus wartenden Nachrichten', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const trim = services.trimAppData;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const other = h.addUser('Otto Andere', 'teacher');
+    const kid = h.addUser('Alter Name', 'student');
+    const [A, O] = await Promise.all([admin, other].map((u) => h.browser().login(u)));
+    await O.page('/start');
+    services.trimAppData = async (ids) => {
+      await trim(ids);
+      // Meanwhile the person signed in with a new name, and a message naming it waits in another session.
+      h.db.run("UPDATE users SET name = 'Neuer Name' WHERE id = ?", kid.id);
+      const s = h.db.get('SELECT sid_hash, data FROM sessions WHERE user_id = ?', other.id);
+      const data = JSON.parse(s.data);
+      data.flash = { text: 'Neuer Name hat etwas abgegeben.', type: 'ok' };
+      h.db.run('UPDATE sessions SET data = ? WHERE sid_hash = ?', JSON.stringify(data), s.sid_hash);
+    };
+    await A.page(`/admin/konten/${kid.id}`);
+    assert.equal((await A.post(`/admin/nutzer/${kid.id}/loeschen`)).status, 303);
+    assert.doesNotMatch(h.db.get('SELECT data FROM sessions WHERE user_id = ?', other.id).data, /Neuer Name/);
   } finally {
     services.trimAppData = trim;
     await h.stop();

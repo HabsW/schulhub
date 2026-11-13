@@ -317,6 +317,9 @@ npm run restore -- schulhub-sicherung-2026-11-12-2030.zip
 # 3. Hub starten – alle melden sich neu an
 ```
 
+Den Hub nie ohne seine Datenbank `data/hub.sqlite` starten (etwa während einer Kopie): Er legt dann eine
+leere Schule an.
+
 Das Werkzeug prüft das Archiv **vollständig, bevor es etwas schreibt**: nur erlaubte Dateinamen, keine
 Verknüpfungen, begrenzte Größen, genug freier Platz, die Prüfsumme jeder App-Datei und eine gültige
 SchulHub-Datenbank. Erst dann werden die Daten an ihren Platz gelegt. Aus dem Archiv wird nie etwas

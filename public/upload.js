@@ -152,12 +152,14 @@
     request('POST', base, null, null, signal)
       .then(function (version) {
         state.versionId = version.id;
-        // A file the server cannot take right now (429: many uploads at once) is sent again a moment later.
+        // A file the server cannot take right now (429: many big uploads at once) is sent again a little later,
+        // for up to about ten minutes (waiting 1.5 s at first, then longer, at most 20 s between tries).
         function put(item, tries) {
           return request('PUT', base + '/' + encodeURIComponent(version.id) + '/datei?pfad=' + encodeURIComponent(item.path), item.file, 'application/octet-stream', signal)
             .catch(function (err) {
               if (err.status !== 429 || tries >= 40 || state.aborted) throw err;
-              return new Promise(function (resolve) { setTimeout(resolve, 1500); }).then(function () { return put(item, tries + 1); });
+              var pause = Math.min(20000, 1500 * Math.pow(1.4, tries));
+              return new Promise(function (resolve) { setTimeout(resolve, pause); }).then(function () { return put(item, tries + 1); });
             });
         }
         function worker() {

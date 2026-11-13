@@ -451,6 +451,7 @@ const SCHEMA_VERSION = MIGRATIONS.length;
 
 function migrate(raw) {
   let version = raw.prepare('PRAGMA user_version').get().user_version;
+  const created = version === 0;
   if (version === 0) {
     raw.exec(SCHEMA);
     raw.exec('PRAGMA user_version = 1;');
@@ -474,6 +475,7 @@ function migrate(raw) {
       raw.exec('PRAGMA foreign_keys = ON;');
     }
   }
+  return created;
 }
 
 /**
@@ -506,7 +508,7 @@ function openDb(file) {
   // journal_size_limit: after a checkpoint the WAL file shrinks back to at most 64 MB (it kept the size of
   // its biggest moment - e.g. a large deletion - for good).
   raw.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_size_limit = 67108864;');
-  migrate(raw);
+  const created = migrate(raw);
   // Statistics for the query planner (cheap: SQLite only looks at tables that need it, with a row limit).
   raw.exec('PRAGMA optimize = 0x10002;');
 
@@ -554,6 +556,8 @@ function openDb(file) {
     optimize: () => raw.exec('PRAGMA optimize;'),
     /** The database file (long jobs open their own connection to it, see dbJobs.js). */
     file,
+    /** True when this start created the database (there was none, or it was empty). */
+    createdNow: created,
     /** Consistent copy of the whole database into a new file, on this thread (tests, scripts). */
     snapshot: (target) => raw.prepare('VACUUM INTO ?').run(target),
     close: () => raw.close(),

@@ -546,11 +546,16 @@ module.exports = (app, ctx) => {
     // Decided now, in the same step as the check above: the account is blocked and signed out at once, so it
     // no longer counts as an admin who stays - nobody else can now step down as "the last admin" - and
     // nothing that happens during the batched deletion can turn the decision around.
-    services.markForDeletion(req.user.id);
-    // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
-    await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', req.user.id).map((r) => r.id));
-    const now = db.get('SELECT * FROM users WHERE id = ?', req.user.id);
-    if (now) services.deleteUser(now, now);
+    services.markForDeletion(req.user.id, req.user.id);
+    try {
+      // Then the data of the person's apps, in small steps (the Hub keeps answering), then the account.
+      await services.trimAppData(db.all('SELECT id FROM apps WHERE owner_id = ?', req.user.id).map((r) => r.id));
+      const now = db.get('SELECT * FROM users WHERE id = ?', req.user.id);
+      if (now) services.deleteUser(now, now);
+    } catch (err) {
+      services.unmarkForDeletion(req.user.id);
+      throw err;
+    }
     req.session.destroy(() => {
       res.clearCookie(config.https ? '__Host-hub_sid' : 'hub_sid', { path: '/', secure: config.https, httpOnly: true, sameSite: 'lax' });
       res.redirect(303, '/?geloescht=1');

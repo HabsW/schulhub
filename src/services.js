@@ -253,7 +253,7 @@ function createServices(ctx) {
     return shas;
   }
   function deleteVersion(actor, app, version) {
-    const shas = db.tx(() => deleteVersionRows(version));
+    const shas = db.tx(() => deleteVersionRows(version), { durable: true });
     uploads.collectGarbage(shas);
     if (actor) audit(actor, 'version_geloescht', app.name, `Version ${version.number}`, { appId: app.id });
   }
@@ -405,11 +405,49 @@ function createServices(ctx) {
    * second step runs (trimAppData) cannot change the decision any more: a blocked account acts no more (its
    * own deletion of another admin included), and a blocked admin no longer counts as the admin who stays.
    */
-  function markForDeletion(userId) {
+  function markForDeletion(userId, actorId) {
     db.tx(() => {
+      const before = db.get('SELECT disabled FROM users WHERE id = ?', userId);
+      if (!before) return;
       db.run('UPDATE users SET disabled = 1 WHERE id = ?', userId);
       db.run('DELETE FROM sessions WHERE user_id = ?', userId);
+      // Remembered until the deletion is done: a stop in between is finished at the next start (finishDeletions).
+      setPendingDeletions([...pendingDeletions().filter((p) => p.id !== userId), { id: userId, by: actorId || null, wasDisabled: before.disabled ? 1 : 0 }]);
     }, { durable: true });
+  }
+  /** The deletion after the mark failed: the account is as it was before (blocked only if it was), and it can be tried again. */
+  function unmarkForDeletion(userId) {
+    db.tx(() => {
+      const p = pendingDeletions().find((x) => x.id === userId);
+      if (!p) return;
+      if (!p.wasDisabled) db.run('UPDATE users SET disabled = 0 WHERE id = ?', userId);
+      setPendingDeletions(pendingDeletions().filter((x) => x.id !== userId));
+    }, { durable: true });
+  }
+  const PENDING_KEY = 'accounts.deleting';
+  function pendingDeletions() {
+    try {
+      const v = JSON.parse(db.get('SELECT value FROM hub_settings WHERE key = ?', PENDING_KEY)?.value || '[]');
+      return Array.isArray(v) ? v.filter((p) => p && typeof p.id === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+  function setPendingDeletions(list) {
+    if (!list.length) return db.run('DELETE FROM hub_settings WHERE key = ?', PENDING_KEY);
+    db.run('INSERT INTO hub_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at', PENDING_KEY, JSON.stringify(list), Date.now());
+  }
+  /** At start: deletions that were decided (marked) but not finished when the Hub stopped are finished now. */
+  function finishDeletions() {
+    for (const p of pendingDeletions()) {
+      const user = db.get('SELECT * FROM users WHERE id = ?', p.id);
+      if (user) {
+        const by = p.by ? db.get('SELECT * FROM users WHERE id = ?', p.by) : null;
+        deleteUser(p.by === p.id ? user : by, user);
+      } else {
+        db.tx(() => setPendingDeletions(pendingDeletions().filter((x) => x.id !== p.id)), { durable: true });
+      }
+    }
   }
 
   /** Delete an account and everything that belongs to it. */
@@ -471,6 +509,7 @@ function createServices(ctx) {
       // cascades: memberships, apps (+ versions, drafts, assignments on them), saves, scores, results,
       // progress, achievements, files, favourites, feedback to them, notices, comments
       db.run('DELETE FROM users WHERE id = ?', user.id);
+      setPendingDeletions(pendingDeletions().filter((p) => p.id !== user.id));
       // The audit entry names the role, never the person (their data is gone).
       const roleLabel = { student: 'Schüler/in', teacher: 'Lehrkraft', admin: 'Admin' }[user.role] || '';
       audit(actor && actor.id !== user.id ? actor : null, 'konto_geloescht', `Konto (${roleLabel})`, actor && actor.id !== user.id ? 'durch Verwaltung' : 'durch Nutzer/in selbst');
@@ -483,7 +522,7 @@ function createServices(ctx) {
   return {
     announcementLink, feedbackLink,
     audit, pruneAudit, notify, recordPlay, maintenance, maintenanceInSteps,
-    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData, markForDeletion,
+    createClass, createJoinCode, deleteClass, appFields, createApp, createVersion, finishVersion, versionFromDraft, deleteVersion, publish, deleteApp, deleteAppData, deleteUser, trimAppData, markForDeletion, unmarkForDeletion, finishDeletions,
   };
 }
 

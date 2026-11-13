@@ -154,7 +154,8 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
       parallelUploads: 4, // upload bodies (folder, editor, ZIP, hub.files) one person sends at the same time; the Hub's uploader sends 3
       parallelApiCalls: 32, // SDK data API requests one person has open at the same time (each body at most ~260 KB)
       parallelExports: 1, // "Meine Daten" downloads one person runs at the same time
-      uploadMemoryBytes: 256 * MB, // big file bodies held in memory at the same time, by everybody together (one person: a quarter)
+      uploadMemoryBytes: 256 * MB, // file bodies over pooledBodyBytes held in memory at the same time, by everybody together (one person: a quarter)
+      pooledBodyBytes: 1 * MB, // smaller bodies never count against uploadMemoryBytes
       minUploadRate: 16 * KB, // bytes per second a big file body must average after 20 s, or its place is freed
     },
     // [max events, per milliseconds]

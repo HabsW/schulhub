@@ -127,17 +127,20 @@ function createUploads(ctx) {
     }
     const doomed = [...new Set(shas)].filter((sha) => !db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha) && !db.get('SELECT 1 AS used FROM draft_files WHERE sha256 = ? LIMIT 1', sha));
     if (!doomed.length) return;
-    // With synchronous=NORMAL a power cut could undo the commit that freed these files: it reaches the disk
-    // first, so a row can never come back pointing at a file that was deleted.
-    db.checkpoint();
+    // The transactions that free files are durable (their commit is on the disk before they return), so a
+    // power cut can never bring back a row that points at a file deleted here.
     for (const sha of doomed) fs.rmSync(blobPath(sha), { force: true });
   }
 
   /**
    * At start: content files no row refers to - left by a stop or crash between disk and database, or by
-   * deletions that waited for a backup when the Hub stopped - are removed.
+   * deletions that waited for a backup when the Hub stopped - are removed. Never on a database this start
+   * created (it was missing, moved away, or a copy without it), never when the database refers to no file at
+   * all while files are there (the wrong database), and never a file written in the last hour (a second
+   * process on the same folder may be about to name it).
    */
   function sweep() {
+    if (db.createdNow) return 0;
     let entries;
     try {
       entries = fs.readdirSync(blobDir);
@@ -145,14 +148,26 @@ function createUploads(ctx) {
       return 0;
     }
     const used = new Set([...db.all('SELECT DISTINCT sha256 FROM app_files'), ...db.all('SELECT DISTINCT sha256 FROM draft_files')].map((r) => r.sha256));
-    let removed = 0;
+    const candidates = [];
+    let present = 0;
     for (const dir of entries) {
       if (!/^[0-9a-f]{2}$/.test(dir)) continue;
       for (const name of fs.readdirSync(path.join(blobDir, dir))) {
-        if (/^[0-9a-f]{64}$/.test(name) && name.startsWith(dir) && !used.has(name)) {
-          fs.rmSync(path.join(blobDir, dir, name), { force: true });
-          removed++;
-        }
+        if (!/^[0-9a-f]{64}$/.test(name) || !name.startsWith(dir)) continue;
+        present++;
+        if (!used.has(name)) candidates.push(path.join(blobDir, dir, name));
+      }
+    }
+    if (present && !used.size) return 0; // files, but a database that names none of them: not this folder's database
+    let removed = 0;
+    const hourAgo = Date.now() - 60 * 60_000;
+    for (const file of candidates) {
+      try {
+        if (fs.statSync(file).mtimeMs > hourAgo) continue;
+        fs.rmSync(file, { force: true });
+        removed++;
+      } catch {
+        // gone meanwhile
       }
     }
     return removed;
@@ -396,7 +411,7 @@ function createUploads(ctx) {
       db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', app.id, p, p.toLowerCase(), buffer.length, sha);
       db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
       return { p, freed: old && old.sha256 !== sha ? old.sha256 : null };
-    });
+    }, { durable: true });
     // After the commit, never inside the transaction: a rolled-back write must still find its file.
     if (saved.freed) collectGarbage([saved.freed]);
     return saved.p;
@@ -406,8 +421,10 @@ function createUploads(ctx) {
     const p = normalizePath(rawPath, { lookup: true }); // finds a stored name, even one from before a naming rule
     const old = db.get('SELECT sha256 FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
     if (!old) return false;
-    db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
-    db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
+    db.tx(() => {
+      db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, p);
+      db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
+    }, { durable: true });
     collectGarbage([old.sha256]);
     return true;
   }
@@ -421,13 +438,13 @@ function createUploads(ctx) {
       if (version) {
         db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) SELECT ?, path, path_lower, size, sha256 FROM app_files WHERE version_id = ?', app.id, version.id);
       }
-    });
+    }, { durable: true });
     collectGarbage(old);
   }
 
   function deleteDraft(app) {
     const old = db.all('SELECT sha256 FROM draft_files WHERE app_id = ?', app.id).map((r) => r.sha256);
-    db.run('DELETE FROM app_drafts WHERE app_id = ?', app.id);
+    db.tx(() => db.run('DELETE FROM app_drafts WHERE app_id = ?', app.id), { durable: true });
     collectGarbage(old);
   }
 
@@ -483,12 +500,13 @@ function createUploads(ctx) {
     if (inFlight(`${bucket}:${person}`).n >= limit) {
       throw new HttpError(429, busy || `Du lädst gerade schon ${limit} Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist, und versuche es dann noch einmal.`);
     }
-    // Big file bodies (version and editor files, up to 25 MB each: pooled) held in memory right now, by
+    // Big file bodies (version and editor files over 1 MB, up to 25 MB each) held in memory right now, by
     // everybody together, are capped (L.uploadMemoryBytes) so that a class uploading big files at once cannot
-    // take the server's memory - and ONE person gets at most a quarter of it, so a few people can never take it
-    // all. Small bodies (SDK calls, hub.files) never count: a save is never refused because others upload.
-    // A ZIP goes to a temp file. The Hub's uploader waits and tries a refused file again.
-    if (pooled) {
+    // take the server's memory; one person gets at most a quarter of it. Everything up to 1 MB never counts -
+    // SDK calls, hub.files, ordinary editor saves and app files: those are never refused because others upload.
+    // A ZIP goes to a temp file. Several people sending big files slowly together (each at the minimum rate)
+    // can still make other BIG uploads wait - the Hub's uploader keeps trying for up to ten minutes.
+    if (pooled && size > L.pooledBodyBytes) {
       if (inFlight(`pool:${person}`).bytes + size > L.uploadMemoryBytes / 4) {
         throw new HttpError(429, 'Du lädst gerade viele große Dateien gleichzeitig hoch. Warte, bis eine davon fertig ist.');
       }
@@ -496,9 +514,10 @@ function createUploads(ctx) {
         throw new HttpError(429, 'Gerade werden sehr viele Dateien hochgeladen. Bitte versuche es in einem Moment noch einmal.');
       }
     }
-    const keys = [...(into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`]), ...(pooled ? ['pool', `pool:${person}`] : [])];
+    const inPool = pooled && size > L.pooledBodyBytes;
+    const keys = [...(into ? [`${bucket}:${person}`, `owner:${owner}`, `into:${into.key}`] : [`${bucket}:${person}`]), ...(inPool ? ['pool', `pool:${person}`] : [])];
     track(keys, 1, size);
-    if (pooled) watchRate(req, res, size);
+    if (inPool) watchRate(req, res, size);
     let held = true;
     const release = () => {
       if (!held) return;

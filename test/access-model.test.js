@@ -97,7 +97,7 @@ const LAST = ['Schmidt', 'Hoffmann', 'Wagner', 'Lehmann', 'Yilmaz', 'Adler', 'Be
 function makeWorld(seed, size) {
   const r = randomness(seedOf('world', seed, size));
   const now = Date.now();
-  const w = { seed, size, now, users: [], classes: [], members: [], codes: [], apps: [], versions: [], classApps: [], assignments: [], feedback: [], announcements: [], comments: [] };
+  const w = { seed, size, now, users: [], classes: [], members: [], codes: [], removals: [], apps: [], versions: [], classApps: [], assignments: [], feedback: [], announcements: [], comments: [] };
   let serial = 0;
   const id = (kind) => `${kind}${serial++}_${r.token(8)}`;
   const membersOf = (classId, role) => w.members.filter((m) => m.class_id === classId && m.role === role).map((m) => m.user_id);
@@ -141,6 +141,11 @@ function makeWorld(seed, size) {
         code: r.token(32), class_id: c.id, created_by: teachers.length ? r.pick(teachers) : null, created_at: now - DAY, role,
         expires_at: r.chance(0.3) ? now - r.between(1, 48) * HOUR : now + r.between(2, 7 * 24) * HOUR,
       });
+    }
+    // Students a teacher took out of this class - before or after its code was made.
+    for (const u of w.users) {
+      if (u.role !== 'student' || w.members.some((m) => m.class_id === c.id && m.user_id === u.id) || !r.chance(0.15)) continue;
+      w.removals.push({ class_id: c.id, user_id: u.id, removed_at: now - DAY + (r.chance(0.5) ? -HOUR : HOUR) });
     }
   }
 
@@ -255,6 +260,7 @@ function insertWorld(db, w) {
     for (const c of w.classes) db.run('INSERT INTO classes (id, name, created_at, archived_at) VALUES (?, ?, ?, ?)', c.id, c.name, c.created_at, c.archived_at);
     for (const m of w.members) db.run('INSERT INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', m.class_id, m.user_id, m.role, m.joined_at);
     for (const k of w.codes) db.run('INSERT INTO join_codes (code, class_id, created_by, created_at, expires_at, role) VALUES (?, ?, ?, ?, ?, ?)', k.code, k.class_id, k.created_by, k.created_at, k.expires_at, k.role);
+    for (const x of w.removals || []) db.run('INSERT INTO class_removals (class_id, user_id, removed_at) VALUES (?, ?, ?)', x.class_id, x.user_id, x.removed_at);
     for (const a of w.apps) {
       db.run(
         `INSERT INTO apps (id, owner_id, name, description, emoji, color, origin_key, published_version_id, schoolwide_version_id, schoolwide_requested_version_id, shared, category, created_at, updated_at)
@@ -977,6 +983,7 @@ function prune(w) {
   const C = has(w.classes);
   w.members = w.members.filter((m) => C.has(m.class_id) && U.has(m.user_id));
   w.codes = w.codes.filter((k) => C.has(k.class_id));
+  w.removals = (w.removals || []).filter((x) => C.has(x.class_id) && U.has(x.user_id));
   w.apps = w.apps.filter((a) => U.has(a.owner_id));
   const A = has(w.apps);
   w.versions = w.versions.filter((v) => A.has(v.app_id));

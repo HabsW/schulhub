@@ -245,6 +245,8 @@ function createHub(config) {
       });
     });
 
+  // Account deletions that were decided but not finished when the Hub stopped.
+  ctx.services.finishDeletions();
   // Content files nothing refers to (a stop between disk and database, deletions that waited for a backup).
   ctx.uploads.sweep();
   ctx.userFiles.sweep();
