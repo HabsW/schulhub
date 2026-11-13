@@ -17,9 +17,11 @@ found and changed, what the numbers are, and what is still risky. Sicherheit: [S
   flushed).
 - **What breaks first now:** the CPU of the one Node.js thread. Nothing errors when it is full – answers
   queue and get slower. Measured limit here: about 8,400 app requests per second.
-- **Other freezes found and removed:** deleting a popular app or its owner's account (0.6 s), backup copy
-  and database check (on the Hub thread), deletions that read whole tables (20 foreign keys without an
-  index), a teachers' start page that read every result of each class.
+- **Other freezes found and removed:** deleting a popular app or its owner's account (0.6 s, and up to
+  3.8 s with a year of feedback notices), lowering the audit retention (1.8 s), backup copy and database
+  check (on the Hub thread), deletions that read whole tables (20 foreign keys without an index), a
+  teachers' start page that read every result of each class; the backup download no longer needs memory
+  the size of the database.
 - **Bugs found on the way:** 50+ real bugs by a state × action matrix, race tests, property-based tests of
   every permission rule and five independent bug hunts – each fixed with a test that fails without the fix
   (list in the report and in SECURITY.md).
@@ -43,7 +45,10 @@ same thread**: while one query runs, no other request of the school is served. T
 
 The architecture was reviewed twice, independently (by the lead and by a separate reviewer), with
 `EXPLAIN QUERY PLAN` of every statement the test suite runs (838 distinct statements, 68 with full-table
-scans) and timings on the large dataset below.
+scans) and timings on the large dataset below. The independent reviewer also built denser data of its own
+(six and twelve months of use: 493,000 and 963,000 results, 350,000 audit entries, 114,000 notices, a
+684 MB and a 956 MB database) and measured the single operations and a 1× and 3× load on it – which is
+how the second half of this table was found.
 
 | Problem | Before | Change | After |
 |---|---|---|---|
@@ -54,6 +59,12 @@ scans) and timings on the large dataset below.
 | Notices of a deleted app found by scanning every notice (once per app in an account deletion) | a full scan of `notices` per app | range on the indexed link | index |
 | Teachers' start page: activity of each class read every result of the class | 44 ms of the admin's 70 ms start page | index on results by class and time | – |
 | A file upload checked before its body was read could land in a version that was finished – and approved – meanwhile | a class could run code no teacher saw | `uploads.addFile` checks again in the same synchronous step as the insert | tested |
+| Deleting an app (or its owner) searched the notices of every student who ever got feedback about it, once per app name and assignment title | 3.8 s stall for a long-serving teacher, 1.5 s for a popular app (independent review, six months of data) | a feedback's notice carries the feedback's own link; deleted through the index, one statement per feedback | ≤ 1 text search, for notices from before the change |
+| The backup download read every file – also the database copy – whole into memory | 1.0 GB RAM for a 670 MB database copy; fails from 2 GiB (`ERR_FS_FILE_TOO_LARGE`) | file entries are read, deflated and sent piece by piece (data descriptor) | flat memory |
+| Lowering the audit retention deleted months of entries in one statement, at whatever time the process had started | 1.8 s stall for 321,000 rows | retention runs at 3 o'clock at night, bulky deletions in batches of 2,000 | Hub answers between batches |
+| Upload bodies held in memory were limited per person only | a class uploading big files at once could take the server's memory | `limits.uploadMemoryBytes` (256 MB) for everybody together; a ZIP goes to disk and does not count | 429 beyond it |
+| The admin overview added up every file and data row of the school at every view | 60 + 60 ms per view on six months of data | sums kept for 5 minutes (names read fresh, a deleted account is never shown) | – |
+| Smaller: MSAL kept Microsoft tokens in memory; the WAL file never shrank; content files were not flushed before the database named them | memory grew with sign-ins; 69 MB WAL kept; a power cut could leave a row pointing at a truncated file | `storeInCache` off and the account removed; `journal_size_limit` 64 MB; `fsync` before the rename | – |
 
 Single statements are fast on this machine; what made the old Hub fragile was the per-write disk flush and
 the few operations whose cost grows with the data. Everything else stayed: one process, one SQLite file,
@@ -202,11 +213,21 @@ again. After every kill the database file is opened and checked before the next 
   1.7 MB of HTML; the year group's class page 450 KB. Fast on the server, heavy on a weak network.
 - **Assignments:** „done“ is derived; an app that lowers a student's progress afterwards can turn a done
   assignment back to open (test marked `todo`, see SECURITY.md).
+- **Uploading a very big version for an owner with very many stored files:** every uploaded file adds up
+  the owner's stored bytes (twice) – 3.8 ms of the Hub's time per file for an owner with 28,000 stored files
+  (independent review). Not a freeze, but a 2,000-file upload by such an owner costs about 8 s of the
+  Hub's time, spread over its requests. A running byte count per owner would remove it.
+- **Data grows every school year:** results are only deleted with their app, their owner or by a teacher's
+  reset; the database grows by roughly 300 MB per 90 days of this school. Plan disk space, and keep the
+  backup below the browser download's limit (3.5 GB; beyond, copy `data/` on the server).
+- **A second start on the same data folder** (e.g. a second service by mistake) runs the migrations and
+  the retention on the live database before it fails on the port. Let the process manager run exactly one.
 
 ## Before go-live: the server
 
 - **CPU:** 2 vCPUs (one for the Hub, one for backup/check worker, GC and the proxy); a fast core matters
-  more than many. **RAM:** 1 GB minimum, 2 GB comfortable (measured ≈ 250 MB at saturation, plus uploads).
+  more than many. **RAM:** 1 GB minimum, 2 GB comfortable (measured ≈ 250 MB at saturation; upload bodies
+  in memory are capped at 256 MB for everybody together; the backup streams).
 - **Disk:** local SSD for `data/` – **never** a network file system (NFS, SMB, some cloud file shares): SQLite's
   WAL needs local shared memory and locking. Leave room for the database (300 MB per 90 days of this
   school), the app files and the backups.
