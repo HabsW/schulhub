@@ -169,3 +169,56 @@ test('Ergebnisse: eine entfernte App bleibt für die Lehrkraft lesbar – auch w
   // Classmates still get nothing.
   assert.equal((await Q.get(base)).status, 404);
 });
+
+// ============================================================================== what teachers see of results
+
+test('Ergebnisse: „Bestes im Schnitt“ rechnet mit denselben begrenzten Werten, die die Tabelle zeigt', async () => {
+  const cls = await newClass(T);
+  const app = await h.makeApp(T, uniq('Punkte'), { 'index.html': '<h1>Punkte</h1>' });
+  assert.equal((await T.post(`/klassen/${cls}/apps`, { app: app.id })).status, 303);
+  const a = await student();
+  const b = await student();
+  for (const s of [a, b]) await join(s.b, cls);
+  // One app counts a bonus above the maximum (8 of 4), the other result is 1 of 4.
+  await call(a.b, app, await h.token(a.b, app, cls), 'results.add', { title: 'MIT-BONUS', score: 8, maxScore: 4 });
+  await call(b.b, app, await h.token(b.b, app, cls), 'results.add', { title: 'NORMAL', score: 1, maxScore: 4 });
+  const page = (await T.get(`/klassen/${cls}/apps/${app.id}/ergebnisse`)).text;
+  const shown = [...page.matchAll(/<td class="num"[^>]*data-label="Bestes"><span class="cell">(\d+) %<\/span>/g)].map((m) => Number(m[1])).sort((x, y) => x - y);
+  assert.deepEqual(shown, [25, 100], 'the table shows each best clamped to 0..100 %');
+  const average = /<span class="stat-label">Bestes im Schnitt<\/span><span class="stat-value">(\d+) %/.exec(page);
+  assert.ok(average, 'the average is shown');
+  assert.equal(Number(average[1]), 63, 'the average of the 100 % and 25 % the table shows');
+});
+
+test('Ergebnisse: die Einzelansicht zählt alle Ergebnisse der Klasse und kennt das beste – auch bei mehr als 200', async () => {
+  const cls = await newClass(T);
+  const app = await h.makeApp(T, uniq('Vokabeln'), { 'index.html': '<h1>Vokabeln</h1>' });
+  assert.equal((await T.post(`/klassen/${cls}/apps`, { app: app.id })).status, 303);
+  const s = await student();
+  await join(s.b, cls);
+  const tok = await h.token(s.b, app, cls);
+  // One perfect round early on, then 200 short practice rounds (one result per word).
+  assert.equal((await call(s.b, app, tok, 'results.add', { title: 'ERSTE-RUNDE', score: 4, maxScore: 4 })).ok, true);
+  for (let i = 0; i < 200; i++) await call(s.b, app, tok, 'results.add', { title: `WORT-${i}`, score: 1, maxScore: 10 });
+  const base = `/klassen/${cls}/apps/${app.id}/ergebnisse`;
+  const list = (await T.get(base)).text;
+  assert.match(list, /data-label="Bestes"><span class="cell">100 %/, 'the list: best 100 %');
+  assert.match(list, /data-label="Ergebnisse"><span class="cell">201</, 'the list: 201 results');
+  const detail = (await T.get(`${base}/${s.user.id}`)).text;
+  const stat = (label) => (new RegExp(`<span class="stat-label">${label}</span><span class="stat-value">([^<]*)</span>`).exec(detail) || [])[1];
+  assert.equal(stat('Ergebnisse'), '201', 'the detail counts the same results');
+  assert.equal(stat('Bestes Ergebnis'), '100 %', 'and knows the same best result');
+});
+
+test('CSV: negative Punkte bleiben Zahlen – der Formelschutz gilt für Text', async () => {
+  const qt = await h.token(Q, G, c1);
+  await call(Q, G, qt, 'results.add', { title: 'STRAFPUNKTE', score: -3.5, maxScore: 10 });
+  await call(Q, G, qt, 'results.add', { title: '=HYPERLINK("x")', score: 1, maxScore: 10 });
+  await call(Q, G, qt, 'results.add', { title: "-2+3+cmd|' /C calc'!A0", score: -1e-7, maxScore: 10 });
+  const csv = (await T.get(`/klassen/${c1}/apps/${G.id}/ergebnisse.csv`)).text;
+  const line = csv.split('\r\n').find((l) => l.includes('STRAFPUNKTE'));
+  assert.ok(line, 'the row is there');
+  assert.equal(line.split(';')[2], '"-3,5"', 'a negative score is a number in the spreadsheet');
+  assert.ok(csv.includes('"\'=HYPERLINK(""x"")"'), 'a formula in text is still guarded');
+  assert.ok(csv.includes(`"'-2+3+cmd|' /C calc'!A0";"-1e-7"`), 'text that starts like a negative number is guarded; a tiny score stays a number');
+});
