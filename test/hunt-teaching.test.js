@@ -151,3 +151,19 @@ test('Mitteilung „Neue Aufgabe“: der Termin steht als Datum drin – „morg
   assert.ok(!/heute|morgen|in \d+ Tagen/.test(text), `no words that are only true on the day it was sent: ${text}`);
   assert.ok(text.includes(formatDay(dueAt)), `the date itself: ${text}`);
 });
+
+// ------------------------------------------------------------------ assignment of a removed app
+
+test('Aufgabe zu einer entfernten App: die Schülerin kann sie trotzdem selbst als erledigt markieren', async () => {
+  const { T, cls, kids, app } = await world(1);
+  const [{ user: kid, b: K }] = kids;
+  const x = idOf(await T.post(`/klassen/${cls}/aufgaben`, { app: app.id, titel: 'Mit entfernter App' }));
+  assert.equal((await T.post(`/klassen/${cls}/apps/${app.id}/entfernen`)).status, 303);
+  const page = (await K.page(`/aufgaben/${x}`)).text;
+  assert.ok(page.includes('Diese App ist nicht mehr in der Klasse'), 'precondition: the student is told');
+  assert.ok(page.includes('Du kannst sie auch selbst als erledigt markieren'), 'precondition: the page promises it');
+  assert.ok(page.includes(`action="/aufgaben/${x}/erledigt"`), 'the button is there');
+  assert.equal((await K.post(`/aufgaben/${x}/erledigt`)).status, 303);
+  assert.equal(h.hub.ctx.assignments.stateOf({ id: x }, kid.id), 'done');
+  assert.ok(!(await K.get('/start')).text.includes('Mit entfernter App'), 'off her start page');
+});

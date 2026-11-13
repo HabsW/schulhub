@@ -271,8 +271,9 @@ module.exports = (app, ctx) => {
       eyebrow: `Aufgabe · ${x.class_name}`,
       title: x.title,
       meta: html`${state === 'done' ? badge('erledigt', 'ok') : state === 'started' ? badge('begonnen') : badge('offen', due.tone)}${x.author_name ? html`<span>von ${x.author_name}</span>` : ''}`,
-      actions: begun && playable
-        ? html`${linkButton(`/apps/${x.app_id}/spielen?klasse=${x.class_id}`, 'Öffnen', { kind: 'primary', icon: 'play', size: 'lg' })}
+      // Marking it done does not need the app: when it left the class, this is the student's way to close the task.
+      actions: begun && (playable || (state !== 'done' && canDone))
+        ? html`${playable ? linkButton(`/apps/${x.app_id}/spielen?klasse=${x.class_id}`, 'Öffnen', { kind: 'primary', icon: 'play', size: 'lg' }) : ''}
           ${state !== 'done' && canDone ? kit.headPostButton(req, `${here}/erledigt`, 'Als erledigt markieren', { icon: 'check', size: 'lg' }) : ''}`
         : '',
     })}
