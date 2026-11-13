@@ -103,3 +103,39 @@ test('Versionen: canSeeVersion gilt nur für Versionen genau dieser App – nie 
     assert.equal(access.canSeeVersion(user('mia'), app('spiel', { id: 'quiz' }), 'spiel-1'), false, 'a version is seen only together with its own app');
   });
 });
+
+test('Identität: ein Konto ohne echte ID besitzt, schrieb und bekommt nichts – auch wenn der Zeile die ID ebenfalls fehlt', () => {
+  smallWorld({
+    users: [{ id: 'mia', role: 'student' }, { id: 'lehmann', role: 'teacher' }],
+    classes: [{ id: '7b' }],
+    members: [{ class_id: '7b', user_id: 'lehmann', role: 'teacher' }, { class_id: '7b', user_id: 'mia', role: 'student' }],
+    apps: [{ id: 'spiel', owner_id: 'mia', published_version_id: 'spiel-1' }],
+    versions: [{ id: 'spiel-1', app_id: 'spiel', number: 1 }],
+    feedback: [{ id: 'f1', class_id: '7b', student_id: 'mia', author_id: null }], // its author's account was deleted
+    comments: [{ id: 'k1', app_id: 'spiel', author_id: null }],
+  }, (access) => {
+    const nobody = [{}, { role: 'student' }, { id: null, role: 'teacher' }, { id: '', role: 'student' }];
+    const ownerless = { id: 'spiel', published_version_id: 'spiel-1' }; // an app row without owner_id
+    for (const u of nobody) {
+      const label = show(u);
+      assert.equal(access.canManageApp(u, {}), false, `canManageApp ${label}`);
+      assert.equal(access.isAppOwner(u, ownerless), false, `isAppOwner ${label}`);
+      assert.equal(access.canReviewApp(u, ownerless), false, `canReviewApp ${label}`);
+      assert.equal(access.canEditAppText(u, ownerless), false, `canEditAppText ${label}`);
+      assert.equal(access.resolvePlay(u, ownerless), null, `resolvePlay ${label}`);
+      assert.equal(access.canSeeVersion(u, ownerless, 'spiel-1'), false, `canSeeVersion ${label}`);
+      assert.equal(access.canReadFeedback(u, {}), false, `canReadFeedback ${label}`);
+      assert.equal(access.canDeleteFeedback(u, { id: 'f1', class_id: '7b', student_id: 'mia', author_id: null }), false, `canDeleteFeedback ${label}`);
+      assert.equal(access.canMarkFeedbackRead(u, {}), false, `canMarkFeedbackRead ${label}`);
+      assert.equal(access.canDeleteComment(u, { kind: 'comment', author_id: null }), false, `canDeleteComment ${label}`);
+      assert.equal(access.canRemoveFromClass(u, { id: '7b' }, { class_id: '7b', app_id: 'spiel', owner_id: null }), false, `canRemoveFromClass ${label}`);
+    }
+    // The admin (by role) adds apps they may use - an app without owner is not "their own".
+    assert.equal(access.addToClassMode({ role: 'admin' }, ownerless, '7b'), null, 'addToClassMode: no owner, not shared, not school-wide');
+    // Real people keep their rights.
+    const mia = { id: 'mia', role: 'student' };
+    assert.equal(access.canManageApp(mia, { id: 'spiel', owner_id: 'mia' }), true);
+    assert.equal(access.canDeleteFeedback(mia, { id: 'f1', class_id: '7b', student_id: 'mia', author_id: null }), true, 'the student deletes feedback to her');
+    assert.equal(access.canReadFeedback({ id: 'lehmann', role: 'teacher' }, { class_id: '7b', student_id: 'mia' }), true);
+  });
+});
