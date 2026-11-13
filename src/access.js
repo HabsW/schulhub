@@ -161,8 +161,10 @@ function createAccess(db) {
     return Boolean(inClass && wasApprovedIn(classId, appId));
   }
   /**
-   * The app is or was approved in this class: its row keeps the version the class had, also after
-   * it was removed - and while a new submission of the removed app waits or was given back.
+   * The app is (or was) in use in this class: approved now, or approved once - then the row keeps
+   * the version the class used (version_id; only an approval ever sets it), whatever happened since:
+   * taken out ('removed'), submitted again by its owner ('pending') or that new submission given
+   * back ('rejected'). Results made in the class stay readable for its teachers through all of these.
    */
   const wasApprovedIn = (classId, appId) => Boolean(db.get('SELECT 1 AS ok FROM class_apps WHERE class_id = ? AND app_id = ? AND version_id IS NOT NULL', classId, appId));
   const isStudentOf = (classId, studentId) => Boolean(db.get("SELECT 1 AS ok FROM class_members WHERE class_id = ? AND user_id = ? AND role = 'student'", classId, studentId));

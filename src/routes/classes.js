@@ -532,7 +532,7 @@ module.exports = (app, ctx) => {
       ${removed.length ? html`<details class="disclosure teach-removed"><summary><span class="teach-sumtitle">Entfernte Apps</span><span class="teach-count">${removed.length}</span></summary>
         <div class="disclosure-body"><p class="meta mb-4">Die Klasse kann diese Apps nicht mehr öffnen. Ihre Ergebnisse bleiben für dich lesbar.</p>
         ${list(removed.map((a) => appRow(a, {
-          sub: `von ${a.owner_name} · Version ${a.version_number || '–'}`,
+          sub: `von ${a.owner_name} · Version ${a.version_number || '–'}${a.status === 'removed' ? '' : ' · neu eingereicht'}`,
           end: html`<div class="teach-actions">${linkButton(`${base}/apps/${a.id}/ergebnisse`, 'Ergebnisse', { size: 'sm', icon: 'chart' })}${change && a.status === 'removed' ? postButton(req, `${base}/apps/${a.id}/zurueckholen`, 'Zurückholen', { kind: 'quiet', size: 'sm', icon: 'undo' }) : ''}</div>`,
           cls: 'wrap',
         })))}</div></details>` : ''}`);

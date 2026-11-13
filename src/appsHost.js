@@ -502,13 +502,14 @@ function createAppsHost(ctx) {
    */
   async function filesApi(req, res, appRow, rawName) {
     try {
+      // 400, not 200: GET answers with the file's bytes, so an error must not look like a file (hub-sdk.js reads any 2xx as content).
       let name;
       try {
         name = decodeURIComponent(rawName);
       } catch {
-        throw new ApiError('bad_key', 'Ungültiger Dateiname.');
+        throw new ApiError('bad_key', 'Ungültiger Dateiname.', 400);
       }
-      if (!KEY.test(name)) throw new ApiError('bad_key', 'Ungültiger Dateiname (erlaubt: Buchstaben, Ziffern, _ . : -, höchstens 64 Zeichen).');
+      if (!KEY.test(name)) throw new ApiError('bad_key', 'Ungültiger Dateiname (erlaubt: Buchstaben, Ziffern, _ . : -, höchstens 64 Zeichen).', 400);
       const { user, store } = caller(req, appRow);
       if (req.method === 'PUT') {
         if (!limiter.hit('sdkFiles', `${user.id}:${appRow.id}`)) throw new ApiError('rate_limited', 'Zu viele Dateien in kurzer Zeit. Bitte kurz warten.', 429);

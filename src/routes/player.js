@@ -48,7 +48,8 @@ module.exports = (app, ctx) => {
 
   app.get('/apps/:id/spielen', (req, res) => {
     const a = getApp(req.params.id);
-    const play = decide(req.user, a, { klasse: str(req.query.klasse), version: str(req.query.version), entwurf: req.query.entwurf === '1' });
+    const klasse = str(req.query.klasse);
+    const play = decide(req.user, a, { klasse, version: str(req.query.version), entwurf: req.query.entwurf === '1' });
     if (!play) throw deny();
     const cls = play.classId ? db.get('SELECT id, name FROM classes WHERE id = ? AND archived_at IS NULL', play.classId) : null;
     // The file token unlocks exactly this version's static files - or the owner's draft.
@@ -59,6 +60,11 @@ module.exports = (app, ctx) => {
       : tokens.sign('files', { a: a.id, v: play.version.id, u: req.user.id, r: 1 }, config.fileTokenSeconds);
     const origin = config.appOrigin(a.origin_key);
     const manage = access.canReviewApp(req.user, a);
+    // The token route (public/player.js) is asked exactly what this page was asked - the link's own
+    // class, never the class this page resolved - so both decide the same version and class context.
+    // (The resolved class would lead it elsewhere: a school-wide app opened with a class it is not in
+    // would borrow another class of the person, and an owner would get the version of that class
+    // instead of the published one the frame runs.)
     // A preview goes back to the app's page - or, for a colleague trying a shared app (who may not open that page), to the catalogue.
     const back = play.draft ? `/studio/${a.id}` : play.preview ? (manage ? `/apps/${a.id}` : '/katalog') : cls ? `/klassen/${cls.id}` : '/start';
     const favourite = Boolean(db.get('SELECT 1 AS ok FROM favorites WHERE user_id = ? AND app_id = ?', req.user.id, a.id));
@@ -75,7 +81,7 @@ module.exports = (app, ctx) => {
         ${manage && !play.draft ? html`<a class="btn quiet icon sm hide-phone" href="/apps/${a.id}" aria-label="App verwalten" title="App verwalten">${icon('settings')}</a>` : ''}
       </div>
       <div class="stage" id="stage" data-origin="${origin}" data-token-url="/apps/${a.id}/token"
-           data-class="${play.classId || ''}" data-version="${play.preview && !play.draft ? play.version.id : ''}" data-draft="${play.draft ? '1' : ''}">
+           data-class="${klasse || ''}" data-version="${play.preview && !play.draft ? play.version.id : ''}" data-draft="${play.draft ? '1' : ''}">
         <template id="appframe-hold" data-start="${origin}/~${fileToken}/_hub/start"><iframe id="appframe" title="${a.name}" src="${origin}/~${fileToken}/index.html" sandbox="${SANDBOX}" allow="fullscreen; autoplay; gamepad" referrerpolicy="no-referrer"></iframe></template>
         <div class="loading ${appClass(a)}" aria-hidden="true">${appIcon(a, 'lg')}</div>
         ${play.preview ? html`<section class="console" id="console" aria-label="Konsole" hidden>

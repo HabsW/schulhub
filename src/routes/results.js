@@ -18,10 +18,10 @@ const { deny, formatDate, formatAgo, dayKey, plural } = require('../util');
 const { manifestOf } = require('../manifest');
 const kit = require('../teachingKit');
 
-/** Guard spreadsheet formulas and quote for CSV. */
+/** Guard spreadsheet formulas and quote for CSV. A plain number ("-3,5", as csvNumber writes it) is no formula and stays a number. */
 function csvCell(value) {
   let s = value === null || value === undefined ? '' : String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (/^[=+\-@\t\r]/.test(s) && !/^-\d+(?:,\d+)?(?:e[+-]\d+)?$/.test(s)) s = `'${s}`;
   return `"${s.replace(/"/g, '""')}"`;
 }
 /** Numbers the way German spreadsheets read them. */
@@ -72,7 +72,8 @@ function detailView(value, labels, depth = 0) {
   if (depth > 2) return html`<pre class="code">${JSON.stringify(value, null, 2)}</pre>`;
   if (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(flat)) {
     const cols = [...new Set(value.flatMap((o) => Object.keys(o)))].slice(0, 12);
-    return dataTable({ cls: 'teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });
+    // Own properties only: a row without a column like 'constructor' gets an empty cell, never Object.prototype's.
+    return dataTable({ cls: 'teach-details', columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(Object.hasOwn(o, c) ? o[c] : null) })), rows: value });
   }
   if (Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')) {
     if (value.length > 40) return html`<pre class="code">${JSON.stringify(value)}</pre>`;
@@ -152,7 +153,8 @@ module.exports = (app, ctx) => {
       ...kit.weekParams(wk), cls.id, a.id, cls.id
     );
     const bars = kit.weekBars(wk, perWeek);
-    const bests = all.filter((s) => s.best !== null).map((s) => s.best);
+    // The same 0..100 % each row shows: an app may record more than the maximum (a bonus) or less than 0.
+    const bests = all.filter((s) => s.best !== null).map((s) => Math.max(0, Math.min(1, s.best)));
     const average = bests.length ? bests.reduce((x, y) => x + y, 0) / bests.length : null;
     const hasSettings = manifest.settings.length > 0;
 
@@ -187,7 +189,8 @@ module.exports = (app, ctx) => {
       icon: 'archive',
       title: 'Nicht mehr in der Klasse',
       text: 'Die Klasse kann diese App nicht mehr öffnen. Die Ergebnisse bleiben für dich lesbar.',
-      actions: change ? postButton(req, `/klassen/${cls.id}/apps/${a.id}/zurueckholen`, 'Zurückholen', { size: 'sm', icon: 'undo' }) : '',
+      // Only a removed app comes back as it was; one its owner submitted again waits for the review.
+      actions: change && ca.status === 'removed' ? postButton(req, `/klassen/${cls.id}/apps/${a.id}/zurueckholen`, 'Zurückholen', { size: 'sm', icon: 'undo' }) : '',
       cls: 'mb-6',
     })}
     <div class="grid-2 even section">
@@ -253,6 +256,11 @@ module.exports = (app, ctx) => {
     const here = `${listUrl}/${student.id}`;
     const labels = (manifest.results && manifest.results.labels) || {};
     const results = db.all("SELECT * FROM results WHERE app_id = ? AND user_id = ? AND (class_id = ? OR class_id = '') ORDER BY created_at DESC, id DESC LIMIT 200", a.id, student.id, cls.id);
+    // Count and best of ALL results of this class (the list above shows the newest 200), as on the class's list.
+    const total = db.get(
+      "SELECT COUNT(*) AS n, MAX(CASE WHEN max_score > 0 THEN score * 1.0 / max_score END) AS best FROM results WHERE app_id = ? AND user_id = ? AND (class_id = ? OR class_id = '')",
+      a.id, student.id, cls.id
+    );
     const saves = db.all('SELECT key, value, size, updated_at FROM saves WHERE app_id = ? AND user_id = ? ORDER BY key LIMIT 200', a.id, student.id);
     const scores = db.all('SELECT board, score, updated_at FROM scores WHERE app_id = ? AND user_id = ? ORDER BY board', a.id, student.id);
     const progress = db.get('SELECT value, label, updated_at FROM progress WHERE app_id = ? AND user_id = ?', a.id, student.id);
@@ -273,7 +281,7 @@ module.exports = (app, ctx) => {
       .filter((f) => access.canReadFeedback(req.user, f));
     const canFeedback = access.canGiveFeedback(req.user, cls.id, student.id);
     const change = access.canChangeClass(req.user, cls.id);
-    const best = results.map((r) => kit.percentOf(r.score, r.max_score)).filter((p) => p !== null);
+    const best = total.best === null ? null : Math.max(0, Math.min(100, Math.round(total.best * 100)));
     const lastActive = Math.max(played ? played.last_at : 0, results[0] ? results[0].created_at : 0, progress ? progress.updated_at : 0) || null;
 
     // One compact group: previous, next, position - nothing floats alone, names are never cut short.
@@ -294,14 +302,14 @@ module.exports = (app, ctx) => {
     })}
     ${pager}
     <section class="section" aria-label="Zahlen">${stats([
-      stat({ label: 'Ergebnisse', value: results.length, sub: 'in dieser Klasse' }),
-      stat({ label: 'Bestes Ergebnis', value: best.length ? `${Math.max(...best)}${NB}%` : '–' }),
+      stat({ label: 'Ergebnisse', value: total.n, sub: 'in dieser Klasse' }),
+      stat({ label: 'Bestes Ergebnis', value: best === null ? '–' : `${best}${NB}%` }),
       stat({ label: progress && progress.label ? progress.label : 'Fortschritt', value: progress ? pctText(progress.value) : '–', sub: progress ? formatAgo(progress.updated_at) : '' }),
       stat({ label: 'Erfolge', value: achievements.length ? `${achievements.filter((x) => unlocked.has(x.id)).length}/${achievements.length}` : '–' }),
     ])}</section>
     <div class="grid-2 section">
       <div>
-        <section class="section" aria-labelledby="s-results">${sectionHead('Ergebnisse', { id: 's-results', count: results.length ? String(results.length) : null })}
+        <section class="section" aria-labelledby="s-results">${sectionHead('Ergebnisse', { id: 's-results', count: total.n ? String(total.n) : null, sub: total.n > results.length ? `Hier stehen die neuesten ${results.length}. Die CSV-Datei enthält alle.` : '' })}
           ${results.length
             ? html`<div class="teach-resultlist">${results.map((r) => {
                 const p = kit.percentOf(r.score, r.max_score);

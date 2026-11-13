@@ -372,7 +372,10 @@
       return 'application/octet-stream';
     }
     var settingsCache = null;
-    var settings = function () { return (settingsCache = settingsCache || b.call('settings.all', {})); };
+    // Asked once per page view - unless that failed (e.g. too many calls at that moment): then again next time.
+    var settings = function () {
+      return (settingsCache = settingsCache || b.call('settings.all', {}).catch(function (e) { settingsCache = null; throw e; }));
+    };
 
     return {
       /** 'live' (im Hub), 'preview' (Vorschau im Hub: nichts wird dauerhaft gespeichert) oder 'local' (auf deinem PC). */

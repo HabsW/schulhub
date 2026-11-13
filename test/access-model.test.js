@@ -1430,7 +1430,9 @@ async function httpWorld(seed, tally) {
       const page = await as(u).get(url);
       note(`${who(u)} GET ${url}`, page.status, play ? 200 : 404);
       if (page.status === 200 && play) {
-        note(`${who(u)} GET ${url}: class context`, /data-class="([^"]*)"/.exec(page.text)?.[1], play.classId || '');
+        // The page hands the token route exactly the link's class (public/player.js), so both decide alike;
+        // the class context itself is checked on the token below.
+        note(`${who(u)} GET ${url}: class asked for`, /data-class="([^"]*)"/.exec(page.text)?.[1], c || '');
         note(`${who(u)} GET ${url}: preview of`, /data-version="([^"]*)"/.exec(page.text)?.[1], play.preview ? play.version.id : '');
         const back = /href="([^"]+)" aria-label="Zurück"/.exec(page.text)?.[1];
         note(`${who(u)} GET ${url}: back to ${back}`, (await as(u).get(back)).status, 200);

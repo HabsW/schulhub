@@ -275,7 +275,8 @@ function jsonView(value, labels = {}) {
   const name = (k) => (labels && Object.hasOwn(labels, k) && typeof labels[k] === 'string' ? labels[k] : k);
   if (Array.isArray(value) && value.length > 0 && value.length <= 500 && value.every(flat)) {
     const cols = [...new Set(value.flatMap((o) => Object.keys(o)))].slice(0, 12);
-    return dataTable({ columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(o[c]) })), rows: value });
+    // A row without one of the columns (e.g. 'constructor') shows an empty cell, not Object.prototype's function.
+    return dataTable({ columns: cols.map((c, i) => ({ label: name(c), primary: i === 0, render: (o) => cell(Object.hasOwn(o, c) ? o[c] : null) })), rows: value });
   }
   if (Array.isArray(value) && value.length > 24 && value.every((v) => v === null || typeof v !== 'object')) {
     return html`<pre class="code">${JSON.stringify(value)}</pre>`;

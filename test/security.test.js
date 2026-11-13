@@ -109,7 +109,7 @@ test('Rolle kommt nur aus der Datenbank: mitgeschickte Rollen werden ignoriert',
     assert.equal((await who.get('/admin')).status, 404);
     assert.equal((await who.get('/admin/protokoll')).status, 404);
     assert.equal((await who.post(`/admin/nutzer/${me}/rolle`, { rolle: 'admin' })).status, 404);
-    assert.equal((await who.post(`/apps/${teacherApp.id}/schulweit`, { an: '1' })).status, 404);
+    assert.equal((await who.post(`/apps/${teacherApp.id}/schulweit`, { an: '1', version: h.db.get('SELECT published_version_id AS v FROM apps WHERE id = ?', teacherApp.id).v })).status, 404);
   }
   assert.equal(h.db.get('SELECT role FROM users WHERE id = ?', me).role, 'student');
 });
