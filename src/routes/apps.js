@@ -780,7 +780,9 @@ module.exports = (app, ctx) => {
     } catch (err) {
       // Nothing of a refused upload is kept.
       if (v && db.get('SELECT 1 AS x FROM app_versions WHERE id = ?', v.id)) services.deleteVersion(null, a, v);
-      if (err instanceof HttpError) services.audit(req.user, 'upload_abgelehnt', a.name, err.message, { appId: a.id });
+      // Unpacking took a while: an account deleted meanwhile (with its apps) leaves no new entry naming it.
+      const still = db.get('SELECT 1 AS ok FROM apps a JOIN users u ON u.id = ? WHERE a.id = ?', req.user.id, a.id);
+      if (err instanceof HttpError && still) services.audit(req.user, 'upload_abgelehnt', a.name, err.message, { appId: a.id });
       throw err;
     } finally {
       fs.rm(file, { force: true }, () => {});

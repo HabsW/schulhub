@@ -179,3 +179,28 @@ test('Entfernt und wieder eingereicht: die Ergebnisse der Klasse bleiben für di
   // Classmates still cannot open it.
   assert.equal(await h.token(B, app, cls), null);
 });
+
+test('Konto gelöscht, während ein ZIP entpackt wird: kein Eintrag nennt danach die Person oder ihre App', async () => {
+  const name = 'Zoe Zipfel';
+  const zoe = h.addUser(name, 'student');
+  const Z = await h.browser().login(zoe);
+  const app = await h.makeApp(Z, 'Zoes Zipspiel', { 'index.html': '<h1>alt</h1>' });
+  const { uploads } = h.hub.ctx;
+  const original = uploads.addZip;
+  // The archive has arrived and its version exists; while it is unpacked, the account is deleted.
+  uploads.addZip = async (...args) => {
+    uploads.addZip = original;
+    await A.page(`/admin/konten/${zoe.id}`);
+    assert.equal((await A.post(`/admin/nutzer/${zoe.id}/loeschen`, {})).status, 303);
+    return original(...args);
+  };
+  try {
+    const res = await Z.send('POST', `/apps/${app.id}/versionen/zip`, makeZip([{ name: 'index.html', data: '<h1>neu</h1>' }]), 'application/zip');
+    assert.equal(res.status, 404);
+  } finally {
+    uploads.addZip = original;
+  }
+  assert.equal(h.db.get('SELECT COUNT(*) AS n FROM users WHERE id = ?', zoe.id).n, 0);
+  const left = h.db.all('SELECT action, actor_label, target FROM audit_log WHERE actor_id = ? OR actor_label LIKE ? OR target LIKE ?', zoe.id, `%${name}%`, '%Zoes Zipspiel%');
+  assert.deepEqual(left, [], 'the audit log names the deleted person and her app');
+});
