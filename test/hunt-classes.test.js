@@ -119,6 +119,27 @@ test('Startseite: eine Lehrkraft mit mehr als 12 Klassen sieht die richtige Zahl
   assert.equal(h.db.get("SELECT COUNT(*) AS n FROM class_members WHERE user_id = ? AND role = 'teacher'", user.id).n, 13);
 });
 
+test('Große Klasse (über 300): Überblick und Mitglieder zählen alle – die Liste zeigt die ersten 300 und sagt es', async () => {
+  const { b } = await person('Frau Groß', 'teacher');
+  const c = await newClass(b, uniq('Schulchor'));
+  // 301 students, written directly (joining one by one is tested elsewhere).
+  h.db.tx(() => {
+    for (let i = 0; i < 301; i++) {
+      const u = h.addUser(`Chorkind ${String(i).padStart(3, '0')}`, 'student');
+      h.db.run("INSERT INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, 'student', ?)", c.id, u.id, Date.now());
+    }
+  });
+  const overview = (await b.get(`/klassen/${c.id}`)).text;
+  assert.ok(overview.includes('301 Schüler/innen'), 'the page head counts all');
+  const stat = /<span class="stat-label">Schüler\/innen<\/span><span class="stat-value">(\d+)<\/span>/.exec(overview);
+  assert.equal(stat && stat[1], '301', 'the number on the overview counts all');
+  assert.ok(overview.includes('von 301 · seit Montag'));
+  const members = (await b.get(`/klassen/${c.id}/mitglieder`)).text;
+  const count = /<h2 id="s-students">[^<]*<span class="count-text">(\d+)<\/span><\/h2>/.exec(members);
+  assert.equal(count && count[1], '301', 'the members heading counts all');
+  assert.ok(members.includes('Es werden die ersten 300 von 301 Schüler/innen gezeigt.'));
+});
+
 // ------------------------------------------------------------- deleting a class
 
 test('Klasse löschen: Mitteilungen, die in die Klasse führen, verschwinden mit ihr – auf jedem Weg, andere Klassen bleiben', async () => {
