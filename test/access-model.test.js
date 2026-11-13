@@ -346,10 +346,12 @@ function createModel(w) {
   // "A normal code ALWAYS makes a student (even for a teacher account). A teacher invitation (co-teachers)
   // only works for staff accounts. Nobody joins an archived class. Expiry and the code itself are checked
   // by the caller." (join_codes.role defaults to 'student')
+  // "A teacher removed this person from the code's class after the code was made: it does not let them back in."
+  m.removedSince = (user, code) => Boolean(user) && Boolean(code) && (w.removals || []).some((x) => same(x.class_id, code.class_id) && same(x.user_id, uid(user)) && x.removed_at >= code.created_at);
   m.joinRoleFor = (user, code) => {
     if (!user || !code || m.isArchived(code.class_id)) return null;
     const kind = code.role ?? 'student';
-    if (kind === 'student') return 'student';
+    if (kind === 'student') return m.removedSince(user, code) ? null : 'student';
     return kind === 'teacher' && m.isStaff(user) ? 'teacher' : null;
   };
 
@@ -570,7 +572,7 @@ const BOOLEAN = new Set([
   'isSharedWith', 'canReviewApp', 'canSeeVersion', 'canSeeStudentData', 'isStudentOf', 'appApprovedIn', 'wasApprovedIn', 'canAssign', 'canSeeAssignment',
   'canManageAssignment', 'canMarkDone', 'canGiveFeedback', 'canReadFeedback', 'canDeleteFeedback', 'canEditAppSettings', 'canAnnounce',
   'canSeeAnnouncement', 'canDeleteAnnouncement', 'canJoinRoom', 'canLeaveClass', 'canSeeClassResults', 'canMarkFeedbackRead',
-  'canRemoveFromClass', 'isAppOwner', 'canDeleteComment', 'canEditAppText',
+  'canRemoveFromClass', 'isAppOwner', 'canDeleteComment', 'canEditAppText', 'removedSince',
 ]);
 const FUNCTIONS = [...BOOLEAN, 'classRole', 'joinRoleFor', 'reviewClasses', 'addToClassMode', 'resolvePlay', 'visibleApps', 'visibleClasses', 'reviewRequest', 'appTextLock'];
 
@@ -808,6 +810,7 @@ const RANDOM = {
   canLeaveClass: (g) => { const u = g.user(); return [u, g.id('c', g.classesOf(u.v))]; },
   canAnnounce: (g) => { const u = g.user(); return [u, g.id('c', g.teaching(u.v))]; },
   joinRoleFor: (g) => [g.user(), g.code()],
+  removedSince: (g) => [g.user(), g.code()],
   canManageApp: (g) => { const u = g.user(); return [u, g.app(g.ownApps(u.v))]; },
   canShareApp: (g) => { const u = g.user(); return [u, g.app(g.ownApps(u.v))]; },
   isSharedWith: (g) => [g.user(), g.app()],
@@ -875,7 +878,7 @@ function runGrid(w, check, r) {
     for (const f of [...w.feedback, null, {}]) for (const fn of ['canReadFeedback', 'canDeleteFeedback', 'canMarkFeedbackRead']) check(fn, [u, f]);
     for (const n of [...w.announcements, null, { class_id: null }, { class_id: ghost('c') }]) for (const fn of ['canSeeAnnouncement', 'canDeleteAnnouncement']) check(fn, [u, n]);
     for (const k of [...w.comments, null, { kind: 'comment' }, { kind: 'comment', author_id: null }]) check('canDeleteComment', [u, k]);
-    for (const code of [...w.codes, null]) check('joinRoleFor', [u, code]);
+    for (const code of [...w.codes, null]) for (const fn of ['joinRoleFor', 'removedSince']) check(fn, [u, code]);
   }
   for (const c of classIds) {
     check('isArchived', [c]);

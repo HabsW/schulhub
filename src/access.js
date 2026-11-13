@@ -44,9 +44,13 @@ function createAccess(db) {
    */
   function joinRoleFor(user, code) {
     if (!user || !code || isArchived(code.class_id)) return null;
-    if ((code.role || 'student') === 'student') return 'student';
+    if ((code.role || 'student') === 'student') return removedSince(user, code) ? null : 'student';
     return code.role === 'teacher' && isStaff(user) ? 'teacher' : null;
   }
+  /** A teacher removed this person from the code's class after the code was made: it does not let them back in. */
+  const removedSince = (user, code) =>
+    Boolean(user && code && typeof user.id === 'string' && typeof code.class_id === 'string') &&
+    Boolean(db.get('SELECT 1 AS removed FROM class_removals WHERE class_id = ? AND user_id = ? AND removed_at >= ?', code.class_id, user.id, Number(code.created_at) || 0));
 
   // ----- apps -----
   /** Owner (or admin): edit, upload, use the editor, publish, delete, see usage numbers. */
@@ -349,7 +353,7 @@ function createAccess(db) {
 
   return {
     isAdmin, isStaff, classRole, isArchived,
-    canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor,
+    canCreateClass, canViewClass, canManageClass, canChangeClass, joinRoleFor, removedSince,
     canManageApp, canShareApp, isSharedWith, canReviewApp, canSeeVersion, reviewClasses, addToClassMode, resolvePlay,
     canSeeStudentData, isStudentOf, appApprovedIn, wasApprovedIn,
     canAssign, canSeeAssignment, canManageAssignment, canMarkDone,

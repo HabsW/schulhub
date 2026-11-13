@@ -81,9 +81,32 @@ function createUserFiles(ctx) {
       for (const sha of shas) ctx.gcHold.userfiles.add(sha);
       return;
     }
-    for (const sha of new Set(shas)) {
-      if (!db.get('SELECT 1 AS used FROM user_files WHERE sha256 = ? LIMIT 1', sha)) fs.rmSync(blobPath(sha), { force: true });
+    const doomed = [...new Set(shas)].filter((sha) => !db.get('SELECT 1 AS used FROM user_files WHERE sha256 = ? LIMIT 1', sha));
+    if (!doomed.length) return;
+    db.checkpoint(); // the commit that freed them is on the disk first (see uploads.collectGarbage)
+    for (const sha of doomed) fs.rmSync(blobPath(sha), { force: true });
+  }
+
+  /** At start: files no row refers to are removed (see uploads.sweep). */
+  function sweep() {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return 0;
     }
+    const used = new Set(db.all('SELECT DISTINCT sha256 FROM user_files').map((r) => r.sha256));
+    let removed = 0;
+    for (const sub of entries) {
+      if (!/^[0-9a-f]{2}$/.test(sub)) continue;
+      for (const name of fs.readdirSync(path.join(dir, sub))) {
+        if (/^[0-9a-f]{64}$/.test(name) && name.startsWith(sub) && !used.has(name)) {
+          fs.rmSync(path.join(dir, sub, name), { force: true });
+          removed++;
+        }
+      }
+    }
+    return removed;
   }
 
   const usage = (appId, userId, exceptName = '') =>
@@ -92,6 +115,7 @@ function createUserFiles(ctx) {
   return {
     blobPath,
     collectGarbage,
+    sweep,
     usage,
     list: (appId, userId) => db.all('SELECT name, type, size, updated_at FROM user_files WHERE app_id = ? AND user_id = ? ORDER BY name', appId, userId),
     get: (appId, userId, name) => db.get('SELECT name, type, size, sha256, updated_at FROM user_files WHERE app_id = ? AND user_id = ? AND name = ?', appId, userId, name),

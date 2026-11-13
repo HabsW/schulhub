@@ -145,6 +145,7 @@ function createServices(ctx) {
   function deleteClassRows(classId) {
     for (const { id } of db.all('SELECT id FROM assignments WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', `/aufgaben/${id}`);
     for (const { id } of db.all('SELECT id FROM announcements WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', announcementLink(id));
+    for (const { id } of db.all('SELECT id FROM feedback WHERE class_id = ?', classId)) db.run('DELETE FROM notices WHERE href = ?', feedbackLink(id));
     const review = `/pruefen/${classId}/`;
     db.run('DELETE FROM notices WHERE href >= ? AND href < ?', review, prefixEnd(review));
     db.run('DELETE FROM shared_data WHERE class_id = ?', classId);

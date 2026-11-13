@@ -125,11 +125,37 @@ function createUploads(ctx) {
       for (const sha of shas) ctx.gcHold.blobs.add(sha);
       return;
     }
-    for (const sha of new Set(shas)) {
-      if (db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha)) continue;
-      if (db.get('SELECT 1 AS used FROM draft_files WHERE sha256 = ? LIMIT 1', sha)) continue;
-      fs.rmSync(blobPath(sha), { force: true });
+    const doomed = [...new Set(shas)].filter((sha) => !db.get('SELECT 1 AS used FROM app_files WHERE sha256 = ? LIMIT 1', sha) && !db.get('SELECT 1 AS used FROM draft_files WHERE sha256 = ? LIMIT 1', sha));
+    if (!doomed.length) return;
+    // With synchronous=NORMAL a power cut could undo the commit that freed these files: it reaches the disk
+    // first, so a row can never come back pointing at a file that was deleted.
+    db.checkpoint();
+    for (const sha of doomed) fs.rmSync(blobPath(sha), { force: true });
+  }
+
+  /**
+   * At start: content files no row refers to - left by a stop or crash between disk and database, or by
+   * deletions that waited for a backup when the Hub stopped - are removed.
+   */
+  function sweep() {
+    let entries;
+    try {
+      entries = fs.readdirSync(blobDir);
+    } catch {
+      return 0;
     }
+    const used = new Set([...db.all('SELECT DISTINCT sha256 FROM app_files'), ...db.all('SELECT DISTINCT sha256 FROM draft_files')].map((r) => r.sha256));
+    let removed = 0;
+    for (const dir of entries) {
+      if (!/^[0-9a-f]{2}$/.test(dir)) continue;
+      for (const name of fs.readdirSync(path.join(blobDir, dir))) {
+        if (/^[0-9a-f]{64}$/.test(name) && name.startsWith(dir) && !used.has(name)) {
+          fs.rmSync(path.join(blobDir, dir, name), { force: true });
+          removed++;
+        }
+      }
+    }
+    return removed;
   }
 
   /** Bytes an account uses: all versions and editor drafts of all its apps. */
@@ -351,7 +377,7 @@ function createUploads(ctx) {
   function putDraftFile(app, rawPath, buffer, { moving = null } = {}) {
     const p = draftFileName(rawPath);
     if (buffer.length > L.maxFileBytes) throw fail(`"${p.slice(0, 80)}" ist zu groß (maximal ${Math.round(L.maxFileBytes / 1048576)} MB pro Datei).`);
-    return db.tx(() => {
+    const saved = db.tx(() => {
       // As with versions: the app (and its owner's account) may be gone by the time the body is read.
       if (!db.get('SELECT 1 AS ok FROM apps WHERE id = ?', app.id)) throw gone();
       ensureDraft(app);
@@ -369,9 +395,11 @@ function createUploads(ctx) {
       if (old) db.run('DELETE FROM draft_files WHERE app_id = ? AND path = ?', app.id, old.path);
       db.run('INSERT INTO draft_files (app_id, path, path_lower, size, sha256) VALUES (?, ?, ?, ?, ?)', app.id, p, p.toLowerCase(), buffer.length, sha);
       db.run('UPDATE app_drafts SET updated_at = ? WHERE app_id = ?', Date.now(), app.id);
-      if (old && old.sha256 !== sha) collectGarbage([old.sha256]);
-      return p;
+      return { p, freed: old && old.sha256 !== sha ? old.sha256 : null };
     });
+    // After the commit, never inside the transaction: a rolled-back write must still find its file.
+    if (saved.freed) collectGarbage([saved.freed]);
+    return saved.p;
   }
 
   function deleteDraftFile(app, rawPath) {
@@ -654,7 +682,7 @@ function createUploads(ctx) {
   }
 
   return {
-    addFile, addZip, addDirectory, receiveToTemp, collectGarbage, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes,
+    addFile, addZip, addDirectory, receiveToTemp, collectGarbage, sweep, listFiles, findFile, readBlob, blobPath, contentType, isTextFile, writeZip, userBytes,
     putDraftFile, deleteDraftFile, draftFromVersion, deleteDraft, listDraftFiles, findDraftFile, isAllowedPath: (p) => Boolean(types[extOf(p)]),
     admitVersionFile, admitDraftFile, admitBody,
   };

@@ -536,13 +536,20 @@ function openDb(file) {
         raw.exec('COMMIT');
         return result;
       } catch (err) {
-        raw.exec('ROLLBACK');
+        // SQLite may have rolled back by itself already (e.g. a full disk): the real error is the one to report.
+        try {
+          raw.exec('ROLLBACK');
+        } catch {
+          // no transaction left to roll back
+        }
         throw err;
       } finally {
         depth--;
         if (durable) raw.exec('PRAGMA synchronous = NORMAL;');
       }
     },
+    /** Everything committed so far reaches the disk (a checkpoint syncs the WAL first). Never inside tx. */
+    checkpoint: () => raw.exec('PRAGMA wal_checkpoint(PASSIVE);'),
     /** Planner statistics, refreshed (daily maintenance). */
     optimize: () => raw.exec('PRAGMA optimize;'),
     /** The database file (long jobs open their own connection to it, see dbJobs.js). */

@@ -326,7 +326,7 @@ test('Sicherung: Datenbank und Dateien werden gestreamt – nie als Ganzes in de
           stream.on('data', (c) => chunks.push(c));
           stream.on('error', reject);
           stream.on('end', () => {
-            out.push({ name: e.fileName, data: Buffer.concat(chunks) });
+            out.push({ name: e.fileName, data: Buffer.concat(chunks), crc: e.crc32 });
             zip.readEntry();
           });
         }));
@@ -334,6 +334,8 @@ test('Sicherung: Datenbank und Dateien werden gestreamt – nie als Ganzes in de
         zip.readEntry();
       });
     });
+    // yauzl checks sizes, not checksums: every entry's CRC-32 (written after its streamed data) must fit its content.
+    for (const e of entries) assert.equal(e.crc, require('node:zlib').crc32(e.data) >>> 0, `checksum of ${e.name}`);
     const dbEntry = entries.find((e) => e.name === 'hub.sqlite');
     assert.ok(dbEntry && dbEntry.data.subarray(0, 16).toString('latin1') === 'SQLite format 3\u0000', 'the database copy is in the archive');
     for (const e of entries.filter((x) => x.name.startsWith('blobs/'))) {
@@ -560,12 +562,13 @@ test('Sicherung: wer gesperrt wird, während die Kopie entsteht, bekommt sie nic
     await A.page('/admin/sicherung');
     // While the database is copied, the other admin blocks Ada (which signs her out everywhere).
     dbJobs.snapshot = async (...args) => {
-      await snapshot(...args);
+      const made = await snapshot(...args);
       h.db.run('UPDATE users SET disabled = 1 WHERE id = ?', a.id);
       h.db.run('DELETE FROM sessions WHERE user_id = ?', a.id);
+      return made;
     };
     const res = await A.post('/admin/sicherung');
-    assert.notEqual(res.status, 200, 'no archive with everybody\'s data');
+    assert.equal(res.status, 404, 'no archive with everybody\'s data');
     assert.notEqual(res.headers['content-type'], 'application/zip');
     assert.ok(b);
   } finally {
@@ -627,6 +630,158 @@ test('Dateien kommen ganz auf die Platte – auch wenn ein einzelner Schreibaufr
     assert.equal(require('node:crypto').createHash('sha256').update(onDisk).digest('hex'), row.sha256);
   } finally {
     fsReal.writeSync = writeSync;
+    await h.stop();
+  }
+});
+
+test('Eine Klasse löschen nimmt auch die Mitteilungen ihrer Rückmeldungen mit; eine gelöschte Rückmeldung ihre eigene', async () => {
+  const h = await startHub();
+  try {
+    const teacher = h.addUser('Tina Lehrerin', 'teacher');
+    const kid = h.addUser('Kim Kind', 'student');
+    const [T, K] = await Promise.all([teacher, kid].map((u) => h.browser().login(u)));
+    await T.post('/klassen', { name: '6c' });
+    const cls = h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher'", teacher.id).id;
+    await K.post(`/beitreten/${h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", cls).code}`);
+    await T.page(`/klassen/${cls}`);
+    await T.post(`/klassen/${cls}/rueckmeldungen`, { schueler: kid.id, text: 'Erste' });
+    await T.post(`/klassen/${cls}/rueckmeldungen`, { schueler: kid.id, text: 'Zweite' });
+    const [first, second] = h.db.all('SELECT id FROM feedback WHERE student_id = ? ORDER BY created_at, rowid', kid.id);
+    assert.equal(h.db.get("SELECT COUNT(*) AS n FROM notices WHERE user_id = ? AND kind = 'rueckmeldung'", kid.id).n, 2);
+    // Deleting one feedback takes its notice along.
+    await K.page('/rueckmeldungen');
+    assert.equal((await K.post(`/rueckmeldungen/${first.id}/loeschen`, { zurueck: '/rueckmeldungen' })).status, 303);
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM notices WHERE href = ?', `/rueckmeldungen#rueckmeldung-${first.id}`).n, 0);
+    // Deleting the class takes the rest along.
+    h.hub.ctx.services.deleteClass(teacher, h.db.get('SELECT * FROM classes WHERE id = ?', cls));
+    assert.equal(h.db.get('SELECT COUNT(*) AS n FROM notices WHERE href = ?', `/rueckmeldungen#rueckmeldung-${second.id}`).n, 0);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Aus der Klasse genommen: die Beitrittsseite bietet den alten Code nicht mehr an – „Meine Daten“ zeigt es und der Export enthält es', async () => {
+  const h = await startHub();
+  try {
+    const teacher = h.addUser('Tina Lehrerin', 'teacher');
+    const kid = h.addUser('Kai Kind', 'student');
+    const [T, K] = await Promise.all([teacher, kid].map((u) => h.browser().login(u)));
+    await T.post('/klassen', { name: '7d' });
+    const cls = h.db.get("SELECT class_id AS id FROM class_members WHERE user_id = ? AND role = 'teacher'", teacher.id).id;
+    const code = h.db.get("SELECT code FROM join_codes WHERE class_id = ? AND role = 'student'", cls).code;
+    await K.post(`/beitreten/${code}`);
+    await T.page(`/klassen/${cls}/mitglieder`);
+    assert.equal((await T.post(`/klassen/${cls}/mitglieder/${kid.id}/entfernen`)).status, 303);
+    const page = await K.page(`/beitreten/${code}`);
+    assert.equal(page.status, 200);
+    assert.doesNotMatch(page.text, /Ja, beitreten/, 'the old code is not offered');
+    const mine = await K.page('/meine-daten');
+    assert.match(mine.text, /„7d“ \(.*\) hat dich eine Lehrkraft genommen/);
+    const exported = (await K.get('/meine-daten/export')).json();
+    assert.deepEqual(exported.ausKlassenGenommen.map((r) => r.klasse), ['7d']);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Beim Start werden Dateien entfernt, auf die nichts mehr verweist (z. B. Löschungen, die auf eine Sicherung warteten, als der Hub stoppte)', async () => {
+  const h = await startHub();
+  try {
+    const { uploads, userFiles } = h.hub.ctx;
+    const orphan = require('node:crypto').createHash('sha256').update('niemand').digest('hex');
+    const blob = uploads.blobPath(orphan);
+    fs.mkdirSync(require('node:path').dirname(blob), { recursive: true });
+    fs.writeFileSync(blob, 'niemand');
+    const userBlob = userFiles.blobPath(orphan);
+    fs.mkdirSync(require('node:path').dirname(userBlob), { recursive: true });
+    fs.writeFileSync(userBlob, 'niemand');
+    const teacher = h.addUser('Tim Bleibt', 'teacher');
+    const T = await h.browser().login(teacher);
+    const app = await h.makeApp(T, 'Bleibt');
+    const kept = h.db.get("SELECT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ? AND f.path = 'index.html'", app.id).sha256;
+    assert.equal(uploads.sweep(), 1);
+    assert.equal(userFiles.sweep(), 1);
+    assert.ok(!fs.existsSync(blob) && !fs.existsSync(userBlob), 'the files nobody refers to are gone');
+    assert.ok(fs.existsSync(uploads.blobPath(kept)), 'files in use stay');
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Löschungen gehen sofort auf die Platte: Konto, App, Klasse und App-Daten laufen in einer Transaktion mit synchronous=FULL', async () => {
+  const h = await startHub();
+  try {
+    const seen = [];
+    const tx = h.db.tx;
+    h.db.tx = (fn, options) => tx(() => {
+      seen.push(h.db.get('PRAGMA synchronous').synchronous);
+      return fn();
+    }, options);
+    const admin = h.addUser('Ada Admin', 'admin');
+    const t = h.addUser('Tom Weg', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Weg');
+    const { services } = h.hub.ctx;
+    seen.length = 0;
+    services.deleteAppData(app.id, t.id);
+    services.deleteApp(t, h.db.get('SELECT * FROM apps WHERE id = ?', app.id));
+    services.deleteClass(t, { id: services.createClass(t, 'Weg-Klasse'), name: 'Weg-Klasse' });
+    services.deleteUser(admin, h.db.get('SELECT * FROM users WHERE id = ?', t.id));
+    h.db.tx = tx;
+    const deleting = seen.filter((v, i) => i !== 2); // the class was created in between (not a deletion)
+    assert.deepEqual(deleting, deleting.map(() => 2), `synchronous inside the deletions: ${seen}`);
+  } finally {
+    await h.stop();
+  }
+});
+
+test('Sicherung: was gelöscht wird, während die Datenbank kopiert wird, bleibt bis danach auf der Platte – dann geht es', async () => {
+  const h = await startHub();
+  const dbJobs = require('../src/dbJobs');
+  const snapshot = dbJobs.snapshot;
+  try {
+    const admin = h.addUser('Ada Admin', 'admin');
+    const t = h.addUser('Tilda Lehrerin', 'teacher');
+    const [A, T] = await Promise.all([admin, t].map((u) => h.browser().login(u)));
+    const app = await h.makeApp(T, 'Kurz', { 'index.html': '<h1>x</h1>', 'nur.js': 'let nur = 1;' });
+    const sha = h.db.get("SELECT f.sha256 FROM app_files f JOIN app_versions v ON v.id = f.version_id WHERE v.app_id = ? AND f.path = 'nur.js'", app.id).sha256;
+    const blob = h.hub.ctx.uploads.blobPath(sha);
+    let duringCopy = null;
+    dbJobs.snapshot = async (...args) => {
+      const made = await snapshot(...args);
+      // While the copy is made, the app (and its only file) is deleted.
+      h.hub.ctx.services.deleteApp(t, h.db.get('SELECT * FROM apps WHERE id = ?', app.id));
+      duringCopy = fs.existsSync(blob);
+      return made;
+    };
+    await A.page('/admin/sicherung');
+    assert.equal((await A.post('/admin/sicherung')).status, 200);
+    assert.equal(duringCopy, true, 'the deletion waited for the backup');
+    assert.equal(fs.existsSync(blob), false, 'and happened afterwards');
+  } finally {
+    dbJobs.snapshot = snapshot;
+    await h.stop();
+  }
+});
+
+test('App löschen: nach der Pause zählt die App, wie sie jetzt ist – ein neuer Name verschwindet mit ihr', async () => {
+  const h = await startHub();
+  const { services } = h.hub.ctx;
+  const trim = services.trimAppData;
+  try {
+    const t = h.addUser('Tilda Lehrerin', 'teacher');
+    const T = await h.browser().login(t);
+    const app = await h.makeApp(T, 'Alter Name');
+    // While the batched deletion pauses, the app is renamed (another tab).
+    services.trimAppData = async (ids) => {
+      await trim(ids);
+      h.db.run("UPDATE apps SET name = 'Neuer Name' WHERE id = ?", app.id);
+    };
+    await T.page(`/apps/${app.id}`);
+    assert.equal((await T.post(`/apps/${app.id}/loeschen`)).status, 303);
+    assert.equal(h.db.get("SELECT target FROM audit_log WHERE action = 'app_geloescht' ORDER BY id DESC LIMIT 1").target, 'Neuer Name');
+  } finally {
+    services.trimAppData = trim;
     await h.stop();
   }
 });

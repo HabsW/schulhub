@@ -1013,12 +1013,11 @@ module.exports = (app, ctx) => {
     if (own) return res.redirect(303, `/klassen/${own}`);
     const { row: code, cls } = findCode(req);
     const role = access.joinRoleFor(req.user, code);
-    if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
     // Removed by a teacher: back only with a code made after the removal (what the teacher was told).
-    const removed = db.get('SELECT removed_at FROM class_removals WHERE class_id = ? AND user_id = ?', cls.id, req.user.id);
-    if (removed && role === 'student' && code.created_at <= removed.removed_at) {
+    if (!role && access.removedSince(req.user, code)) {
       throw bad('Deine Lehrkraft hat dich aus dieser Klasse genommen. Mit diesem Code kannst du nicht wieder beitreten – frag deine Lehrkraft nach einem neuen.');
     }
+    if (!role) throw bad('Mit diesem Link kannst du dieser Klasse nicht beitreten.');
     let added = db.run('INSERT OR IGNORE INTO class_members (class_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)', cls.id, req.user.id, role, Date.now());
     // Already a student of the class (a colleague who tried its QR code first): the invitation makes them its teacher.
     // joinRoleFor gave 'teacher', so this is a staff account with a valid invitation; a class code never changes a role.

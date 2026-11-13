@@ -94,10 +94,10 @@ if (process.argv.includes('--profile-sql')) {
     };
   }
   const tx = db.tx;
-  db.tx = (fn) => {
+  db.tx = (fn, options) => {
     const t = process.hrtime.bigint();
     try {
-      return tx(fn);
+      return tx(fn, options);
     } finally {
       const ms = Number(process.hrtime.bigint() - t) / 1e6;
       let s = sqlStats.get('(transaction incl. commit)');

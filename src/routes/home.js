@@ -327,7 +327,7 @@ module.exports = (app, ctx) => {
       `SELECT COUNT(DISTINCT p.user_id) AS n FROM plays p JOIN class_members s ON s.user_id = p.user_id AND s.role = 'student'
          JOIN class_members t ON t.class_id = s.class_id AND t.user_id = ? AND t.role = 'teacher'
          JOIN classes c ON c.id = s.class_id AND c.archived_at IS NULL
-         JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = s.class_id AND ca.status IN ('approved','removed')
+         JOIN class_apps ca ON ca.app_id = p.app_id AND ca.class_id = s.class_id AND ca.version_id IS NOT NULL
         WHERE p.last_at > ?`,
       user.id, now - 86_400_000
     ).n;

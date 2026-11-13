@@ -245,6 +245,9 @@ function createHub(config) {
       });
     });
 
+  // Content files nothing refers to (a stop between disk and database, deletions that waited for a backup).
+  ctx.uploads.sweep();
+  ctx.userFiles.sweep();
   // Retention (audit log, archived classes, inactive-account flags): at start, then every night at 3 o'clock
   // (server time) - outside lessons, and with the bulky deletions in batches (services.maintenanceInSteps).
   ctx.services.maintenance();

@@ -8,7 +8,7 @@ const {
   html, page, flash, csrfField, postButton, linkButton, appIcon, appClass, jsonView, ROLE_LABEL, icon,
   pageHead, sectionHead, list, row, stat, stats, empty, notice, meter, dataTable, badge, field,
 } = require('../html');
-const { deny, bad, cleanText, formatDate, formatAgo, formatBytes, plural, isLocalPath, HttpError } = require('../util');
+const { deny, bad, cleanText, formatDate, formatDay, formatAgo, formatBytes, plural, isLocalPath, HttpError } = require('../util');
 const { manifestOf, KEY } = require('../manifest');
 const { auditLabel } = require('../auditLabels');
 const { displaySummary } = require('../formKit');
@@ -156,6 +156,7 @@ module.exports = (app, ctx) => {
       'SELECT c.id, c.name, c.archived_at, m.role, m.joined_at FROM class_members m JOIN classes c ON c.id = m.class_id WHERE m.user_id = ? ORDER BY c.name COLLATE NOCASE',
       u.id
     );
+    const removals = db.all('SELECT c.name, r.removed_at FROM class_removals r JOIN classes c ON c.id = r.class_id WHERE r.user_id = ? ORDER BY r.removed_at', u.id);
     const data = myAppData(u.id);
     const n = inventory(u.id);
     const ownApps = db.all('SELECT id, name FROM apps WHERE owner_id = ? ORDER BY name COLLATE NOCASE LIMIT 6', u.id);
@@ -214,6 +215,7 @@ module.exports = (app, ctx) => {
 
       <section class="section" aria-labelledby="s-klassen">${sectionHead('Klassen', { id: 's-klassen', count: classes.length ? String(classes.length) : null })}
         ${classes.length ? list(classRows) : empty({ icon: 'klassen', title: 'Du bist in keiner Klasse', text: 'Einer Klasse trittst du per QR-Code oder Link deiner Lehrkraft bei.' })}
+        ${removals.length ? html`<p class="meta mt-2">Aus ${removals.length === 1 ? 'der Klasse' : 'den Klassen'} ${removals.map((r, i) => html`${i ? ', ' : ''}„${r.name}“ (${formatDay(r.removed_at)})`)} hat dich eine Lehrkraft genommen. Mit einem neuen Code von ihr kannst du wieder beitreten.</p>` : ''}
       </section>
 
       <section class="section" aria-labelledby="s-apps">${sectionHead('Daten in Apps', { id: 's-apps', count: data.length ? String(data.length) : null, sub: 'Was Apps für dich gespeichert haben. Tippe auf eine App, um alles im Einzelnen zu sehen und Dateien herunterzuladen.' })}
@@ -449,6 +451,9 @@ module.exports = (app, ctx) => {
       },
       klassen: db.all('SELECT c.name, m.role, m.joined_at FROM class_members m JOIN classes c ON c.id = m.class_id WHERE m.user_id = ? ORDER BY c.name', u.id)
         .map((c) => ({ name: c.name, rolle: c.role === 'teacher' ? 'Lehrkraft' : 'Schüler/in', seit: iso(c.joined_at) })),
+      // A teacher took the person out of these classes; they come back only with a newer code.
+      ausKlassenGenommen: db.all('SELECT c.name, r.removed_at FROM class_removals r JOIN classes c ON c.id = r.class_id WHERE r.user_id = ? ORDER BY r.removed_at', u.id)
+        .map((r) => ({ klasse: r.name, am: iso(r.removed_at) })),
       eigeneApps: db.all(`SELECT a.name, a.description, a.created_at, a.published_version_id,
                                  (SELECT COUNT(*) FROM app_versions v WHERE v.app_id = a.id AND v.status = 'ready') AS versions
                             FROM apps a WHERE a.owner_id = ? ORDER BY a.name`, u.id)

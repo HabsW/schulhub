@@ -36,15 +36,24 @@ if (!isMainThread && workerData && workerData.schulhubDbJob) {
   }
 }
 
+/** A job that has not finished after this long is stopped: a hung worker must not hold back deletions for good. */
+const JOB_TIMEOUT_MS = 30 * 60_000;
+
 function run(file, job, target = null) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(__filename, { workerData: { schulhubDbJob: true, file, job, target } });
     let answer = null;
+    const timer = setTimeout(() => worker.terminate(), JOB_TIMEOUT_MS);
+    timer.unref();
     worker.once('message', (m) => {
       answer = m;
     });
     worker.once('error', reject);
-    worker.once('exit', (code) => (answer && code === 0 ? resolve(answer) : reject(new Error(`database job "${job}" ended without a result (exit ${code})`))));
+    worker.once('exit', (code) => {
+      clearTimeout(timer);
+      if (answer && code === 0) resolve(answer);
+      else reject(new Error(`database job "${job}" ended without a result (exit ${code})`));
+    });
   });
 }
 
