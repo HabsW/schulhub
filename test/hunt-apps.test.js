@@ -259,3 +259,12 @@ test('Editor: an der Grenze lässt sich eine Datei trotzdem umbenennen oder vers
     await small.stop();
   }
 });
+
+test('Ohne Formularinhalt: eine Anfrage mit gültigem Token führt nie zu einem Serverfehler', async () => {
+  const app = await h.makeApp(M, uniq('Leere Anfrage'));
+  const csrf = /<meta name="csrf" content="([^"]*)"/.exec((await M.get('/start')).text)[1];
+  for (const url of [`/apps/${app.id}/veroeffentlichen`, `/apps/${app.id}/bearbeiten`, `/apps/${app.id}/einreichen`, `/apps/${app.id}/kommentare`, '/apps', `/studio/${app.id}/entwurf`]) {
+    const res = await M.raw('POST', url, { headers: { 'x-csrf-token': csrf } });
+    assert.ok(res.status < 500, `${url}: ${res.status}`);
+  }
+});
