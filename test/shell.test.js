@@ -130,9 +130,11 @@ test('Player: eine schulweite App mit fremder Klasse öffnet schulweit – Klass
   // Mia opens it with her class in the link, although it is not in that class: school-wide, no class context.
   const page = await M.page(`/apps/${school.id}/spielen?klasse=${cls7b}`);
   assert.equal(page.status, 200);
-  assert.match(page.text, /data-class=""/, 'no class context is invented');
+  assert.ok(!/<small>/.test(page.text.split('class="playerbar')[1].split('</div>')[0]), 'the bar names no class');
+  // The player asks the token route with the link's own class (data-class), so it falls back the same way.
+  assert.match(page.text, new RegExp(`data-class="${cls7b}"`), 'the token route is asked what the page was asked');
   const t = await M.send('POST', `/apps/${school.id}/token`, { klasse: cls7b, first: true });
-  assert.equal(t.json().class, null);
+  assert.equal(t.json().class, null, 'no class context is invented');
   // A class app with a class the person is not in stays closed, and so does a preview.
   assert.equal((await M.get(`/apps/${hidden.id}/spielen?klasse=${cls7b}`)).status, 404);
   assert.equal((await M.get(`/apps/${school.id}/spielen?klasse=${cls7b}&version=${school.published_version_id}`)).status, 404);
