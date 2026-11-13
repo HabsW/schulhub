@@ -436,7 +436,10 @@ async function scenarioJoin(plan, server) {
 }
 
 /** The peak: classes play at once, teachers read results and export, people upload. */
-async function scenarioPeak(plan, server, playing, { duration = O.duration, title = '', interval = 4000, uploaders = 2 * O.factor, exportsEvery = 60_000, soak = false } = {}) {
+async function scenarioPeak(plan, server, playing, { duration = O.duration, title = '', interval = 4000, uploaders = 2 * O.factor, exportsEvery = 60_000, soak = false, tag = RUN } = {}) {
+  // Every phase writes under its own tag (key, board, result title): a soak lesson that meets the same class and
+  // app again must not count the writes of an earlier lesson as its own.
+  const KEY = `lt-${tag}`.slice(0, 64);
   const stats = new Stats(title);
   const ledger = []; // what the server confirmed, checked afterwards
   const sessions = [];
@@ -477,17 +480,17 @@ async function scenarioPeak(plan, server, playing, { duration = O.duration, titl
     ledger.push(entry);
     sessions.push(app);
     await app.api('settings.all');
-    await app.api('save.get', { key: 'lasttest' });
+    await app.api('save.get', { key: KEY });
     await app.api('achievements.list');
-    await app.api('scores.top', { board: 'lasttest', limit: 10 });
+    await app.api('scores.top', { board: KEY, limit: 10 });
     let i = 0;
     while (Date.now() < stopAt) {
       await sleep(interval * (0.75 + rnd() * 0.5));
       if (Date.now() >= stopAt) break;
       i++;
       const seq = ++entry.seq;
-      const value = { owner: s.oid, seq, run: RUN, level: seq % 10, notes: 'x'.repeat(200 + Math.floor(rnd() * 2800)) };
-      const saved = await app.api('save.set', { key: 'lasttest', value });
+      const value = { owner: s.oid, seq, run: tag, level: seq % 10, notes: 'x'.repeat(200 + Math.floor(rnd() * 2800)) };
+      const saved = await app.api('save.set', { key: KEY, value });
       if (saved.ok) entry.ackedSeq = seq;
       else if (saved.unknown) entry.unknownSeq.push(seq);
       if (i % 2 === 0) {
@@ -498,17 +501,17 @@ async function scenarioPeak(plan, server, playing, { duration = O.duration, titl
       }
       if (i % 3 === 0) {
         const score = rnd() < 0.2 ? Math.floor(rnd() * 10) : seq * 10 + Math.floor(rnd() * 10);
-        const r = await app.api('scores.submit', { board: 'lasttest', score });
+        const r = await app.api('scores.submit', { board: KEY, score });
         if (r.ok) entry.best = Math.max(entry.best ?? -Infinity, score);
         else if (r.unknown) entry.bestUnknown.push(score);
       }
       if (i % 4 === 0) {
-        const r = await app.api('results.add', { title: `Lasttest ${RUN}`, score: seq % 20, maxScore: 20, details: { aufgabe: `${seq} + ${seq}`, antwort: 2 * seq, richtig: true } });
+        const r = await app.api('results.add', { title: `Lasttest ${tag}`, score: seq % 20, maxScore: 20, details: { aufgabe: `${seq} + ${seq}`, antwort: 2 * seq, richtig: true } });
         if (r.ok) entry.results++;
         else if (r.unknown) entry.resultsUnknown++;
       }
       if (i % 8 === 0) {
-        const r = await app.api('scores.top', { board: 'lasttest', limit: 10 });
+        const r = await app.api('scores.top', { board: KEY, limit: 10 });
         if (r.ok && entry.best !== null && entry.bestUnknown.length === 0) {
           const me = r.result.me && r.result.me.score;
           if (me !== entry.best) stats.fail('consistency: leaderboard shows my best', `expected ${entry.best}, got ${me}`);
@@ -522,7 +525,7 @@ async function scenarioPeak(plan, server, playing, { duration = O.duration, titl
         if (r.ok) entry.achievements.add(id);
       }
       if (i % 25 === 0) {
-        const r = await app.api('save.get', { key: 'lasttest' });
+        const r = await app.api('save.get', { key: KEY });
         if (r.ok && entry.unknownSeq.length === 0 && (!r.result || r.result.seq !== entry.ackedSeq || r.result.owner !== s.oid)) {
           stats.fail('consistency: read back my save', `expected seq ${entry.ackedSeq}, got ${r.result && r.result.seq} (${r.result && r.result.owner})`);
         }
@@ -621,16 +624,17 @@ async function scenarioPeak(plan, server, playing, { duration = O.duration, titl
   const extra = soak ? '' : `Players: ${players.length} in ${playing.length} classes (each saves every ~${interval / 1000} s, plus progress, scores, results, leaderboards); ${playing.length} teachers reading results every ~20 s; CSV export of a class of ${biggest.students.length} every ${exportsEvery / 1000} s; ${uploadTeachers.length} people uploading versions (25 files) and ${O.factor} ZIP(s) of ~10 MB.`;
   section(title, stats, win, extra);
   if (soak) report.soakTimeline = stats.timeline(5);
-  verifyLedger(ledger, title);
+  verifyLedger(ledger, title, tag);
   verifyUploads(uploads);
   return { stats, win, ledger };
 }
 
 /** Every write the server confirmed is in the database, for the right person, app and class. */
-function verifyLedger(ledger, title) {
+function verifyLedger(ledger, title, tag = RUN) {
+  const KEY = `lt-${tag}`.slice(0, 64);
   const db = openDb();
-  const save = db.prepare("SELECT value FROM saves WHERE app_id = ? AND user_id = ? AND key = 'lasttest'");
-  const score = db.prepare("SELECT score FROM scores WHERE app_id = ? AND board = 'lasttest' AND user_id = ?");
+  const save = db.prepare('SELECT value FROM saves WHERE app_id = ? AND user_id = ? AND key = ?');
+  const score = db.prepare('SELECT score FROM scores WHERE app_id = ? AND board = ? AND user_id = ?');
   const results = db.prepare("SELECT class_id, COUNT(*) AS n FROM results WHERE app_id = ? AND user_id = ? AND title = ? GROUP BY class_id");
   const progress = db.prepare('SELECT value FROM progress WHERE app_id = ? AND user_id = ?');
   const ach = db.prepare('SELECT achievement FROM achievements WHERE app_id = ? AND user_id = ?');
@@ -638,17 +642,17 @@ function verifyLedger(ledger, title) {
   for (const e of ledger) {
     const where = `${e.user.id.slice(0, 6)} in ${e.app.id.slice(0, 6)}`;
     if (e.ackedSeq > 0) {
-      const row = save.get(e.app.id, e.user.id);
+      const row = save.get(e.app.id, e.user.id, KEY);
       const v = row && JSON.parse(row.value);
       const okSeq = v && (v.seq === e.ackedSeq || e.unknownSeq.includes(v.seq));
-      if (!v || v.owner !== e.user.oid || !okSeq || v.run !== RUN) bad.push(`save ${where}: expected seq ${e.ackedSeq} of ${e.user.oid}, found ${v ? `${v.seq} of ${v.owner}` : 'nothing'}`);
+      if (!v || v.owner !== e.user.oid || !okSeq || v.run !== tag) bad.push(`save ${where}: expected seq ${e.ackedSeq} of ${e.user.oid}, found ${v ? `${v.seq} of ${v.owner}` : 'nothing'}`);
     }
     if (e.best !== null) {
-      const row = score.get(e.app.id, e.user.id);
+      const row = score.get(e.app.id, KEY, e.user.id);
       const okBest = row && (row.score === e.best || (e.bestUnknown.length && row.score === Math.max(e.best, ...e.bestUnknown)));
       if (!okBest) bad.push(`score ${where}: expected ${e.best}, found ${row && row.score}`);
     }
-    const rs = results.all(e.app.id, e.user.id, `Lasttest ${RUN}`);
+    const rs = results.all(e.app.id, e.user.id, `Lasttest ${tag}`);
     const total = rs.reduce((n, r) => n + r.n, 0);
     if (total < e.results || total > e.results + e.resultsUnknown) bad.push(`results ${where}: expected ${e.results}, found ${total}`);
     if (rs.some((r) => r.class_id !== e.classId)) bad.push(`results ${where}: recorded under another class (${rs.map((r) => r.class_id).join(',')})`);
@@ -660,7 +664,7 @@ function verifyLedger(ledger, title) {
     for (const id of e.achievements) if (!have.has(id)) bad.push(`achievement ${where}: ${id} missing`);
   }
   // Nothing of this run landed with somebody else: every saved value names the person it belongs to.
-  const foreign = db.prepare("SELECT s.user_id, u.oid, s.value FROM saves s JOIN users u ON u.id = s.user_id WHERE s.key = 'lasttest'").all()
+  const foreign = db.prepare('SELECT s.user_id, u.oid, s.value FROM saves s JOIN users u ON u.id = s.user_id WHERE s.key = ?').all(KEY)
     .filter((r) => JSON.parse(r.value).owner !== r.oid);
   db.close();
   if (foreign.length) bad.push(`${foreign.length} saves hold another person's data`);
@@ -777,7 +781,7 @@ async function scenarioSoak(plan, server) {
     const classes = shuffle(playable).slice(0, 5);
     // A new lesson: the classes sign in fresh (yesterday's sessions are not reused) and play.
     for (const c of classes) for (const p of [...c.students, ...c.teachers]) signedIn.delete(p.id);
-    const r = await scenarioPeak(plan, server, classes, { duration: Math.min(lessonMinutes, left) * 60 - 25, title: `Soak lesson ${l + 1}/${lessons}`, uploaders: 1, exportsEvery: 300_000, soak: true });
+    const r = await scenarioPeak(plan, server, classes, { duration: Math.min(lessonMinutes, left) * 60 - 25, title: `Soak lesson ${l + 1}/${lessons}`, uploaders: 1, exportsEvery: 300_000, soak: true, tag: `${RUN}-${l + 1}` });
     summaries.push({ lesson: l + 1, ...r.stats.summary().total, errors: r.stats.errorCount, elu: r.win && r.win.elu, lagP99: r.win && r.win.lag.p99, rssMaxMB: r.win && r.win.rssMaxMB });
     // People sign out at the end of the lesson, as on a school computer.
     for (const c of classes) {
