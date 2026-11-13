@@ -188,3 +188,39 @@ test('Formulare der Klassen ohne Inhalt (nur das CSRF-Token im Kopf): eine Antwo
   assert.deepEqual(errors, [], 'nothing was logged as a server error');
   assert.equal(h.db.get('SELECT name FROM classes WHERE id = ?', c.id).name, c.name, 'the class is unchanged');
 });
+
+// ------------------------------------------------------------- confirmed, fix proposed
+
+test('Mitglied entfernen: wer entfernt wurde, kommt erst mit einem neuen Code zurück – wie die Bestätigung es sagt', { todo: 'Produktentscheidung: Rückkehr mit dem alten Code sperren (Entfernen merken) oder den Bestätigungstext ändern' }, async () => {
+  const c = await newClass(T);
+  const kid = await person('Kai Fremd', 'student');
+  const code = joinCode(c.id);
+  assert.equal((await kid.b.post(`/beitreten/${code}`)).status, 303);
+  const members = await T.page(`/klassen/${c.id}/mitglieder`);
+  assert.ok(members.text.includes('Mit einem neuen QR-Code kann Kai Fremd wieder beitreten.'), 'what the teacher is told before removing');
+  assert.equal((await T.post(`/klassen/${c.id}/mitglieder/${kid.user.id}/entfernen`)).status, 303);
+  assert.equal(classRole(kid.user.id, c.id), null);
+  // The code on the board (valid for up to a week) still lets him straight back in.
+  const back = await kid.b.post(`/beitreten/${code}`);
+  assert.equal(classRole(kid.user.id, c.id), null, `the old code let him back in (${back.status})`);
+});
+
+test('Beitreten: ein veralteter Link zählt pro Klick einmal – vier Klicks sperren den neuen, gültigen Code nicht', { todo: 'Vorschlag: denselben falschen Code nur einmal zählen (oder nur das Absenden zählen)' }, async () => {
+  const c = await newClass(T);
+  const kid = await person('Lia Eilig', 'student');
+  const stale = joinCode(c.id);
+  assert.equal((await kid.b.page(`/beitreten/${stale}`)).status, 200, 'the confirmation page is open');
+  // Meanwhile the teacher makes a new code (the projector reloads by itself).
+  await T.page(`/klassen/${c.id}/einstellungen`);
+  assert.equal((await T.post(`/klassen/${c.id}/code`, { minuten: '60' })).status, 303);
+  // "Ja, beitreten" on the open page, four times, like a browser: the form error goes back to the page.
+  const referer = `${h.config.hubOrigin}/beitreten/${stale}`;
+  for (let i = 0; i < 4; i++) {
+    const res = await kid.b.post(`/beitreten/${stale}`, {}, { headers: { referer } });
+    assert.equal(res.status, 303);
+    assert.equal((await kid.b.get(res.headers.location)).status, 400);
+  }
+  // Now Lia scans the new QR code on the board.
+  const fresh = await kid.b.get(`/beitreten/${joinCode(c.id)}`);
+  assert.equal(fresh.status, 200, `the new code is refused with ${fresh.status}`);
+});
