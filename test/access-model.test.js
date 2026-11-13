@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const { openDb } = require('../src/db');
 const { createAccess } = require('../src/access');
 const { EMOJIS } = require('../src/html');
+const { startHub } = require('./helpers');
 
 /** The world as rows of a real database (schema and migrations from src/db.js). */
 function insertWorld(db, w) {
@@ -138,4 +139,38 @@ test('Identität: ein Konto ohne echte ID besitzt, schrieb und bekommt nichts �
     assert.equal(access.canDeleteFeedback(mia, { id: 'f1', class_id: '7b', student_id: 'mia', author_id: null }), true, 'the student deletes feedback to her');
     assert.equal(access.canReadFeedback({ id: 'lehmann', role: 'teacher' }, { class_id: '7b', student_id: 'mia' }), true);
   });
+});
+
+test('Entdecken: die geteilte App einer Kollegin öffnet sich als Vorschau – kein toter Link, auch nicht zurück', async () => {
+  const h = await startHub();
+  try {
+    const ahorn = h.addUser('Frau Ahorn', 'teacher');
+    const birke = h.addUser('Herr Birke', 'teacher');
+    const sina = h.addUser('Sina Sorgsam', 'student');
+    const [A, B, S] = await Promise.all([ahorn, birke, sina].map((u) => h.browser().login(u)));
+    const app = await h.makeApp(A, 'Geteiltes Quiz', { 'index.html': '<h1>Quiz</h1>' });
+    assert.equal((await A.post(`/apps/${app.id}/bearbeiten`, { name: 'Geteiltes Quiz', emoji: EMOJIS[0], color: '0', shared_field: '1', shared: '1' })).status, 303);
+
+    // Herr Birke finds it in "Entdecken" (access.visibleApps: shared with staff) ...
+    const catalogue = (await B.get('/katalog?zeige=kollegium')).text;
+    const link = new RegExp(`class="row-link row-title" href="(/apps/${app.id}/spielen[^"]*)"`).exec(catalogue);
+    assert.ok(link, 'the shared app is listed for a colleague');
+    // ... and the link opens it - as a preview of the published version, nothing is stored.
+    const player = await B.get(link[1].replaceAll('&amp;', '&'));
+    assert.equal(player.status, 200, `${link[1]} opens`);
+    assert.match(player.text, /Vorschau/);
+    const version = /data-version="([^"]*)"/.exec(player.text)[1];
+    assert.equal(version, app.published_version_id, 'the published version');
+    const token = await h.token(B, app, null, version);
+    assert.equal(token.mode, 'preview');
+    // The way back leads to a page he may open.
+    const back = /href="([^"]+)" aria-label="Zurück"/.exec(player.text)[1];
+    assert.equal((await B.get(back)).status, 200, `back to ${back}`);
+
+    // Students never see a colleague's shared app.
+    assert.ok(!(await S.get('/katalog')).text.includes(`/apps/${app.id}/`), 'not in a student\'s catalogue');
+    assert.equal((await S.get(`/apps/${app.id}/spielen?version=${version}`)).status, 404);
+  } finally {
+    await h.stop();
+  }
 });

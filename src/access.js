@@ -104,7 +104,8 @@ function createAccess(db) {
   /**
    * Decide what (if anything) this user may run.
    * Returns { version, classId, preview } or null.
-   *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin)
+   *  - versionId given: private preview of exactly that version (owner / reviewing teacher / admin,
+   *    and a colleague trying the published version of a shared app - see canSeeVersion)
    *  - classId given: the version approved for that class
    *  - neither: owner's published version, school-wide release, or any of the user's classes
    */
@@ -199,7 +200,8 @@ function createAccess(db) {
   // ----- lists filtered by permission (search, catalogue, start page) -----
   /**
    * Apps this user can open, with how: own (published), approved in one of
-   * their active classes, released school-wide, or shared with staff.
+   * their active classes, released school-wide, or shared with staff (a colleague's
+   * shared app that is none of the others opens as a preview of its published version).
    * q: optional search text (matched against name/description), category: exact.
    */
   function visibleApps(user, { q = '', category = '', limit = 60 } = {}) {
