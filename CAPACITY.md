@@ -184,7 +184,38 @@ again. After every kill the database file is opened and checked before the next 
   uploads per hour) refuse them – the limits doing their job.
 
 
-<!-- RESULTS-SOAK -->
+### Soak: hours at normal load
+
+Normal load: 5 classes play at a time (117–183 students), each student's app saving every ~4 s with
+progress, scores, results and leaderboards; their teachers read results; one person uploads versions; a
+CSV export every 5 minutes. Every 15 minutes the lesson ends – the students sign out, and the next 5
+classes (chosen at random) sign in fresh and play. A full garbage collection is forced at the end of each
+lesson to see what memory really stays.
+
+| | 3 hours (12 lessons) | 1 hour (4 lessons, with the final integrity check) |
+|---|---|---|
+| Requests | ≈ 900,000 | ≈ 300,000 |
+| HTTP errors | 0 | 0 |
+| p95 per lesson | 0.5 – 0.9 ms | 0.7 – 0.9 ms |
+| p99 per lesson | 2.2 – 6.0 ms | 3.3 – 3.8 ms |
+| Longest request | 237 ms | 397 ms (while the final review's tests ran on the same machine) |
+| Server busy (ELU) | 2.0 – 3.3 % | 2.0 – 2.9 % |
+| Event-loop delay p99 | 5.8 ms (all lessons) | ≈ 5.8 ms |
+| Heap after a full GC | **17 MB after every one of the 12 lessons** | 17 MB after every lesson |
+| RSS | 134 MB at start, at most 191 MB, 186 MB at the end | at most 184 MB |
+| Sessions stored at the end | 795 (expired ones are removed every 10 minutes) | – |
+
+- **No leak, no slowdown:** the memory that stays after a full collection did not grow by a megabyte in
+  three hours, and the last lessons were as fast as the first.
+- **Data:** in the one-hour run every confirmed write of every lesson was checked (37,000–42,000 saves and
+  results per lesson, 16 uploaded versions byte for byte) – all there, none mixed up. In the three-hour run
+  the per-lesson check of lessons 3–12 reported mismatches: the check counted the results and best scores
+  of an earlier lesson that had played the same app with the same students (exactly twice the results
+  expected). That was a fault of the load test, fixed (each lesson now writes under its own tag) and
+  confirmed by the one-hour run; there was not a single HTTP error in the three hours.
+- The three-hour run used the code before the final review's fixes, the one-hour run the code after its
+  first part; none of the later changes touch the request path that was soaked.
+
 
 ## What breaks first as the load grows
 
