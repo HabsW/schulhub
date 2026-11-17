@@ -312,12 +312,3 @@ systemctl --user start schulhub
   `STAFF_EMAIL_DOMAINS=fes-stuttgart.de`,
   `ADMIN_EMAILS=david.giese@schueler-fes-stuttgart.de`.
 - `ALLOW_ANY_ACCOUNT=true` (the app registration is in a personal tenant, so login runs over `common` and the domain lists do the filtering).
-
-**Still to do in Entra (one time):**
-1. Add the redirect URI `https://habsw.de/auth/callback` (platform *Web*).
-2. Set **Supported account types** = “Accounts in any organizational directory
-   and personal Microsoft accounts” (otherwise login fails with `AADSTS50194`).
-
-Backup reminder: under **Verwaltung → Sicherung → Sicherung herunterladen** you
-can download a full backup (the `.env` secrets are not included — keep those
-separate).
