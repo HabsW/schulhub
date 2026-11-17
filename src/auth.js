@@ -15,11 +15,14 @@ function createAuth(ctx) {
   let cryptoProvider = null;
   if (config.microsoft) {
     const msal = require('@azure/msal-node');
+    // Single tenant by default; "common" (ALLOW_ANY_ACCOUNT=true) accepts accounts of
+    // any tenant AND personal Microsoft accounts - the e-mail-domain role check below
+    // then refuses anyone whose domain is not listed.
+    const authority = config.microsoft.authority || config.microsoft.tenantId;
     client = new msal.ConfidentialClientApplication({
       auth: {
         clientId: config.microsoft.clientId,
-        // Tenant-specific authority: Microsoft itself refuses other tenants and personal accounts.
-        authority: `https://login.microsoftonline.com/${config.microsoft.tenantId}`,
+        authority: `https://login.microsoftonline.com/${authority}`,
         clientSecret: config.microsoft.clientSecret,
       },
     });
@@ -58,8 +61,9 @@ function createAuth(ctx) {
       throw failed;
     }
     const claims = result.idTokenClaims || {};
-    // Defence in depth: the token must come from OUR tenant.
-    if (claims.tid !== config.microsoft.tenantId || !claims.oid) {
+    // Defence in depth: the token must come from OUR tenant (unless any account is allowed:
+    // then the e-mail-domain role check below is the only gate, and it refuses unknown domains).
+    if ((!config.microsoft.allowAny && claims.tid !== config.microsoft.tenantId) || !claims.oid) {
       throw new HttpError(403, 'Dieses Konto gehört nicht zu unserer Schule. Bitte melde dich mit deinem Schulkonto an.');
     }
     return { oid: String(claims.oid), name: String(claims.name || 'Ohne Namen'), email: String(claims.email || claims.preferred_username || '') };
@@ -119,7 +123,7 @@ function createAuth(ctx) {
 
   const logoutUrl = () =>
     config.microsoft
-      ? `https://login.microsoftonline.com/${config.microsoft.tenantId}/oauth2/v2.0/logout?${new URLSearchParams({ post_logout_redirect_uri: `${config.hubOrigin}/` })}`
+      ? `https://login.microsoftonline.com/${config.microsoft.authority || config.microsoft.tenantId}/oauth2/v2.0/logout?${new URLSearchParams({ post_logout_redirect_uri: `${config.hubOrigin}/` })}`
       : '/';
 
   return { loginUrl, handleCallback, roleForEmail, upsertUser, establishSession, logoutUrl, enabled: Boolean(client) };

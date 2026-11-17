@@ -84,8 +84,16 @@ function loadConfig({ env = process.env, dev = false, overrides = {} } = {}) {
   let microsoft = null;
   const ms = { tenantId: env.TENANT_ID, clientId: env.CLIENT_ID, clientSecret: env.CLIENT_SECRET };
   const msComplete = Object.values(ms).every((v) => v && !PLACEHOLDERS.includes(v));
-  if (msComplete) microsoft = ms;
-  else if (!dev) problems.push('TENANT_ID, CLIENT_ID und CLIENT_SECRET müssen gesetzt sein.');
+  if (msComplete) {
+    // ALLOW_ANY_ACCOUNT=true signs in over the "common" endpoint, so accounts of ANY
+    // Microsoft tenant (and personal accounts) can reach the login. The e-mail-domain
+    // lists below are then the only gate: unknown domains are refused. Required when the
+    // app registration lives in a personal/test tenant, not the school's own tenant.
+    const allowAny = env.ALLOW_ANY_ACCOUNT === 'true';
+    microsoft = { ...ms, allowAny, authority: allowAny ? 'common' : ms.tenantId };
+  } else if (!dev) {
+    problems.push('TENANT_ID, CLIENT_ID und CLIENT_SECRET müssen gesetzt sein.');
+  }
 
   const studentDomains = list(env.STUDENT_EMAIL_DOMAINS);
   const staffDomains = list(env.STAFF_EMAIL_DOMAINS);
