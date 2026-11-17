@@ -1,8 +1,7 @@
 # SchulHub — Betrieb (Produktion)
 
-This guide covers running SchulHub in **production mode** on this CachyOS machine:
-starting/stopping, auto-start, Cloudflare Tunnel + HTTPS, Microsoft login, and
-troubleshooting. It assumes the setup below is already done where noted.
+This guide covers running SchulHub in **production mode** on a CachyOS machine:
+
 
 ---
 
